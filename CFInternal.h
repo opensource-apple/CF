@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2010 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -345,8 +345,8 @@ const CFStringRef S = (CFStringRef) & __ ## S ## __;
 #define PE_CONST_STRING_DECL(S, V)			\
 static struct CF_CONST_STRING __ ## S ## __ = {{(uintptr_t)&__CFConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)(V), sizeof(V) - 1}; \
 __private_extern__ const CFStringRef S = (CFStringRef) & __ ## S ## __;
-#endif
 #endif // __BIG_ENDIAN__
+#endif // __CONSTANT_CFSTRINGS__
 
 
 /* Buffer size for file pathname */

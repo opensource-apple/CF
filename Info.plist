@@ -19,7 +19,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>550.13</string>
+	<string>550.19</string>
 	<key>CarbonLazyValues</key>
 	<dict>
 		<key>CodeFragmentManager</key>
