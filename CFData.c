@@ -380,21 +380,25 @@ void CFDataDeleteBytes(CFMutableDataRef data, CFRange range) {
 }
 
 void CFDataReplaceBytes(CFMutableDataRef data, CFRange range, const uint8_t *newBytes, CFIndex newLength) {
-    CFIndex len;
     CF_OBJC_FUNCDISPATCH3(__kCFDataTypeID, void, data, "replaceBytesInRange:withBytes:length:", range, newBytes, newLength);
     __CFGenericValidateType(data, __kCFDataTypeID);
     __CFDataValidateRange(data, range, __PRETTY_FUNCTION__);
     CFAssert1(__CFMutableVariety(data) == kCFMutable || __CFMutableVariety(data) == kCFFixedMutable, __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     CFAssert2(0 <= newLength, __kCFLogAssertion, "%s(): newLength (%d) cannot be less than zero", __PRETTY_FUNCTION__, newLength);
-    len = __CFDataLength(data);
+
+    CFIndex len = __CFDataLength(data);
+    if (len < 0 || range.length < 0 || newLength < 0) HALT;
+    CFIndex newCount = len - range.length + newLength;
+    if (newCount < 0) HALT;
+
     switch (__CFMutableVariety(data)) {
     case kCFMutable:
-	if (range.length < newLength && __CFDataNumBytes(data) < len - range.length + newLength) {
+	if (__CFDataNumBytes(data) < newCount) {
 	    __CFDataGrow(data, newLength - range.length);
 	}
 	break;
     case kCFFixedMutable:
-	CFAssert1(len - range.length + newLength <= __CFDataCapacity(data), __kCFLogAssertion, "%s(): fixed-capacity data is full", __PRETTY_FUNCTION__);
+	CFAssert1(newCount <= __CFDataCapacity(data), __kCFLogAssertion, "%s(): fixed-capacity data is full", __PRETTY_FUNCTION__);
 	break;
     }
     if (newLength != range.length && range.location + range.length < len) {
@@ -403,8 +407,8 @@ void CFDataReplaceBytes(CFMutableDataRef data, CFRange range, const uint8_t *new
     if (0 < newLength) {
         memmove(data->_bytes + range.location, newBytes, newLength * sizeof(uint8_t));
     }
-    __CFDataSetNumBytesUsed(data, (len - range.length + newLength));
-    __CFDataSetLength(data, (len - range.length + newLength));
+    __CFDataSetNumBytesUsed(data, newCount);
+    __CFDataSetLength(data, newCount);
 }
 
 #undef __CFDataValidateRange
