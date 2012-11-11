@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFRuntime.c
 	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
@@ -281,6 +282,10 @@ __private_extern__ uint8_t __CFDeallocateZombies = 0;
 #if !__OBJC2__
 static void *_original_objc_dealloc = 0;
 #endif
+
+void _CFEnableZombies(void) {
+    __CFZombieEnabled = 0xFF;
+}
 
 #endif /* DEBUG */
 
@@ -822,6 +827,8 @@ extern void __CFUUIDInitialize(void);
 extern void __CFBinaryHeapInitialize(void);
 extern void __CFBitVectorInitialize(void);
 #if DEPLOYMENT_TARGET_WINDOWS
+extern void __CFWindowsMessageQueueInitialize(void);
+extern void __CFWindowsNamedPipeInitialize(void);
 extern void __CFBaseCleanup(void);
 #endif
 extern void __CFStreamInitialize(void);
@@ -1255,23 +1262,25 @@ CF_EXPORT CFTypeRef _CFRetain(CFTypeRef cf) {
     } while (__builtin_expect(!success, 0));
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-	__CFRecordAllocationEvent(__kCFRetainEvent, (void *)cf, 0, CFGetRetainCount(cf), NULL);
+	__CFRecordAllocationEvent(__kCFRetainEvent, (void *)cf, 0, 0, NULL);
     }
     return cf;
 }
 
 CF_EXPORT void _CFRelease(CFTypeRef cf) {
-    Boolean isAllocator = false;
+    CFTypeID typeID = __CFGenericTypeID_inline(cf);
+    Boolean isAllocator = (__kCFAllocatorTypeID_CONST == typeID);
     Boolean didAuto = false;
 #if __LP64__
     uint32_t lowBits;
     do {
 	lowBits = ((CFRuntimeBase *)cf)->_rc;
-	if (0 == lowBits) return;	// Constant CFTypeRef
+	if (0 == lowBits) {
+	    if (CF_IS_COLLECTABLE(cf)) auto_zone_release(auto_zone(), (void*)cf);
+	    return;        // Constant CFTypeRef
+	}
 	if (1 == lowBits) {
 	    // CANNOT WRITE ANY NEW VALUE INTO [CF_RC_BITS] UNTIL AFTER FINALIZATION
-	    CFTypeID typeID = __CFGenericTypeID_inline(cf);
-	    isAllocator = (__kCFAllocatorTypeID_CONST == typeID);
             CFRuntimeClass *cfClass = __CFRuntimeClassTable[typeID];
             if (cfClass->version & _kCFRuntimeResourcefulObject && cfClass->reclaim != NULL) {
                 cfClass->reclaim(cf);
@@ -1301,7 +1310,10 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 #else
     volatile UInt32 *infoLocation = (UInt32 *)&(((CFRuntimeBase *)cf)->_cfinfo);
     CFIndex rcLowBits = __CFBitfieldGetValue(*infoLocation, RC_END, RC_START);
-    if (__builtin_expect(0 == rcLowBits, 0)) return;        // Constant CFTypeRef
+    if (__builtin_expect(0 == rcLowBits, 0)) {
+        if (CF_IS_COLLECTABLE(cf)) auto_zone_release(auto_zone(), (void*)cf);
+        return;        // Constant CFTypeRef
+    }
     bool success = 0;
     do {
         UInt32 initialCheckInfo = *infoLocation;
@@ -1309,7 +1321,6 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
         if (__builtin_expect(1 == rcLowBits, 0)) {
             // we think cf should be deallocated
 	    // CANNOT WRITE ANY NEW VALUE INTO [CF_RC_BITS] UNTIL AFTER FINALIZATION
-	    CFTypeID typeID = __CFGenericTypeID_inline(cf);
 	    CFRuntimeClass *cfClass = __CFRuntimeClassTable[typeID];
 	    if (cfClass->version & _kCFRuntimeResourcefulObject && cfClass->reclaim != NULL) {
 		cfClass->reclaim(cf);
@@ -1323,15 +1334,12 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 		    didAuto = true;
 		}
              } else {
-		if (__builtin_expect(__kCFAllocatorTypeID_CONST == typeID, 0)) {
-		    if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-			__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
-		    }
-		    __CFAllocatorDeallocate((void *)cf);
-		    success = 1;
+		if (isAllocator) {
+		    goto really_free;
 		} else {
-		    if (NULL != __CFRuntimeClassTable[typeID]->finalize) {
-		        __CFRuntimeClassTable[typeID]->finalize(cf);
+                    void (*func)(CFTypeRef) = __CFRuntimeClassTable[typeID]->finalize;
+                    if (NULL != func) {
+		        func(cf);
 		    }
 		    // We recheck rcLowBits to see if the object has been retained again during
 		    // the finalization process.  This allows for the finalizer to resurrect,
@@ -1372,7 +1380,7 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, CFGetRetainCount(cf), NULL);
+	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
     }
     return;
 
@@ -1382,16 +1390,16 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
     }
     // cannot zombify allocators, which get deallocated by __CFAllocatorDeallocate (finalize)
-    if (!isAllocator) {
-	CFAllocatorRef allocator;
-	Boolean usesSystemDefaultAllocator;
-
-	if (__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_cfinfo[CF_INFO_BITS], 7, 7)) {
-	    allocator = kCFAllocatorSystemDefault;
+    if (isAllocator) {
+        __CFAllocatorDeallocate((void *)cf);
 	} else {
+	CFAllocatorRef allocator = kCFAllocatorSystemDefault;
+	Boolean usesSystemDefaultAllocator = true;
+
+	if (!__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_cfinfo[CF_INFO_BITS], 7, 7)) {
 	    allocator = CFGetAllocator(cf);
-	}
 	usesSystemDefaultAllocator = (allocator == kCFAllocatorSystemDefault);
+	}
 
 	if (__CFZombieEnabled && !kCFUseCollectableAllocator) {
 	    Class cls = object_getClass((id)cf);

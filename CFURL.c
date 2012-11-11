@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFURL.c
 	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Becky Willrich
@@ -138,6 +139,13 @@ static UInt32 numNonUTF8EncodedURLs = 0;
 #define FILE_ID_KEY "id"
 
 #define ASSERT_CHECK_PATHSTYLE(x) 0
+
+#if DEPLOYMENT_TARGET_WINDOWS
+#define PATH_SEP '\\'
+#define PATH_MAX MAX_PATH
+#else
+#define PATH_SEP '/'
+#endif
 
 //	In order to reduce the sizeof ( __CFURL ), move these items into a seperate structure which is
 //	only allocated when necessary.  In my tests, it's almost never needed -- very rarely does a CFURL have

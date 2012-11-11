@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFInternal.h
 	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
@@ -73,7 +74,6 @@ CF_EXTERN_C_BEGIN
 #define __CF_LITTLE_ENDIAN__ 1
 #define __CF_BIG_ENDIAN__ 0
 #endif
-
 
 #include <CoreFoundation/ForFoundationOnly.h>
 
@@ -548,7 +548,7 @@ CF_INLINE Boolean CF_IS_OBJC(CFTypeID typeID, const void *obj) {
     return (typeID >= __CFRuntimeClassTableSize) || (((CFRuntimeBase *)obj)->_cfisa != __CFISAForTypeID(typeID) && ((CFRuntimeBase *)obj)->_cfisa > (uintptr_t)0xFFF);
 }
 
-#endif
+
 #define CF_IS_OBJC(typeID, obj)	(false)
 
 #define CF_OBJC_VOIDCALL0(obj, sel)
@@ -566,6 +566,7 @@ CF_INLINE Boolean CF_IS_OBJC(CFTypeID typeID, const void *obj) {
 #define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4)
 #define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5)
 
+#endif
 
 /* See comments in CFBase.c
 */

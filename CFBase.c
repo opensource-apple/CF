@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFBase.c
 	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
@@ -424,7 +425,7 @@ static const CFRuntimeClass __CFAllocatorClass = {
     "CFAllocator",
     NULL,	// init
     NULL,	// copy
-    __CFAllocatorDeallocate,
+    NULL,
     NULL,	// equal
     NULL,	// hash
     NULL,	// 

@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFRunLoop.c
 	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
@@ -2070,6 +2071,33 @@ static int32_t __CFRunLoopRun(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFTimeInter
 	}
 
         sourceHandledThisLoop = __CFRunLoopDoSources0(rl, rlm, stopAfterHandle) || sourceHandledThisLoop;
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+        if (MACH_PORT_NULL != dispatchPort) {
+            msg = (mach_msg_header_t *)buffer;
+            msg->msgh_size = sizeof(buffer);
+            msg->msgh_bits = 0;
+            msg->msgh_local_port = dispatchPort;
+            msg->msgh_remote_port = MACH_PORT_NULL;
+            msg->msgh_id = 0;
+            ret = mach_msg(msg, MACH_RCV_MSG|MACH_RCV_LARGE|MACH_RCV_TIMEOUT|MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AV), 0, msg->msgh_size, dispatchPort, 0, MACH_PORT_NULL);
+
+            if (MACH_MSG_SUCCESS == ret) {
+                __CFRunLoopModeUnlock(rlm);
+                pthread_setspecific(__CFTSDKeyIsInGCDMainQ, (void *)3);
+                _dispatch_main_queue_callback_4CF(msg);
+                sourceHandledThisLoop = true;
+                pthread_setspecific(__CFTSDKeyIsInGCDMainQ, (void *)0);
+                __CFRunLoopLock(rl);
+                __CFRunLoopModeLock(rlm);
+	        __CFRunLoopUnlock(rl);
+            } else if (MACH_RCV_TIMED_OUT == ret) {
+                msg = NULL;
+            } else {
+                HALT;
+            }
+        }
+#endif
 
 	if (sourceHandledThisLoop) {
 	    poll = true;

@@ -26,8 +26,8 @@ PRIVATE_HEADERS="CFBundlePriv.h CFCharacterSetPriv.h CFError_Private.h CFLogUtil
 
 OBJBASE=./CF-Objects
 ARCHFLAGS="-arch i386 -arch x86_64"
-CFLAGS="-c -x objective-c -pipe -std=gnu99 -g -Wmost -Wno-trigraphs -mmacosx-version-min=10.6 -fconstant-cfstrings -fexceptions -DCF_BUILDING_CF=1 -DDEPLOYMENT_TARGET_MACOSX=1 -DMAC_OS_X_VERSION_MAX_ALLOWED=MAC_OS_X_VERSION_10_6 -DU_SHOW_DRAFT_API=1 -I$OBJBASE -DVERSION=535 -include CoreFoundation_Prefix.h"
-LFLAGS="-dynamiclib -mmacosx-version-min=10.6 -twolevel_namespace -init ___CFInitialize -compatibility_version 150 -current_version 535 -sectcreate __UNICODE __csbitmaps CFCharacterSetBitmaps.bitmap -Wl,-alias_list,SymbolAliases -sectcreate __UNICODE __properties CFUniCharPropertyDatabase.data -sectcreate __UNICODE __data $UNICODE_DATA_FILE -segprot __UNICODE r r"
+CFLAGS="-c -x objective-c -pipe -std=gnu99 -g -Wmost -Wno-trigraphs -mmacosx-version-min=10.6 -fconstant-cfstrings -fexceptions -DCF_BUILDING_CF=1 -DDEPLOYMENT_TARGET_MACOSX=1 -DMAC_OS_X_VERSION_MAX_ALLOWED=MAC_OS_X_VERSION_10_6 -DU_SHOW_DRAFT_API=1 -I$OBJBASE -DVERSION=550.13 -include CoreFoundation_Prefix.h"
+LFLAGS="-dynamiclib -mmacosx-version-min=10.6 -twolevel_namespace -init ___CFInitialize -compatibility_version 150 -current_version 550.13 -sectcreate __UNICODE __csbitmaps CFCharacterSetBitmaps.bitmap -Wl,-alias_list,SymbolAliases -sectcreate __UNICODE __properties CFUniCharPropertyDatabase.data -sectcreate __UNICODE __data $UNICODE_DATA_FILE -segprot __UNICODE r r"
 
 /bin/rm -rf $OBJBASE
 /bin/mkdir -p $OBJBASE

@@ -20,6 +20,7 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
 /*	CFPropertyList.c
 	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
@@ -1162,7 +1163,7 @@ static CFStringRef _uniqueStringForString(_CFXMLPlistParseInfo *pInfo, CFStringR
     if (!uniqued) {
         uniqued = (CFStringRef)__CFStringCollectionCopy(pInfo->allocator, stringToUnique);
         CFSetAddValue(pInfo->stringSet, uniqued);
-        CFRelease(uniqued);
+        __CFTypeCollectionRelease(pInfo->allocator, uniqued);
     }
     return uniqued;
 }
