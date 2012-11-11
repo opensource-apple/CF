@@ -1,2 +1,2 @@
 install:
-	DSTBASE="$(DSTROOT)/System/Library/Frameworks" ./BuildCFLite
+    DSTBASE="$(DSTROOT)/System/Library/Frameworks" ./BuildCFLite

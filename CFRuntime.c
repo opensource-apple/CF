@@ -470,11 +470,31 @@ __private_extern__ void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, co
 #define __CFGenericAssertIsCF(cf) \
     CFAssert2(cf != NULL && (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]) && (__kCFNotATypeTypeID != __CFGenericTypeID_inline(cf)) && (__kCFTypeTypeID != __CFGenericTypeID_inline(cf)), __kCFLogAssertion, "%s(): pointer %p is not a CF object", __PRETTY_FUNCTION__, cf);
 
+#if 0
 
 #define CFTYPE_IS_OBJC(obj) (false)
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) do {} while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) do {} while (0)
 
+#else
+
+CF_INLINE int CFTYPE_IS_OBJC(const void *obj) {
+    CFTypeID typeID = __CFGenericTypeID_inline(obj);
+    return CF_IS_OBJC(typeID, obj);
+}
+
+#define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) \
+	if (CFTYPE_IS_OBJC(obj)) \
+	{rettype (*func)(void *, SEL) = (rettype (*)(void *, SEL))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((void *)obj, s);}
+#define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) \
+	if (CFTYPE_IS_OBJC(obj)) \
+	{rettype (*func)(void *, SEL, ...) = (rettype (*)(void *, SEL, ...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((void *)obj, s, (a1));}
+
+#endif
 
 CFTypeID CFGetTypeID(CFTypeRef cf) {
 #if defined(DEBUG)
@@ -1262,7 +1282,7 @@ CF_EXPORT CFTypeRef _CFRetain(CFTypeRef cf) {
     } while (__builtin_expect(!success, 0));
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-	__CFRecordAllocationEvent(__kCFRetainEvent, (void *)cf, 0, 0, NULL);
+	__CFRecordAllocationEvent(__kCFRetainEvent, (void *)cf, 0, CFGetRetainCount(cf), NULL);
     }
     return cf;
 }
@@ -1380,7 +1400,7 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
+	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, CFGetRetainCount(cf), NULL);
     }
     return;
 

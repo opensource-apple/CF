@@ -75,6 +75,7 @@ CF_EXTERN_C_BEGIN
 #define __CF_BIG_ENDIAN__ 0
 #endif
 
+
 #include <CoreFoundation/ForFoundationOnly.h>
 
 CF_EXPORT const char *_CFProcessName(void);
@@ -345,8 +346,8 @@ const CFStringRef S = (CFStringRef) & __ ## S ## __;
 #define PE_CONST_STRING_DECL(S, V)			\
 static struct CF_CONST_STRING __ ## S ## __ = {{(uintptr_t)&__CFConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)(V), sizeof(V) - 1}; \
 __private_extern__ const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#endif
 #endif // __BIG_ENDIAN__
-#endif // __CONSTANT_CFSTRINGS__
 
 
 /* Buffer size for file pathname */
@@ -548,23 +549,68 @@ CF_INLINE Boolean CF_IS_OBJC(CFTypeID typeID, const void *obj) {
     return (typeID >= __CFRuntimeClassTableSize) || (((CFRuntimeBase *)obj)->_cfisa != __CFISAForTypeID(typeID) && ((CFRuntimeBase *)obj)->_cfisa > (uintptr_t)0xFFF);
 }
 
+// Invoke an ObjC method that returns void.
+// Assumes CF_IS_OBJC has already been checked.
+#define CF_OBJC_VOIDCALL0(obj, sel) \
+        {void (*func)(const void *, SEL) = (void (*)(const void *, SEL))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s);}
+#define CF_OBJC_VOIDCALL1(obj, sel, a1) \
+        {void (*func)(const void *, SEL, ...) = (void (*)(const void *, SEL, ...))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s, (a1));}
+#define CF_OBJC_VOIDCALL2(obj, sel, a1, a2) \
+        {void (*func)(const void *, SEL, ...) = (void (*)(const void *, SEL, ...))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s, (a1), (a2));}
 
-#define CF_IS_OBJC(typeID, obj)	(false)
 
-#define CF_OBJC_VOIDCALL0(obj, sel)
-#define CF_OBJC_VOIDCALL1(obj, sel, a1)
-#define CF_OBJC_VOIDCALL2(obj, sel, a1, a2)
+// Invoke an ObjC method, leaving the result in "retvar".
+// Assumes CF_IS_OBJC has already been checked.
+#define CF_OBJC_CALL0(rettype, retvar, obj, sel) \
+        {rettype (*func)(const void *, SEL) = (rettype (*)(const void *, SEL))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s);}
+#define CF_OBJC_CALL1(rettype, retvar, obj, sel, a1) \
+        {rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL, ...))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s, (a1));}
+#define CF_OBJC_CALL2(rettype, retvar, obj, sel, a1, a2) \
+        {rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL, ...))objc_msgSend; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s, (a1), (a2));}
 
-#define CF_OBJC_CALL0(rettype, retvar, obj, sel)
-#define CF_OBJC_CALL1(rettype, retvar, obj, sel, a1)
-#define CF_OBJC_CALL2(rettype, retvar, obj, sel, a1, a2)
-
-#define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel)
-#define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1)
-#define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2)
-#define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3)
-#define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4)
-#define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5)
+// Invoke an ObjC method, return the result
+#define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL) = (rettype (*)(const void *, SEL))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s);}
+#define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL,...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1));}
+#define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL,...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1), (a2));}
+#define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL,...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1), (a2), (a3));}
+#define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL,...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1), (a2), (a3), (a4));}
+#define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (rettype (*)(const void *, SEL,...))objc_msgSend; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1), (a2), (a3), (a4), (a5));}
 
 #endif
 

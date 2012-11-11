@@ -92,14 +92,22 @@
 #include <CoreFoundation/CFUUID.h>
 
 
-#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
-#include <CoreFoundation/CFMachPort.h>
+#if (TARGET_OS_MAC || TARGET_OS_WIN32)
+#include <CoreFoundation/CFURLEnumerator.h>
 #endif
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <CoreFoundation/CFFileDescriptor.h>
+#include <CoreFoundation/CFMachPort.h>
+#endif
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE))
 #include <CoreFoundation/CFUserNotification.h>
 #include <CoreFoundation/CFXMLNode.h>
 #include <CoreFoundation/CFXMLParser.h>
+#endif
+#if TARGET_OS_WIN32
+#include <CoreFoundation/CFWindowsMessageQueue.h>
+#include <CoreFoundation/CFWindowsNamedPipe.h>
 #endif
 
 #endif /* ! __COREFOUNDATION_COREFOUNDATION__ */

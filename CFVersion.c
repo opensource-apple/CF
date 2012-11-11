@@ -21,9 +21,5 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-/* CFVersion.c
-    Copyright 2009, Apple Inc. All rights reserved.
-    Responsibility: CFLite Team
-*/
-const unsigned char kCFCoreFoundationVersionString[] = "@(#)PROGRAM:CoreFoundation  PROJECT:CoreFoundation-550.19  SYSTEM:Darwin  DEVELOPER:unknown  BUILT:" __DATE__ " " __TIME__ "\n";
-double kCFCoreFoundationVersionNumber = (double)550.19;
+const unsigned char kCFCoreFoundationVersionString[] = "@(#)PROGRAM:CoreFoundation  PROJECT:CoreFoundation-550  SYSTEM:Darwin  DEVELOPER:unknown  BUILT:" __DATE__ " " __TIME__ "\n";
+double kCFCoreFoundationVersionNumber = (double)550;

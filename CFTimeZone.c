@@ -49,6 +49,7 @@
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
+#import <Foundation/NSEnumerator.h>
 
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
