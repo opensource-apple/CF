@@ -28,6 +28,7 @@
 #include "CFBundle_Internal.h"
 #include "CFInternal.h"
 
+
 static void _registerFactory(const void *key, const void *val, void *context) {
     CFStringRef factoryIDStr = (CFStringRef)key;
     CFStringRef factoryFuncStr = (CFStringRef)val;
@@ -120,32 +121,44 @@ __private_extern__ void _CFBundleInitPlugIn(CFBundleRef bundle) {
         CFDictionaryApplyFunction(typeDict, _registerType, bundle);
     }
 
-    /* Now do dynamic registration if necessary */
+    /* Now set key for dynamic registration if necessary */
     if (doDynamicReg) {
+        CFDictionarySetValue((CFMutableDictionaryRef)infoDict, CFSTR("CFPlugInNeedsDynamicRegistration"), CFSTR("YES"));
+        if (CFBundleIsExecutableLoaded(bundle)) _CFBundlePlugInLoaded(bundle);
+    }
+}
+
+__private_extern__ void _CFBundlePlugInLoaded(CFBundleRef bundle) {
+    CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
+    CFStringRef tempStr;
+    CFPlugInDynamicRegisterFunction func = NULL;
+
+    if (!__CFBundleGetPlugInData(bundle)->_isPlugIn || __CFBundleGetPlugInData(bundle)->_isDoingDynamicRegistration || !infoDict || !CFBundleIsExecutableLoaded(bundle)) return;
+
+    tempStr = CFDictionaryGetValue(infoDict, CFSTR("CFPlugInNeedsDynamicRegistration"));
+    if (tempStr != NULL && CFGetTypeID(tempStr) == CFStringGetTypeID() && CFStringCompare(tempStr, CFSTR("YES"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+        CFDictionaryRemoveValue((CFMutableDictionaryRef)infoDict, CFSTR("CFPlugInNeedsDynamicRegistration"));
         tempStr = CFDictionaryGetValue(infoDict, kCFPlugInDynamicRegisterFunctionKey);
         if (tempStr == NULL || CFGetTypeID(tempStr) != CFStringGetTypeID() || CFStringGetLength(tempStr) <= 0) {
             tempStr = CFSTR("CFPlugInDynamicRegister");
         }
         __CFBundleGetPlugInData(bundle)->_loadOnDemand = false;
+        __CFBundleGetPlugInData(bundle)->_isDoingDynamicRegistration = true;
 
-        if (CFBundleLoadExecutable(bundle)) {
-            CFPlugInDynamicRegisterFunction func = NULL;
-
-            __CFBundleGetPlugInData(bundle)->_isDoingDynamicRegistration = true;
-
-            /* Find the symbol and call it. */
-            func = (CFPlugInDynamicRegisterFunction)CFBundleGetFunctionPointerForName(bundle, tempStr);
-            if (func) {
-                func(bundle);
-                // MF:!!! Unload function is never called.  Need to deal with this!
-            }
-
-            __CFBundleGetPlugInData(bundle)->_isDoingDynamicRegistration = false;
-            if (__CFBundleGetPlugInData(bundle)->_loadOnDemand && (__CFBundleGetPlugInData(bundle)->_instanceCount == 0)) {
-                /* Unload now if we can/should. */
-                CFBundleUnloadExecutable(bundle);
-            }
+        /* Find the symbol and call it. */
+        func = (CFPlugInDynamicRegisterFunction)CFBundleGetFunctionPointerForName(bundle, tempStr);
+        if (func) {
+            func(bundle);
+            // MF:!!! Unload function is never called.  Need to deal with this!
         }
+
+        __CFBundleGetPlugInData(bundle)->_isDoingDynamicRegistration = false;
+        if (__CFBundleGetPlugInData(bundle)->_loadOnDemand && (__CFBundleGetPlugInData(bundle)->_instanceCount == 0)) {
+            /* Unload now if we can/should. */
+            CFBundleUnloadExecutable(bundle);
+        }
+    } else {
+        CFDictionaryRemoveValue((CFMutableDictionaryRef)infoDict, CFSTR("CFPlugInNeedsDynamicRegistration"));
     }
 }
 
@@ -169,7 +182,8 @@ UInt32 CFPlugInGetTypeID(void) {
 }
 
 CFPlugInRef CFPlugInCreate(CFAllocatorRef allocator, CFURLRef plugInURL) {
-    return (CFPlugInRef)CFBundleCreate(allocator, plugInURL);
+    CFBundleRef bundle = CFBundleCreate(allocator, plugInURL);
+    return (CFPlugInRef)bundle;
 }
 
 CFBundleRef CFPlugInGetBundle(CFPlugInRef plugIn) {

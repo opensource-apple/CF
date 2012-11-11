@@ -138,6 +138,7 @@ extern void *_CFBundleDLLGetSymbolByName(CFBundleRef bundle, CFStringRef symbolN
 
 extern Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle);
 extern void _CFBundleInitPlugIn(CFBundleRef bundle);
+extern void _CFBundlePlugInLoaded(CFBundleRef bundle);
 extern void _CFBundleDeallocatePlugIn(CFBundleRef bundle);
 
 extern void _CFPlugInWillUnload(CFPlugInRef plugIn);

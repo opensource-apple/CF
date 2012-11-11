@@ -102,6 +102,7 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
 
     *bytes = NULL;
 
+    
 #if defined(__WIN32__)
     fd = open(path, O_RDONLY|CF_OPENFLGS, 0666|_S_IREAD);
 #else

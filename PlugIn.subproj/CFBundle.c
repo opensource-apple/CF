@@ -78,6 +78,7 @@
 #endif
 #endif
 
+
 // Public CFBundle Info plist keys
 CONST_STRING_DECL(kCFBundleInfoDictionaryVersionKey, "CFBundleInfoDictionaryVersion")
 CONST_STRING_DECL(kCFBundleExecutableKey, "CFBundleExecutable")
@@ -2315,6 +2316,7 @@ Boolean CFBundleLoadExecutable(CFBundleRef bundle) {
             CFLog(__kCFLogBundle, CFSTR("Cannot recognize type of executable for %@"), bundle);
             break;
     }
+    if (result && bundle->_plugInData._isPlugIn) _CFBundlePlugInLoaded(bundle);
     
     return result;
 }
@@ -2685,11 +2687,13 @@ static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath) {
     // If an image path corresponds to a bundle, we see if there is already a bundle instance.  If there is and it is NOT in the _dynamicBundles array, it is added to the staticBundles.  Do not add the main bundle to the list here.
     CFBundleRef bundle;
     CFURLRef curURL = _CFBundleCopyFrameworkURLForExecutablePath(NULL, imagePath);
+    Boolean doFinalProcessing = false;
 
     if (curURL != NULL) {
         bundle = _CFBundleFindByURL(curURL, true);
         if (bundle == NULL) {
-            bundle = _CFBundleCreate(NULL, curURL, true, true);
+            bundle = _CFBundleCreate(NULL, curURL, true, false);
+            doFinalProcessing = true;
         }
         if (bundle != NULL && !bundle->_isLoaded) {
             // make sure that these bundles listed as loaded, and mark them frameworks (we probably can't see anything else here, and we cannot unload them)
@@ -2703,6 +2707,16 @@ static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath) {
             if (!bundle->_imageCookie) _CFBundleDYLDCheckLoaded(bundle);
 #endif /* BINARY_SUPPORT_DYLD */
             bundle->_isLoaded = true;
+        }
+        // Perform delayed final processing steps.
+        // This must be done after _isLoaded has been set.
+        if (bundle && doFinalProcessing) {
+            _CFBundleCheckWorkarounds(bundle);
+            if (_CFBundleNeedsInitPlugIn(bundle)) {
+                __CFSpinUnlock(&CFBundleGlobalDataLock);
+                _CFBundleInitPlugIn(bundle);
+                __CFSpinLock(&CFBundleGlobalDataLock);
+            }
         }
         CFRelease(curURL);
     }

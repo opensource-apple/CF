@@ -824,11 +824,12 @@ Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CF
 #if defined(__MACH__)
 #define MAX_STACK_BUFFER_LEN	(255)
     const UTF16Char *characters = CFStringGetCharactersPtr(string);
+    CFIndex length = CFStringGetLength(string);
     uint32_t usedBufLen;
 
-    if (NULL == characters) {
-        CFIndex length = CFStringGetLength(string);
+    if (maxBufLen < length) return false; // Since we're using UTF-8, the byte length is never shorter than the char length. Also, it filters out 0 == maxBufLen
 
+    if (NULL == characters) {
         if (length > MAX_STACK_BUFFER_LEN) {
             UTF16Char charactersBuffer[MAX_STACK_BUFFER_LEN];
             CFRange range = CFRangeMake(0, MAX_STACK_BUFFER_LEN);
@@ -836,7 +837,7 @@ Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CF
 
             usedBufLen = 0;
 
-            while (length > 0) {
+            while ((length > 0) && (maxBufLen > usedBufLen)) {
                 CFStringGetCharacters(string, range, charactersBuffer);
                 if (CFUniCharIsSurrogateHighCharacter(charactersBuffer[range.length - 1])) --range.length; // Backup for a high surrogate
 
@@ -856,7 +857,7 @@ Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CF
             buffer += usedBufLen;
         }
     } else {
-        if (!CFUniCharDecompose(characters, CFStringGetLength(string), NULL, (void *)buffer, maxBufLen, &usedBufLen, true, kCFUniCharUTF8Format, true)) return false;
+        if (!CFUniCharDecompose(characters, length, NULL, (void *)buffer, maxBufLen, &usedBufLen, true, kCFUniCharUTF8Format, true)) return false;
         buffer += usedBufLen;
     }
 

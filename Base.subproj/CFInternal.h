@@ -56,6 +56,7 @@
 #include "auto_stubs.h"
 #include <libkern/OSAtomic.h>
 
+
 #if defined(__MACH__)
 #if defined(__ppc__)
 // This hack is in here because B&I kernel does not set up comm page with Tiger additions yet.

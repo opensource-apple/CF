@@ -131,8 +131,8 @@ endif
 #
 
 ifeq "$(PLATFORM)" "Darwin"
-C_WARNING_FLAGS += -Wno-four-char-constants -Wall
-CPP_WARNING_FLAGS += -Wno-four-char-constants -Wall
+C_WARNING_FLAGS += -Wno-precomp -Wno-four-char-constants -Wall
+CPP_WARNING_FLAGS += -Wno-precomp -Wno-four-char-constants -Wall
 endif
 
 ifeq "$(PLATFORM)" "CYGWIN"

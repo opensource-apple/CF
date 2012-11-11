@@ -30,6 +30,7 @@
 #include <CoreFoundation/CFUniChar.h>
 #include <CoreFoundation/CFNumber.h>
 
+
 static Boolean _CFApplicationPreferencesSynchronizeNoLock(_CFApplicationPreferences *self);
 void _CFPreferencesDomainSetMultiple(CFPreferencesDomainRef domain, CFDictionaryRef dict);
 static void updateDictRep(_CFApplicationPreferences *self);

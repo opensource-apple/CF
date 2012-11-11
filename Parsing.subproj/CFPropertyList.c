@@ -43,6 +43,7 @@
 #include <math.h>
 #include <ctype.h>
 
+
 __private_extern__ bool allowMissingSemi = false;
 
 // Should move this somewhere else
