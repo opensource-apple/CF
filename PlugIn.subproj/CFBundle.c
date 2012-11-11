@@ -188,7 +188,7 @@ static CFBundleRef _mainBundle = NULL;
 static CFStringRef _defaultLocalization = NULL;
 
 // Forward declares functions.
-static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked);
+static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked, Boolean doFinalProcessing);
 static CFStringRef _CFBundleCopyExecutableName(CFAllocatorRef alloc, CFBundleRef bundle, CFURLRef url, CFDictionaryRef infoDict);
 static CFURLRef _CFBundleCopyExecutableURLIgnoringCache(CFBundleRef bundle);
 static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath);
@@ -510,7 +510,8 @@ static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
         if (bundleURL != NULL) {
             // make sure that main bundle has executable path
             //??? what if we are not the main executable in the bundle?
-            _mainBundle = _CFBundleCreate(NULL, bundleURL, true);
+            // NB doFinalProcessing must be false here, see below
+            _mainBundle = _CFBundleCreate(NULL, bundleURL, true, false);
             if (_mainBundle != NULL) {
                 CFBundleGetInfoDictionary(_mainBundle);
                 // make sure that the main bundle is listed as loaded, and mark it as executable
@@ -576,6 +577,10 @@ static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
                     }
                 }
 #endif /* BINARY_SUPPORT_CFM */
+                // Perform delayed final processing steps.
+                // This must be done after _isLoaded has been set, for security reasons (3624341).
+               _CFBundleCheckWorkarounds(_mainBundle);
+               _CFBundleInitPlugIn(_mainBundle);
             }
         }
         if (bundleURL) CFRelease(bundleURL);
@@ -762,7 +767,7 @@ CFTypeID CFBundleGetTypeID(void) {
     return __kCFBundleTypeID;
 }
 
-static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked) {
+static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked, Boolean doFinalProcessing) {
     CFBundleRef bundle = NULL;
     char buff[CFMaxPathSize];
     CFDateRef modDate = NULL;
@@ -859,14 +864,15 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
     
     _CFBundleAddToTables(bundle, alreadyLocked);
 
-    _CFBundleInitPlugIn(bundle);
+    if (doFinalProcessing) {
+        _CFBundleCheckWorkarounds(bundle);
+        _CFBundleInitPlugIn(bundle);
+    }
 
-    _CFBundleCheckWorkarounds(bundle);
-    
     return bundle;
 }
 
-CFBundleRef CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL) {return _CFBundleCreate(allocator, bundleURL, false);}
+CFBundleRef CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL) {return _CFBundleCreate(allocator, bundleURL, false, true);}
 
 CFArrayRef CFBundleCreateBundlesFromDirectory(CFAllocatorRef alloc, CFURLRef directoryURL, CFStringRef bundleType) {
     CFMutableArrayRef bundles = CFArrayCreateMutable(alloc, 0, &kCFTypeArrayCallBacks);
@@ -2495,7 +2501,7 @@ static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath) {
     if (curURL != NULL) {
         bundle = _CFBundleFindByURL(curURL, true);
         if (bundle == NULL) {
-            bundle = _CFBundleCreate(NULL, curURL, true);
+            bundle = _CFBundleCreate(NULL, curURL, true, true);
         }
         if (bundle != NULL && !bundle->_isLoaded) {
             // make sure that these bundles listed as loaded, and mark them frameworks (we probably can't see anything else here, and we cannot unload them)

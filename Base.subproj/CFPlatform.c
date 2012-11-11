@@ -189,15 +189,15 @@ const char *_CFProcessPath(void) {
                 if (thePath) {
                     // User could have "." or "../bin" or other relative path in $PATH
                     if (('/' != thePath[0]) && _CFGetCurrentDirectory(buf, CFMaxPathSize)) {
-                        strcat(buf, "/");
-                        strcat(buf, thePath);
+                        strlcat(buf, "/", CFMaxPathSize);
+                        strlcat(buf, thePath, CFMaxPathSize);
                         if (0 == stat(buf, &statbuf)) {
                             CFAllocatorDeallocate(alloc, (void *)thePath);
                             thePath = buf;
                         }
                     }
                     if (thePath != buf) {
-                        strcpy(buf, thePath);
+                        strlcpy(buf, thePath, CFMaxPathSize);
                         CFAllocatorDeallocate(alloc, (void *)thePath);
                         thePath = buf;
                     }
@@ -209,9 +209,9 @@ const char *_CFProcessPath(void) {
 	// try prepending the current directory to argv[0].
         if (!thePath && _CFGetCurrentDirectory(buf, CFMaxPathSize)) {
             if (buf[strlen(buf)-1] != '/') {
-                strcat(buf, "/");
+                strlcat(buf, "/", CFMaxPathSize);
             }
-	    strcat(buf, arg0);
+	    strlcat(buf, arg0, CFMaxPathSize);
             if (0 == stat(buf, &statbuf)) {
 		thePath = buf;
             }
