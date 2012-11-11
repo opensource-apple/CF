@@ -148,7 +148,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
 
     if ((encoding == kCFStringEncodingUTF16) || (encoding == kCFStringEncodingUTF16BE) || (encoding == kCFStringEncodingUTF16LE)) { // UTF-16
         const UTF16Char *src = (const UTF16Char *)bytes;
-        const UTF16Char *limit = (const UTF16Char *)(bytes + len);
+	const UTF16Char *limit = src + (len / sizeof(UTF16Char));
         bool swap = false;
 
         if (kCFStringEncodingUTF16 == encoding) {
@@ -228,7 +228,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
         }
     } else if ((encoding == kCFStringEncodingUTF32) || (encoding == kCFStringEncodingUTF32BE) || (encoding == kCFStringEncodingUTF32LE)) {
         const UTF32Char *src = (const UTF32Char *)bytes;
-        const UTF32Char *limit = (const UTF32Char *)(bytes + len);
+	const UTF32Char *limit =  src + (len / sizeof(UTF32Char));
         bool swap = false;
         static bool strictUTF32 = (bool)-1;
 
