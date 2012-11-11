@@ -130,7 +130,7 @@ extern "C" {
 #endif
 
 #if !defined(CF_INLINE)
-    #if defined(__GNUC__) && (__GNUC__ == 4)
+    #if defined(__GNUC__) && (__GNUC__ == 4) && !defined(DEBUG)
 	#define CF_INLINE static __inline__ __attribute__((always_inline))
     #elif defined(__GNUC__)
     #define CF_INLINE static __inline__
