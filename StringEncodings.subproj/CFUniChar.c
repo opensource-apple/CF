@@ -63,8 +63,8 @@
 #if !defined(__MACOS8__)
 
 CF_INLINE void __CFUniCharCharacterSetPath(char *cpath) {
-    strcpy(cpath, __kCFCharacterSetDir);
-    strcat(cpath, "/CharacterSets/");
+    strlcpy(cpath, __kCFCharacterSetDir, MAXPATHLEN);
+    strlcat(cpath, "/CharacterSets/", MAXPATHLEN);
 }
 
 static bool __CFUniCharLoadBytesFromFile(const char *fileName, const void **bytes) {
@@ -109,7 +109,7 @@ static bool __CFUniCharLoadFile(const char *bitmapName, const void **bytes) {
     char cpath[MAXPATHLEN];
 
     __CFUniCharCharacterSetPath(cpath);
-    strcat(cpath, bitmapName);
+    strlcat(cpath, bitmapName, MAXPATHLEN);
 
     return __CFUniCharLoadBytesFromFile(cpath, bytes);
 }
