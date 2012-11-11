@@ -2620,7 +2620,7 @@ Boolean CFStringFindWithOptions(CFStringRef string, CFStringRef stringToFind, CF
                             
                             // this is assuming viramas are only in BMP ???
                             if ((str1Char == COMBINING_GRAPHEME_JOINER) || (otherChar == COMBINING_GRAPHEME_JOINER) || (otherChar == ZERO_WIDTH_JOINER) || ((otherChar >= HANGUL_CHOSEONG_START) && (otherChar <= HANGUL_JONGSEONG_END)) || (CFUniCharGetCombiningPropertyForCharacter(otherChar, combClassBMP) == 9)) {
-                                CFRange clusterRange = CFStringGetRangeOfCharacterClusterAtIndex(string, str1Index, kCFStringGramphemeCluster);
+                                CFRange clusterRange = CFStringGetRangeOfCharacterClusterAtIndex(string, str1Index - 1, kCFStringGramphemeCluster);
                                 
                                 if (str1Index < (clusterRange.location + clusterRange.length)) match = false;
                             }

@@ -378,6 +378,11 @@ void _CFApplicationPreferencesSet(_CFApplicationPreferences *self, CFStringRef d
 
 void _CFApplicationPreferencesRemove(_CFApplicationPreferences *self, CFStringRef defaultName) {
     CFPreferencesDomainRef appDomain;
+    void *defs = NULL;
+    __CFSpinLock(&userDefaultsLock);
+    defs = userDefaults;
+    __CFSpinUnlock(&userDefaultsLock);
+    CF_OBJC_KVO_WILLCHANGE(defs, defaultName);
     __CFSpinLock(&__CFApplicationPreferencesLock);
     appDomain = _CFPreferencesStandardDomain(self->_appName, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     if(appDomain) {
@@ -388,6 +393,7 @@ void _CFApplicationPreferencesRemove(_CFApplicationPreferences *self, CFStringRe
         }
     }
     __CFSpinUnlock(&__CFApplicationPreferencesLock);
+    CF_OBJC_KVO_DIDCHANGE(defs, defaultName);
 }
 
 static Boolean _CFApplicationPreferencesSynchronizeNoLock(_CFApplicationPreferences *self) {

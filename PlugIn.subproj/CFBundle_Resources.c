@@ -1962,22 +1962,22 @@ static Boolean _CFBundleGetPackageInfoInDirectoryWithInfoDictionary(CFAllocatorR
                 startOfExtension = _CFStartOfPathExtension(buff, strLen);
                 if (((strLen - startOfExtension == 4) || (strLen - startOfExtension == 5)) && (buff[startOfExtension] == (UniChar)'.') && (buff[startOfExtension+1] == (UniChar)'a') && (buff[startOfExtension+2] == (UniChar)'p') && (buff[startOfExtension+3] == (UniChar)'p') && ((strLen - startOfExtension == 4) || (buff[startOfExtension+4] == (UniChar)'/'))) {
                     // This is an app
-                    *packageType = CFSwapInt32BigToHost(0x4150504c);  // 'APPL'
+                    *packageType = 0x4150504c;  // 'APPL'
                 } else if (((strLen - startOfExtension == 6) || (strLen - startOfExtension == 7)) && (buff[startOfExtension] == (UniChar)'.') && (buff[startOfExtension+1] == (UniChar)'d') && (buff[startOfExtension+2] == (UniChar)'e') && (buff[startOfExtension+3] == (UniChar)'b') && (buff[startOfExtension+4] == (UniChar)'u') && (buff[startOfExtension+5] == (UniChar)'g') && ((strLen - startOfExtension == 6) || (buff[startOfExtension+6] == (UniChar)'/'))) {
                     // This is an app (debug version)
-                    *packageType = CFSwapInt32BigToHost(0x4150504c);  // 'APPL'
+                    *packageType = 0x4150504c;  // 'APPL'
                 } else if (((strLen - startOfExtension == 8) || (strLen - startOfExtension == 9)) && (buff[startOfExtension] == (UniChar)'.') && (buff[startOfExtension+1] == (UniChar)'p') && (buff[startOfExtension+2] == (UniChar)'r') && (buff[startOfExtension+3] == (UniChar)'o') && (buff[startOfExtension+4] == (UniChar)'f') && (buff[startOfExtension+5] == (UniChar)'i') && (buff[startOfExtension+6] == (UniChar)'l') && (buff[startOfExtension+7] == (UniChar)'e') && ((strLen - startOfExtension == 8) || (buff[startOfExtension+8] == (UniChar)'/'))) {
                     // This is an app (profile version)
-                    *packageType = CFSwapInt32BigToHost(0x4150504c);  // 'APPL'
+                    *packageType = 0x4150504c;  // 'APPL'
                 } else if (((strLen - startOfExtension == 8) || (strLen - startOfExtension == 9)) && (buff[startOfExtension] == (UniChar)'.') && (buff[startOfExtension+1] == (UniChar)'s') && (buff[startOfExtension+2] == (UniChar)'e') && (buff[startOfExtension+3] == (UniChar)'r') && (buff[startOfExtension+4] == (UniChar)'v') && (buff[startOfExtension+5] == (UniChar)'i') && (buff[startOfExtension+6] == (UniChar)'c') && (buff[startOfExtension+7] == (UniChar)'e') && ((strLen - startOfExtension == 8) || (buff[startOfExtension+8] == (UniChar)'/'))) {
                     // This is a service
-                    *packageType = CFSwapInt32BigToHost(0x4150504c);  // 'APPL'
+                    *packageType = 0x4150504c;  // 'APPL'
                 } else if (((strLen - startOfExtension == 10) || (strLen - startOfExtension == 11)) && (buff[startOfExtension] == (UniChar)'.') && (buff[startOfExtension+1] == (UniChar)'f') && (buff[startOfExtension+2] == (UniChar)'r') && (buff[startOfExtension+3] == (UniChar)'a') && (buff[startOfExtension+4] == (UniChar)'m') && (buff[startOfExtension+5] == (UniChar)'e') && (buff[startOfExtension+6] == (UniChar)'w') && (buff[startOfExtension+7] == (UniChar)'o') && (buff[startOfExtension+8] == (UniChar)'r') && (buff[startOfExtension+9] == (UniChar)'k') && ((strLen - startOfExtension == 10) || (buff[startOfExtension+10] == (UniChar)'/'))) {
                     // This is a framework
-                    *packageType = CFSwapInt32BigToHost(0x464d574b);  // 'FMWK'
+                    *packageType = 0x464d574b;  // 'FMWK'
                 } else {
                     // Default to BNDL for generic bundle
-                    *packageType = CFSwapInt32BigToHost(0x424e444C);  // 'BNDL'
+                    *packageType = 0x424e444c;  // 'BNDL'
                 }
             }
             retVal = true;
@@ -1992,7 +1992,7 @@ CF_EXPORT void CFBundleGetPackageInfo(CFBundleRef bundle, UInt32 *packageType, U
     CFURLRef bundleURL = CFBundleCopyBundleURL(bundle);
     if (!_CFBundleGetPackageInfoInDirectoryWithInfoDictionary(CFGetAllocator(bundle), bundleURL, CFBundleGetInfoDictionary(bundle), packageType, packageCreator)) {
         if (packageType != NULL) {
-            *packageType = CFSwapInt32BigToHost(0x424e444C);  // 'BNDL'
+            *packageType = 0x424e444c;  // 'BNDL'
         }
         if (packageCreator != NULL) {
             *packageCreator = 0x3f3f3f3f;  // '????'

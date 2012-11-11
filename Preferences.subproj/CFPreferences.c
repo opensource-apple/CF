@@ -86,6 +86,8 @@ CF_EXPORT void CFPreferencesDumpMem(void) {
 }
 #endif
 
+static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef domainName, CFStringRef userName, CFStringRef hostName, unsigned long safeLevel);
+
 static unsigned long __CFSafeLaunchLevel = 0;
 
 static CFURLRef _preferencesDirectoryForUserHostSafetyLevel(CFStringRef userName, CFStringRef hostName, unsigned long safeLevel) {

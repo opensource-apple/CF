@@ -722,6 +722,7 @@ void CFAllocatorGetContext(CFAllocatorRef allocator, CFAllocatorContext *context
     context->reallocate = __CFAllocatorGetReallocateFunction(&allocator->_context);
     context->deallocate = __CFAllocatorGetDeallocateFunction(&allocator->_context);
     context->preferredSize = __CFAllocatorGetPreferredSizeFunction(&allocator->_context);
+#if defined(__ppc__)	
     context->retain = (void *)((uintptr_t)context->retain & ~0x3);
     context->release = (void *)((uintptr_t)context->release & ~0x3);
     context->copyDescription = (void *)((uintptr_t)context->copyDescription & ~0x3);
@@ -729,6 +730,7 @@ void CFAllocatorGetContext(CFAllocatorRef allocator, CFAllocatorContext *context
     context->reallocate = (void *)((uintptr_t)context->reallocate & ~0x3);
     context->deallocate = (void *)((uintptr_t)context->deallocate & ~0x3);
     context->preferredSize = (void *)((uintptr_t)context->preferredSize & ~0x3);
+#endif
 }
 
 void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint)

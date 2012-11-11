@@ -289,15 +289,29 @@ static Boolean __CFWriteBytesToFileWithAtomicity(CFURLRef url, const void *bytes
     int fd = -1;
     char auxPath[CFMaxPathSize + 16];
     char cpath[CFMaxPathSize];
-    int fsyncErr = 0;
+    uid_t owner = getuid();
+    gid_t group = getgid();
+    Boolean writingFileAsRoot = ((getuid() != geteuid()) && (geteuid() == 0));
 
     if (!CFURLGetFileSystemRepresentation(url, true, cpath, CFMaxPathSize)) {
         return false;
     }
-    if (-1 == mode) {
+    
+    if (-1 == mode || writingFileAsRoot) {
 	struct stat statBuf;
-	mode = (0 == stat(cpath, &statBuf)) ? statBuf.st_mode : 0600;
+        if (0 == stat(cpath, &statBuf)) {
+            mode = statBuf.st_mode;
+            owner = statBuf.st_uid;
+            group = statBuf.st_gid;
+        } else {
+            mode = 0664;
+            if (writingFileAsRoot && (0 == strncmp(cpath, "/Library/Preferences", 20))) {
+                owner = geteuid();
+                group = 80;
+            }
+        }
     }
+    
     if (atomic) {
         CFURLRef dir = CFURLCreateCopyDeletingLastPathComponent(NULL, url);
         CFURLRef tempFile = CFURLCreateCopyAppendingPathComponent(NULL, dir, CFSTR("cf#XXXXX"), false);
@@ -311,7 +325,9 @@ static Boolean __CFWriteBytesToFileWithAtomicity(CFURLRef url, const void *bytes
     } else {
         fd = open(cpath, O_WRONLY|O_CREAT|O_TRUNC, mode);
     }
+    
     if (fd < 0) return false;
+    
     if (length && (write(fd, bytes, length) != length || fsync(fd) < 0)) {
         int saveerr = thread_errno();
         close(fd);
@@ -320,7 +336,9 @@ static Boolean __CFWriteBytesToFileWithAtomicity(CFURLRef url, const void *bytes
         thread_set_errno(saveerr);
         return false;
     }
+    
     close(fd);
+    
     if (atomic) {
         // preserve the mode as passed in originally
         chmod(auxPath, mode);
@@ -328,6 +346,11 @@ static Boolean __CFWriteBytesToFileWithAtomicity(CFURLRef url, const void *bytes
         if (0 != rename(auxPath, cpath)) {
             unlink(auxPath);
             return false;
+        }
+        
+        // If the file was renamed successfully and we wrote it as root we need to reset the owner & group as they were.
+        if (writingFileAsRoot) {
+            chown(cpath, owner, group);
         }
     }
     return true;

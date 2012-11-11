@@ -74,7 +74,7 @@ include framework.make
 # Misc additional options
 #
 
-CURRENT_PROJECT_VERSION = 368.11
+CURRENT_PROJECT_VERSION = 368.18
 
 # common items all build styles should be defining
 CFLAGS += -DCF_BUILDING_CF=1

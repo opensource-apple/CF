@@ -114,7 +114,7 @@ extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void);
 extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint);
 #endif
 
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
 // CFM API
 #if defined(__MACOS8__)
 #include <CodeFragments.h>
@@ -125,7 +125,7 @@ extern void _CFBundleCFMConnect(CFBundleRef bundle);
 extern void _CFBundleCFMUnload(CFBundleRef bundle);
 extern void *__CFBundleCFMGetSymbol(void *connID, ConstStr255Param name, CFragSymbolClass class);
 extern void *_CFBundleCFMGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName, CFragSymbolClass class);
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 
 #if defined(BINARY_SUPPORT_DLL)
 extern Boolean _CFBundleDLLLoad(CFBundleRef bundle);

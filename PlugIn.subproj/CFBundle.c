@@ -2286,12 +2286,12 @@ Boolean CFBundleLoadExecutable(CFBundleRef bundle) {
 
     
     switch (bundle->_binaryType) {
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
         case __CFBundleCFMBinary:
         case __CFBundleUnreadableBinary:
             result = _CFBundleCFMLoad(bundle);
             break;
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
             result = _CFBundleDYLDLoadBundle(bundle);
@@ -2343,11 +2343,11 @@ void CFBundleUnloadExecutable(CFBundleRef bundle) {
     _CFPlugInWillUnload(bundle);
 
     switch (bundle->_binaryType) {
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
         case __CFBundleCFMBinary:
              _CFBundleCFMUnload(bundle);
             break;
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
             _CFBundleDYLDUnloadBundle(bundle);
@@ -2417,11 +2417,11 @@ void *CFBundleGetFunctionPointerForName(CFBundleRef bundle, CFStringRef funcName
     }
     
     switch (bundle->_binaryType) {
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
         case __CFBundleCFMBinary:
             tvp = _CFBundleCFMGetSymbolByName(bundle, funcName, kTVectorCFragSymbol);
             break;
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
         case __CFBundleDYLDFrameworkBinary:
@@ -2461,11 +2461,11 @@ void *_CFBundleGetCFMFunctionPointerForName(CFBundleRef bundle, CFStringRef func
     }
     
     switch (bundle->_binaryType) {
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
         case __CFBundleCFMBinary:
             return _CFBundleCFMGetSymbolByName(bundle, funcName, kTVectorCFragSymbol);
             break;
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
         case __CFBundleDYLDFrameworkBinary:
@@ -2522,11 +2522,11 @@ void *CFBundleGetDataPointerForName(CFBundleRef bundle, CFStringRef symbolName) 
     }
     
     switch (bundle->_binaryType) {
-#if defined(BINARY_SUPPORT_CFM)
+#if defined(BINARY_SUPPORT_CFM) && defined(__ppc__)
         case __CFBundleCFMBinary:
             dp = _CFBundleCFMGetSymbolByName(bundle, symbolName, kDataCFragSymbol);
             break;
-#endif /* BINARY_SUPPORT_CFM */
+#endif /* BINARY_SUPPORT_CFM && __ppc__ */
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
         case __CFBundleDYLDFrameworkBinary:

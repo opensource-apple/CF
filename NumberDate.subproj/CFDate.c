@@ -245,13 +245,17 @@ static void __CFYMDFromAbsolute(int32_t absolute, int32_t *year, int8_t *month, 
 }
 
 /* year arg is absolute year; Gregorian 2001 == year 0; 2001/1/1 = absolute date 0 */
-static int32_t __CFAbsoluteFromYMD(int32_t year, int8_t month, int8_t day) {
-    int32_t absolute = 0, idx;
+static double __CFAbsoluteFromYMD(int32_t year, int8_t month, int8_t day) {
+    double absolute = 0.0;
+    int32_t idx;
+    int32_t b = year / 400; // take care of as many multiples of 400 years as possible
+    absolute += b * 146097.0;
+    year -= b * 400;
     if (year < 0) {
 	for (idx = year; idx < 0; idx++)
 	    absolute -= __CFDaysAfterMonth(0, idx, isleap(idx));
     } else {
-	for (idx = year - 1; 0 <= idx; idx--)
+	for (idx = 0; idx < year; idx++)
 	    absolute += __CFDaysAfterMonth(0, idx, isleap(idx));
     }
     /* Now add the days into the original year */
@@ -451,7 +455,6 @@ SInt32 CFAbsoluteTimeGetDayOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
 SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
     int32_t absolute, year;
     int8_t month, day;
-    int32_t absolute0101, dow0101;
     CFAbsoluteTime fixedat;
     if (NULL != tz) {
 	__CFGenericValidateType(tz, CFTimeZoneGetTypeID());
@@ -459,8 +462,8 @@ SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
     fixedat = at + (NULL != tz ? CFTimeZoneGetSecondsFromGMT(tz, at) : 0.0);
     absolute = (int32_t)(float)floor(fixedat / 86400.0);
     __CFYMDFromAbsolute(absolute, &year, &month, &day);
-    absolute0101 = __CFAbsoluteFromYMD(year, 1, 1);
-    dow0101 = (absolute0101 < 0) ? ((absolute0101 + 1) % 7 + 7) : (absolute0101 % 7 + 1);
+    double absolute0101 = __CFAbsoluteFromYMD(year, 1, 1);
+    int32_t dow0101 = __CFDoubleModToInt(absolute0101, 7) + 1;
     /* First three and last three days of a year can end up in a week of a different year */
     if (1 == month && day < 4) {
 	if ((day < 4 && 5 == dow0101) || (day < 3 && 6 == dow0101) || (day < 2 && 7 == dow0101)) {
@@ -468,9 +471,8 @@ SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) {
 	}
     }
     if (12 == month && 28 < day) {
-	int32_t absolute20101, dow20101;
-	absolute20101 = __CFAbsoluteFromYMD(year + 1, 1, 1);
-	dow20101 = (absolute20101 < 0) ? ((absolute20101 + 1) % 7 + 7) : (absolute20101 % 7 + 1);
+	double absolute20101 = __CFAbsoluteFromYMD(year + 1, 1, 1);
+	int32_t dow20101 = __CFDoubleModToInt(absolute20101, 7) + 1;
 	if ((28 < day && 4 == dow20101) || (29 < day && 3 == dow20101) || (30 < day && 2 == dow20101)) {
 	    return 1;
 	}

@@ -143,6 +143,7 @@
 #include <CoreFoundation/CFMachPort.h>
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFDictionary.h>
+#include <CoreFoundation/CFByteOrder.h>
 #include <mach/mach.h>
 #include <mach/mach_error.h>
 #include <mach/notify.h>
@@ -266,38 +267,44 @@ void _CFMachPortInstallNotifyPort(CFRunLoopRef rl, CFStringRef mode) {
 static void __CFNotifyDeadMachPort(CFMachPortRef port, void *msg, CFIndex size, void *info) {
     mach_msg_header_t *header = (mach_msg_header_t *)msg;
     if (header && header->msgh_id == MACH_NOTIFY_DEAD_NAME) {
-	mach_port_t dead_port = ((mach_dead_name_notification_t *)msg)->not_port;
-	CFMachPortRef existing;
-	/* If the CFMachPort has already been invalidated, it won't be found here. */
-	__CFSpinLock(&__CFAllMachPortsLock);
-	if (NULL != __CFAllMachPorts && CFDictionaryGetValueIfPresent(__CFAllMachPorts, (void *)dead_port, (const void **)&existing)) {
-	    CFDictionaryRemoveValue(__CFAllMachPorts, (void *)dead_port);
-	    CFRetain(existing);
-	    __CFSpinUnlock(&__CFAllMachPortsLock);
-	    CFMachPortInvalidate(existing);
-	    CFRelease(existing);
-	} else {
-	    __CFSpinUnlock(&__CFAllMachPortsLock);
-	}
-	/* Delete port reference we got for this notification */
-	mach_port_deallocate(mach_task_self(), dead_port);
+		mach_port_t dead_port = ((mach_dead_name_notification_t *)msg)->not_port;
+		if (((mach_dead_name_notification_t *)msg)->NDR.int_rep != NDR_record.int_rep) {
+			dead_port = CFSwapInt32(dead_port);	
+		}
+		CFMachPortRef existing;
+		/* If the CFMachPort has already been invalidated, it won't be found here. */
+		__CFSpinLock(&__CFAllMachPortsLock);
+		if (NULL != __CFAllMachPorts && CFDictionaryGetValueIfPresent(__CFAllMachPorts, (void *)dead_port, (const void **)&existing)) {
+			CFDictionaryRemoveValue(__CFAllMachPorts, (void *)dead_port);
+			CFRetain(existing);
+			__CFSpinUnlock(&__CFAllMachPortsLock);
+			CFMachPortInvalidate(existing);
+			CFRelease(existing);
+		} else {
+			__CFSpinUnlock(&__CFAllMachPortsLock);
+		}
+		/* Delete port reference we got for this notification */
+		mach_port_deallocate(mach_task_self(), dead_port);
     } else if (header && header->msgh_id == MACH_NOTIFY_PORT_DELETED) {
-	mach_port_t dead_port = ((mach_port_deleted_notification_t *)msg)->not_port;
-	CFMachPortRef existing;
-	/* If the CFMachPort has already been invalidated, it won't be found here. */
-	__CFSpinLock(&__CFAllMachPortsLock);
-	if (NULL != __CFAllMachPorts && CFDictionaryGetValueIfPresent(__CFAllMachPorts, (void *)dead_port, (const void **)&existing)) {
-	    CFDictionaryRemoveValue(__CFAllMachPorts, (void *)dead_port);
-	    CFRetain(existing);
-	    __CFSpinUnlock(&__CFAllMachPortsLock);
-	    CFMachPortInvalidate(existing);
-	    CFRelease(existing);
-	} else {
-	    __CFSpinUnlock(&__CFAllMachPortsLock);
-	}
-	/* Delete port reference we got for this notification */
-// Don't do this, since this always fails, and could cause trouble
-//	mach_port_deallocate(mach_task_self(), dead_port);
+		mach_port_t dead_port = ((mach_port_deleted_notification_t *)msg)->not_port;
+		if (((mach_dead_name_notification_t *)msg)->NDR.int_rep != NDR_record.int_rep) {
+			dead_port = CFSwapInt32(dead_port);	
+		}
+		CFMachPortRef existing;
+		/* If the CFMachPort has already been invalidated, it won't be found here. */
+		__CFSpinLock(&__CFAllMachPortsLock);
+		if (NULL != __CFAllMachPorts && CFDictionaryGetValueIfPresent(__CFAllMachPorts, (void *)dead_port, (const void **)&existing)) {
+			CFDictionaryRemoveValue(__CFAllMachPorts, (void *)dead_port);
+			CFRetain(existing);
+			__CFSpinUnlock(&__CFAllMachPortsLock);
+			CFMachPortInvalidate(existing);
+			CFRelease(existing);
+		} else {
+			__CFSpinUnlock(&__CFAllMachPortsLock);
+		}
+		/* Delete port reference we got for this notification */
+		// Don't do this, since this always fails, and could cause trouble
+		//	mach_port_deallocate(mach_task_self(), dead_port);
     }
 }
 
