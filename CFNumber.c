@@ -1280,16 +1280,6 @@ Boolean CFNumberGetValue(CFNumberRef number, CFNumberType type, void *valuePtr) 
             *(int16_t *)valuePtr = (int16_t)taggedInteger;
             return true;
         case kCFNumberSInt32Type:
-#if 0 && __LP64__
-            if (taggedInteger < INT32_MIN) {
-                *(int32_t *)valuePtr = INT32_MIN;
-                return false;
-            }
-            if (INT32_MAX < taggedInteger) {
-                *(int32_t *)valuePtr = INT32_MAX;
-                return false;
-            }
-#endif
             *(int32_t *)valuePtr = (int32_t)taggedInteger;
             return true;
 #if __LP64__

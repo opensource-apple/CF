@@ -526,26 +526,7 @@ static CFBundleRef _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(CFStri
 
 #endif /* AVOID_WEAK_COLLECTIONS */
 
-#if 0 && DEPLOYMENT_TARGET_WINDOWS
-static CFStringRef _CFBundleCopyWrapperInBinaryDirectory(CFStringRef strippedExeName) {
-    char buff[CFMaxPathSize];
-    CFIndex buffLen;
-    int i;
-
-    CFArrayRef binaryDirs = _CFGetWindowsBinaryDirectories();
-    int count = CFArrayGetCount(binaryDirs);
-    CFStringRef str;
-    struct stat garbage;
-    for (i = 0; i < count; i++) {
-        str = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@\\%@.app"), CFArrayGetValueAtIndex(binaryDirs,i), strippedExeName);
-        buffLen = CFStringGetLength(str);
-        CFStringGetFileSystemRepresentation(str, buff, CFMaxPathSize);
-        if (stat(buff, &garbage) == 0) return str;
-        CFRelease(str);
-    }
-    return NULL;
-}
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if   DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
@@ -561,24 +542,7 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
     if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
     CFStringGetCharacters(str, CFRangeMake(0, buffLen), buff);
 
-#if 0 && DEPLOYMENT_TARGET_WINDOWS
-    CFIndex startOfBinaryName = _CFLengthAfterDeletingLastPathComponent(buff, buffLen) + 1;  // Remove exe name
-    CFIndex endOfBinaryName = _CFLengthAfterDeletingPathExtension(buff, buffLen);
-    if (startOfBinaryName > 0 && startOfBinaryName < buffLen && endOfBinaryName > 0 && endOfBinaryName <= buffLen) {
-        CFStringRef strippedExeName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfBinaryName]), endOfBinaryName - startOfBinaryName);
-        CFStringRef wrapperInBinaryDirectory = _CFBundleCopyWrapperInBinaryDirectory(strippedExeName);
-        if (wrapperInBinaryDirectory) {
-            buffLen = CFStringGetLength(wrapperInBinaryDirectory);
-            if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
-            CFStringGetCharacters(wrapperInBinaryDirectory, CFRangeMake(0, buffLen), buff);
-            CFRelease(wrapperInBinaryDirectory);
-            outstr = CFStringCreateWithCharactersNoCopy(kCFAllocatorSystemDefault, buff, buffLen, kCFAllocatorNull);
-            url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, outstr, PLATFORM_PATH_STYLE, true);
-            CFRelease(outstr);
-            return url;
-        }
-    }
-#elif DEPLOYMENT_TARGET_WINDOWS
+#if   DEPLOYMENT_TARGET_WINDOWS
     // Is this a .dll or .exe?
     if (buffLen >= 5 && (_wcsnicmp((wchar_t *)&(buff[buffLen-4]), L".dll", 4) == 0 || _wcsnicmp((wchar_t *)&(buff[buffLen-4]), L".exe", 4) == 0)) {
         CFIndex extensionLength = CFStringGetLength(_CFBundleWindowsResourceDirectoryExtension);
@@ -629,26 +593,6 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
                     if (buffLen > 0) {
                         // Remove support files folder
                         buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
-#elif 0 && DEPLOYMENT_TARGET_WINDOWS
-    if (buffLen > 0) {
-        // See if this is a new bundle.  If it is, we have to remove more path components.
-        CFIndex startOfLastDir = _CFStartOfLastPathComponent(buff, buffLen);
-        if (startOfLastDir > 0 && startOfLastDir < buffLen) {
-            CFStringRef lastDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfLastDir]), buffLen - startOfLastDir);
-
-            if (CFEqual(lastDirName, _CFBundleGetPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetAlternatePlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherAlternatePlatformExecutablesSubdirectoryName())) {
-                // This is a new bundle.  Back off a few more levels
-                if (buffLen > 0) {
-                    // Remove platform folder
-                    buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
-                }
-                if (buffLen > 0) {
-                    // Remove executables folder (if present)
-                    CFIndex startOfNextDir = _CFStartOfLastPathComponent(buff, buffLen);
-                    if (startOfNextDir > 0 && startOfNextDir < buffLen) {
-                        CFStringRef nextDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfNextDir]), buffLen - startOfNextDir);
-                        if (CFEqual(nextDirName, _CFBundleExecutablesDirectoryName)) buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
-                        CFRelease(nextDirName);
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
@@ -658,15 +602,6 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
                 CFRelease(lastDirName);
             }
         }
-#elif 0 && DEPLOYMENT_TARGET_WINDOWS
-                if (buffLen > 0) {
-                    // Remove support files folder
-                    buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
-                }
-            }
-            CFRelease(lastDirName);
-        }
-    }
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
@@ -3726,12 +3661,6 @@ __private_extern__ Boolean _CFBundleCouldBeBundle(CFURLRef url) {
 static CFURLRef __CFBundleCopyFrameworkURLForExecutablePath(CFStringRef executablePath, Boolean permissive) {
     // MF:!!! Implement me.  We need to be able to find the bundle from the exe, dealing with old vs. new as well as the Executables dir business on Windows.
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#elif 0 && DEPLOYMENT_TARGET_WINDOWS
-    UniChar executablesToFrameworksPathBuff[] = {'.', '.', '\\', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
-    UniChar executablesToPrivateFrameworksPathBuff[] = {'.', '.', '\\', 'P', 'r', 'i', 'v', 'a', 't', 'e', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
-    UniChar executablesToSystemFrameworksPathBuff[MAX_PATH+1] = { 0 };
-    SHGetFolderPathAndSubDirW(NULL, CSIDL_PROGRAM_FILES_COMMON, NULL, 0 /* SHGFP_TYPE_CURRENT */, L"Apple\\Mobile Device Support\\Frameworks", executablesToSystemFrameworksPathBuff);
-    UniChar frameworksExtension[] = {'f', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k'};
 #elif DEPLOYMENT_TARGET_WINDOWS
     UniChar executablesToFrameworksPathBuff[] = {'.', '.', '\\', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
     UniChar executablesToPrivateFrameworksPathBuff[] = {'.', '.', '\\', 'P', 'r', 'i', 'v', 'a', 't', 'e', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
@@ -3782,40 +3711,6 @@ static CFURLRef __CFBundleCopyFrameworkURLForExecutablePath(CFStringRef executab
         }
     }
             
-#elif 0 && DEPLOYMENT_TARGET_WINDOWS
-    // * (Windows-only) First check the "Executables" directory parallel to the "Frameworks" directory case.
-    if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToFrameworksPathBuff, LENGTH_OF(executablesToFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
-        CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
-        bundleURL = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, cheapStr, PLATFORM_PATH_STYLE, true);
-        if (!_CFBundleCouldBeBundle(bundleURL)) {
-            CFRelease(bundleURL);
-            bundleURL = NULL;
-        }
-    }
-    // * (Windows-only) Next check the "Executables" directory parallel to the "PrivateFrameworks" directory case.
-    if (!bundleURL) {
-        length = savedLength;
-        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToPrivateFrameworksPathBuff, LENGTH_OF(executablesToPrivateFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
-            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
-            bundleURL = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, cheapStr, PLATFORM_PATH_STYLE, true);
-            if (!_CFBundleCouldBeBundle(bundleURL)) {
-                CFRelease(bundleURL);
-                bundleURL = NULL;
-            }
-        }
-    }
-    // * (Windows-only) Next check the \Program Files\Apple\Mobile Device Support\Frameworks directory
-    if (!bundleURL) {
-        length = 0;
-        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToSystemFrameworksPathBuff, wcslen(executablesToSystemFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
-            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
-            bundleURL = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, cheapStr, PLATFORM_PATH_STYLE, true);
-            if (!_CFBundleCouldBeBundle(bundleURL)) {
-                CFRelease(bundleURL);
-                bundleURL = NULL;
-            }
-        }
-    }
 #elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
