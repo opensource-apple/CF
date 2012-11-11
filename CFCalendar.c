@@ -22,7 +22,7 @@
  */
 
 /*	CFCalendar.c
-	Copyright (c) 2004-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -176,19 +176,19 @@ CFCalendarRef CFCalendarCreateWithIdentifier(CFAllocatorRef allocator, CFStringR
 }
 
 CFStringRef CFCalendarGetIdentifier(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFStringRef, calendar, "calendarIdentifier");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFStringRef, calendar, calendarIdentifier);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     return calendar->_identifier;
 }
 
 CFLocaleRef CFCalendarCopyLocale(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFLocaleRef, calendar, "_copyLocale");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFLocaleRef, calendar, _copyLocale);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     return (CFLocaleRef)CFLocaleCreate(kCFAllocatorSystemDefault, calendar->_localeID);
 }
 
 void CFCalendarSetLocale(CFCalendarRef calendar, CFLocaleRef locale) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), void, calendar, "setLocale:", locale);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), void, calendar, setLocale:locale);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     __CFGenericValidateType(locale, CFLocaleGetTypeID());
     CFStringRef localeID = CFLocaleGetIdentifier(locale);
@@ -201,13 +201,13 @@ void CFCalendarSetLocale(CFCalendarRef calendar, CFLocaleRef locale) {
 }
 
 CFTimeZoneRef CFCalendarCopyTimeZone(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFTimeZoneRef, calendar, "_copyTimeZone");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFTimeZoneRef, calendar_copyTimeZone);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     return (CFTimeZoneRef)CFRetain(calendar->_tz);
 }
 
 void CFCalendarSetTimeZone(CFCalendarRef calendar, CFTimeZoneRef tz) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), void, calendar, "setTimeZone:", tz);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), void, calendar, setTimeZone:tz);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (tz) __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
     if (tz != calendar->_tz) {
@@ -218,7 +218,7 @@ void CFCalendarSetTimeZone(CFCalendarRef calendar, CFTimeZoneRef tz) {
 }
 
 CFIndex CFCalendarGetFirstWeekday(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFIndex, calendar, "firstWeekday");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFIndex, calendar, firstWeekday);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     if (calendar->_cal) {
@@ -228,7 +228,7 @@ CFIndex CFCalendarGetFirstWeekday(CFCalendarRef calendar) {
 }
 
 void CFCalendarSetFirstWeekday(CFCalendarRef calendar, CFIndex wkdy) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), void, calendar, "setFirstWeekday:", wkdy);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), void, calendar, setFirstWeekday:wkdy);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     if (calendar->_cal) {
@@ -237,21 +237,21 @@ void CFCalendarSetFirstWeekday(CFCalendarRef calendar, CFIndex wkdy) {
 }
 
 CFIndex CFCalendarGetMinimumDaysInFirstWeek(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFIndex, calendar, "minimumDaysInFirstWeek");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFIndex, calendar, minimumDaysInFirstWeek);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     return calendar->_cal ? ucal_getAttribute(calendar->_cal, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK) : -1;
 }
 
 void CFCalendarSetMinimumDaysInFirstWeek(CFCalendarRef calendar, CFIndex mwd) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), void, calendar, "setMinimumDaysInFirstWeek:", mwd);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), void, calendar, setMinimumDaysInFirstWeek:mwd);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     if (calendar->_cal) ucal_setAttribute(calendar->_cal, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK, mwd);
 }
 
 CFDateRef CFCalendarCopyGregorianStartDate(CFCalendarRef calendar) {
-    CF_OBJC_FUNCDISPATCH0(CFCalendarGetTypeID(), CFDateRef, calendar, "_gregorianStartDate");
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFDateRef, calendar, _gregorianStartDate);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     UErrorCode status = U_ZERO_ERROR;
@@ -264,7 +264,7 @@ CFDateRef CFCalendarCopyGregorianStartDate(CFCalendarRef calendar) {
 }
 
 void CFCalendarSetGregorianStartDate(CFCalendarRef calendar, CFDateRef date) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), void, calendar, "_setGregorianStartDate:", date);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), void, calendar, _setGregorianStartDate:date);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (date) __CFGenericValidateType(date, CFDateGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
@@ -348,7 +348,7 @@ static CFCalendarUnit __CFCalendarGetCalendarUnitFromChar(char ch) {
 }
 
 CFRange CFCalendarGetMinimumRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit unit) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), CFRange, calendar, "_minimumRangeOfUnit:", unit);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFRange, calendar, _minimumRangeOfUnit:unit);
     CFRange range = {kCFNotFound, kCFNotFound};
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
@@ -365,7 +365,7 @@ CFRange CFCalendarGetMinimumRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit u
 }
 
 CFRange CFCalendarGetMaximumRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit unit) {
-    CF_OBJC_FUNCDISPATCH1(CFCalendarGetTypeID(), CFRange, calendar, "_maximumRangeOfUnit:", unit);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFRange, calendar, _maximumRangeOfUnit:unit);
     CFRange range = {kCFNotFound, kCFNotFound};
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
@@ -505,7 +505,7 @@ static Boolean __validUnits(CFCalendarUnit smaller, CFCalendarUnit bigger) {
 static CFRange __CFCalendarGetRangeOfUnit1(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {
     CFRange range = {kCFNotFound, kCFNotFound};
     if (!__validUnits(smallerUnit, biggerUnit)) return range;
-    CF_OBJC_FUNCDISPATCH3(CFCalendarGetTypeID(), CFRange, calendar, "_rangeOfUnit:inUnit:forAT:", smallerUnit, biggerUnit, at);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFRange, calendar, _rangeOfUnit:smallerUnit inUnit:biggerUnit forAT:at);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     if (calendar->_cal) {
@@ -604,7 +604,7 @@ static CFRange __CFCalendarGetRangeOfUnit1(CFCalendarRef calendar, CFCalendarUni
 
 static CFRange __CFCalendarGetRangeOfUnit2(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) __attribute__((noinline));
 static CFRange __CFCalendarGetRangeOfUnit2(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {
-    CF_OBJC_FUNCDISPATCH3(CFCalendarGetTypeID(), CFRange, calendar, "_rangeOfUnit:inUnit:forAT:", smallerUnit, biggerUnit, at);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFRange, calendar, _rangeOfUnit:smallerUnit inUnit:biggerUnit forAT:at);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     CFRange range = {kCFNotFound, kCFNotFound};
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
@@ -766,17 +766,13 @@ static CFRange __CFCalendarGetRangeOfUnit2(CFCalendarRef calendar, CFCalendarUni
 }
 
 CFRange CFCalendarGetRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {
-    if (_CFExecutableLinkedOnOrAfter(CFSystemVersionLeopard)) {
 	return __CFCalendarGetRangeOfUnit2(calendar, smallerUnit, biggerUnit, at);
-    } else {
-	return __CFCalendarGetRangeOfUnit1(calendar, smallerUnit, biggerUnit, at);
-    }
 }
 
 CFIndex CFCalendarGetOrdinalityOfUnit(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {
     CFIndex result = kCFNotFound;
     if (!__validUnits(smallerUnit, biggerUnit)) return result;
-    CF_OBJC_FUNCDISPATCH3(CFCalendarGetTypeID(), CFIndex, calendar, "_ordinalityOfUnit:inUnit:forAT:", smallerUnit, biggerUnit, at);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFIndex, calendar, _ordinalityOfUnit:smallerUnit inUnit:biggerUnit forAT:at);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (!calendar->_cal) __CFCalendarSetupCal(calendar);
     if (calendar->_cal) {
@@ -974,7 +970,7 @@ Boolean _CFCalendarGetComponentDifferenceV(CFCalendarRef calendar, CFAbsoluteTim
 Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef calendar, /* out */ CFAbsoluteTime *atp, const char *componentDesc, ...) {
     va_list args;
     va_start(args, componentDesc);
-    CF_OBJC_FUNCDISPATCH3(CFCalendarGetTypeID(), Boolean, calendar, "_composeAbsoluteTime:::", atp, componentDesc, args);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), Boolean, calendar, _composeAbsoluteTime:atp :componentDesc :args);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     int idx, cnt = strlen((char *)componentDesc);
     STACK_BUFFER_DECL(int, vector, cnt);
@@ -989,7 +985,7 @@ Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef calendar, /* out */ CFAbsolu
 Boolean CFCalendarDecomposeAbsoluteTime(CFCalendarRef calendar, CFAbsoluteTime at, const char *componentDesc, ...) {
     va_list args;
     va_start(args, componentDesc);
-    CF_OBJC_FUNCDISPATCH3(CFCalendarGetTypeID(), Boolean, calendar, "_decomposeAbsoluteTime:::", at, componentDesc, args);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), Boolean, calendar, _decomposeAbsoluteTime:at :componentDesc :args);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     int idx, cnt = strlen((char *)componentDesc);
     STACK_BUFFER_DECL(int *, vector, cnt);
@@ -1004,7 +1000,7 @@ Boolean CFCalendarDecomposeAbsoluteTime(CFCalendarRef calendar, CFAbsoluteTime a
 Boolean CFCalendarAddComponents(CFCalendarRef calendar, /* inout */ CFAbsoluteTime *atp, CFOptionFlags options, const char *componentDesc, ...) {
     va_list args;
     va_start(args, componentDesc);
-    CF_OBJC_FUNCDISPATCH4(CFCalendarGetTypeID(), Boolean, calendar, "_addComponents::::", atp, options, componentDesc, args);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), Boolean, calendar, _addComponents:atp :options :componentDesc :args);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     int idx, cnt = strlen((char *)componentDesc);
     STACK_BUFFER_DECL(int, vector, cnt);
@@ -1019,7 +1015,7 @@ Boolean CFCalendarAddComponents(CFCalendarRef calendar, /* inout */ CFAbsoluteTi
 Boolean CFCalendarGetComponentDifference(CFCalendarRef calendar, CFAbsoluteTime startingAT, CFAbsoluteTime resultAT, CFOptionFlags options, const char *componentDesc, ...) {
     va_list args;
     va_start(args, componentDesc);
-    CF_OBJC_FUNCDISPATCH5(CFCalendarGetTypeID(), Boolean, calendar, "_diffComponents:::::", startingAT, resultAT, options, componentDesc, args);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), Boolean, calendar, _diffComponents:startingAT :resultAT :options :componentDesc :args);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     int idx, cnt = strlen((char *)componentDesc);
     STACK_BUFFER_DECL(int *, vector, cnt);
@@ -1033,7 +1029,7 @@ Boolean CFCalendarGetComponentDifference(CFCalendarRef calendar, CFAbsoluteTime 
 }
 
 Boolean CFCalendarGetTimeRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit unit, CFAbsoluteTime at, CFAbsoluteTime *startp, CFTimeInterval *tip) {
-    CF_OBJC_FUNCDISPATCH4(CFCalendarGetTypeID(), Boolean, calendar, "_rangeOfUnit:startTime:interval:forAT:", unit, startp, tip, at);
+    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), Boolean, calendar, _rangeOfUnit:unit startTime:startp interval:tip forAT:at);
     __CFGenericValidateType(calendar, CFCalendarGetTypeID());
     if (kCFCalendarUnitWeekdayOrdinal == unit) return false;
     if (kCFCalendarUnitWeekday == unit) unit = kCFCalendarUnitDay;

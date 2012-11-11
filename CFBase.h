@@ -22,7 +22,7 @@
  */
 
 /*	CFBase.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBASE__)
@@ -32,6 +32,14 @@
 
 #if (defined(__CYGWIN32__) || defined(_WIN32)) && !defined(__WIN32__)
 #define __WIN32__ 1
+#endif
+
+#if defined(_WIN64) && !defined(__WIN64__)
+#define __WIN64__ 1
+#endif
+
+#if defined(__WIN64__) && !defined(__LLP64__)
+#define __LLP64__ 1
 #endif
 
 #if defined(_MSC_VER) && defined(_M_IX86)
@@ -59,6 +67,15 @@
 #define __has_feature(x) 0
 #endif
 
+// Some compilers provide the capability to test if certain attributes are available. This macro provides a compatibility path for other compilers.
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
+#ifndef __has_extension
+#define __has_extension(x) 0
+#endif
+
 #if defined(__GNUC__) || TARGET_OS_WIN32
 #include <stdint.h>
 #include <stdbool.h>
@@ -69,37 +86,34 @@
 #endif
 
 // The arguments to these availability macros is a version number, e.g. 10_6, 3_0
-#if TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#if (TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 #include <AvailabilityMacros.h>
 #include <Availability.h>
 
+#ifndef __IPHONE_5_0
+#define __IPHONE_5_0 50000
+#endif
+
+#ifndef __IPHONE_6_0
+#define __IPHONE_6_0 60000
+#endif
+
 // Available on MacOS and iOS
-#define CF_AVAILABLE(_mac, _ios) AVAILABLE_MAC_OS_X_VERSION_##_mac##_AND_LATER
+#define CF_AVAILABLE(_mac, _ios) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_##_ios)
 
 // Available on MacOS only
-#define CF_AVAILABLE_MAC(_mac) AVAILABLE_MAC_OS_X_VERSION_##_mac##_AND_LATER
+#define CF_AVAILABLE_MAC(_mac) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_NA)
 
 // Available on iOS only
 #define CF_AVAILABLE_IOS(_ios) __OSX_AVAILABLE_STARTING(__MAC_NA, __IPHONE_##_ios)
 
 // Deprecated on either MacOS or iOS, or deprecated on both (check version numbers for details)
-#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) AVAILABLE_MAC_OS_X_VERSION_##_macIntro##_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_##_macDep
+#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
 
 // Deprecated on MacOS, unavailable on iOS
-#define CF_DEPRECATED_MAC(_macIntro, _macDep) AVAILABLE_MAC_OS_X_VERSION_##_macIntro##_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_##_macDep
+#define CF_DEPRECATED_MAC(_macIntro, _macDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_NA, __IPHONE_NA)
 
 // Unavailable on MacOS, deprecated on iOS
-#define CF_DEPRECATED_IOS(_iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_NA, __MAC_NA, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
-
-#elif (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
-#include <AvailabilityMacros.h>
-#include <Availability.h>
-
-#define CF_AVAILABLE(_mac, _ios) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_##_ios)
-#define CF_AVAILABLE_MAC(_mac) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_NA)
-#define CF_AVAILABLE_IOS(_ios) __OSX_AVAILABLE_STARTING(__MAC_NA, __IPHONE_##_ios)
-#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
-#define CF_DEPRECATED_MAC(_macIntro, _macDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_NA, __IPHONE_NA)
 #define CF_DEPRECATED_IOS(_iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_NA, __MAC_NA, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
 
 #else
@@ -118,6 +132,33 @@
 
 #endif
 
+#if __has_feature(enumerator_attributes) && __has_attribute(availability)
+#define CF_ENUM_AVAILABLE(_mac, _ios) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_##_ios)
+#define CF_ENUM_AVAILABLE_MAC(_mac) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_NA)
+#define CF_ENUM_AVAILABLE_IOS(_ios) __OSX_AVAILABLE_STARTING(__MAC_NA, __IPHONE_##_ios)
+#define CF_ENUM_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
+#define CF_ENUM_DEPRECATED_MAC(_macIntro, _macDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_NA, __IPHONE_NA)
+#define CF_ENUM_DEPRECATED_IOS(_iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_NA, __MAC_NA, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
+#else
+#define CF_ENUM_AVAILABLE(_mac, _ios)
+#define CF_ENUM_AVAILABLE_MAC(_mac)
+#define CF_ENUM_AVAILABLE_IOS(_ios)
+#define CF_ENUM_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep)
+#define CF_ENUM_DEPRECATED_MAC(_macIntro, _macDep)
+#define CF_ENUM_DEPRECATED_IOS(_iosIntro, _iosDep)
+#endif
+
+#if (__cplusplus && __cplusplus >= 201103L && (__has_extension(cxx_strong_enums) || __has_feature(objc_fixed_enum))) || (!__cplusplus && __has_feature(objc_fixed_enum))
+#define CF_ENUM(_type, _name) enum _name : _type _name; enum _name : _type
+#if (__cplusplus)
+#define CF_OPTIONS(_type, _name) _type _name; enum : _type
+#else
+#define CF_OPTIONS(_type, _name) enum _name : _type _name; enum _name : _type
+#endif
+#else
+#define CF_ENUM(_type, _name) _type _name; enum
+#define CF_OPTIONS(_type, _name) _type _name; enum
+#endif
 
 // Older versions of these macro; use IOS versions instead
 #define CF_AVAILABLE_IPHONE(_ios) CF_AVAILABLE_IOS(_ios)
@@ -216,7 +257,7 @@ CF_EXTERN_C_BEGIN
         #define CF_INLINE static __inline__ __attribute__((always_inline))
     #elif defined(__GNUC__)
         #define CF_INLINE static __inline__
-    #elif defined(__MWERKS__) || defined(__cplusplus)
+    #elif defined(__cplusplus)
 	#define CF_INLINE static inline
     #elif defined(_MSC_VER)
         #define CF_INLINE static __inline
@@ -227,18 +268,40 @@ CF_EXTERN_C_BEGIN
 
 // Marks functions which return a CF type that needs to be released by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is to rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed.
 // This macro is ONLY to be used in exceptional circumstances, not to annotate functions which conform to the CoreFoundation naming rules.
+#ifndef CF_RETURNS_RETAINED
 #if __has_feature(attribute_cf_returns_retained)
 #define CF_RETURNS_RETAINED __attribute__((cf_returns_retained))
 #else
 #define CF_RETURNS_RETAINED
 #endif
+#endif
 
 // Marks functions which return a CF type that may need to be retained by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is to rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed. 
 // This macro is ONLY to be used in exceptional circumstances, not to annotate functions which conform to the CoreFoundation naming rules.
+#ifndef CF_RETURNS_NOT_RETAINED
 #if __has_feature(attribute_cf_returns_not_retained)
 #define CF_RETURNS_NOT_RETAINED __attribute__((cf_returns_not_retained))
 #else
 #define CF_RETURNS_NOT_RETAINED
+#endif
+#endif
+
+// Marks function arguments which are released by the callee.
+#ifndef CF_RELEASES_ARGUMENT
+#if __has_feature(attribute_cf_consumed)
+#define CF_RELEASES_ARGUMENT __attribute__((cf_consumed))
+#else
+#define CF_RELEASES_ARGUMENT
+#endif
+#endif
+
+// Compatibility
+#ifndef CF_CONSUMED
+#if __has_feature(attribute_cf_consumed)
+#define CF_CONSUMED __attribute__((cf_consumed))
+#else
+#define CF_CONSUMED
+#endif
 #endif
 
 // Marks functions which cannot be used when compiling in automatic reference counting mode.
@@ -247,6 +310,23 @@ CF_EXTERN_C_BEGIN
 #else
 #define CF_AUTOMATED_REFCOUNT_UNAVAILABLE
 #endif
+
+#ifndef CF_IMPLICIT_BRIDGING_ENABLED
+#if __has_feature(arc_cf_code_audited)
+#define CF_IMPLICIT_BRIDGING_ENABLED _Pragma("clang arc_cf_code_audited begin")
+#else
+#define CF_IMPLICIT_BRIDGING_ENABLED
+#endif
+#endif
+
+#ifndef CF_IMPLICIT_BRIDGING_DISABLED
+#if __has_feature(arc_cf_code_audited)
+#define CF_IMPLICIT_BRIDGING_DISABLED _Pragma("clang arc_cf_code_audited end")
+#else
+#define CF_IMPLICIT_BRIDGING_DISABLED
+#endif
+#endif
+
 
 CF_EXPORT double kCFCoreFoundationVersionNumber;
 
@@ -308,6 +388,14 @@ CF_EXPORT double kCFCoreFoundationVersionNumber;
 #define kCFCoreFoundationVersionNumber10_6_3	550.19
 #define kCFCoreFoundationVersionNumber10_6_4	550.29
 #define kCFCoreFoundationVersionNumber10_6_5	550.42
+#define kCFCoreFoundationVersionNumber10_6_6	550.42
+#define kCFCoreFoundationVersionNumber10_6_7	550.42
+#define kCFCoreFoundationVersionNumber10_6_8	550.43
+#define kCFCoreFoundationVersionNumber10_7      635.00
+#define kCFCoreFoundationVersionNumber10_7_1    635.00
+#define kCFCoreFoundationVersionNumber10_7_2    635.15
+#define kCFCoreFoundationVersionNumber10_7_3    635.19
+#define kCFCoreFoundationVersionNumber10_7_4    635.21
 #endif
 
 #if TARGET_OS_IPHONE
@@ -320,12 +408,22 @@ CF_EXPORT double kCFCoreFoundationVersionNumber;
 #define kCFCoreFoundationVersionNumber_iOS_4_0 550.32
 #define kCFCoreFoundationVersionNumber_iOS_4_1 550.38
 #define kCFCoreFoundationVersionNumber_iOS_4_2 550.52
+#define kCFCoreFoundationVersionNumber_iOS_4_3 550.52
+#define kCFCoreFoundationVersionNumber_iOS_5_0 675
+#define kCFCoreFoundationVersionNumber_iOS_5_1 690.1
 #endif
 
+#if __LLP64__
+typedef unsigned long long CFTypeID;
+typedef unsigned long long CFOptionFlags;
+typedef unsigned long long CFHashCode;
+typedef signed long long CFIndex;
+#else
 typedef unsigned long CFTypeID;
 typedef unsigned long CFOptionFlags;
 typedef unsigned long CFHashCode;
 typedef signed long CFIndex;
+#endif
 
 /* Base "type" of all "CF objects", and polymorphic functions on them */
 typedef const void * CFTypeRef;
@@ -341,12 +439,11 @@ typedef struct __CFString * CFMutableStringRef;
 typedef CFTypeRef CFPropertyListRef;
 
 /* Values returned from comparison functions */
-enum {
-    kCFCompareLessThan = -1,
+typedef CF_ENUM(CFIndex, CFComparisonResult) {
+    kCFCompareLessThan = -1L,
     kCFCompareEqualTo = 0,
     kCFCompareGreaterThan = 1
 };
-typedef CFIndex CFComparisonResult;
 
 /* A standard comparison function */
 typedef CFComparisonResult (*CFComparatorFunction)(const void *val1, const void *val2, void *context);

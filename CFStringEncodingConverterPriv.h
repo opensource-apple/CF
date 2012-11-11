@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingConverterPriv.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__)

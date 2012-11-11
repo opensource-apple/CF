@@ -22,7 +22,7 @@
  */
 
 /*	CFRuntime.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -34,7 +34,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -42,6 +42,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <CoreFoundation/CFStringDefaultEncoding.h>
+#endif
+#if DEPLOYMENT_TARGET_EMBEDDED
+// This isn't in the embedded runtime.h header
+OBJC_EXPORT void *objc_destructInstance(id obj);
 #endif
 
 
@@ -66,6 +70,7 @@ __kCFReleaseEvent = 29
 #define FAKE_INSTRUMENTS 0
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+__private_extern__ void __CFOAInitializeNSObject(void);  // from NSObject.m
 
 bool __CFOASafe = false;
 
@@ -73,17 +78,6 @@ void (*__CFObjectAllocRecordAllocationFunction)(int, void *, int64_t , uint64_t,
 void (*__CFObjectAllocSetLastAllocEventNameFunction)(void *, const char *) = NULL;
 
 void __CFOAInitialize(void) {
-    static void (*dyfunc)(void) = (void *)~0;
-    if (NULL == __CFgetenv("OAKeepAllocationStatistics")) return;
-    if ((void *)~0 == dyfunc) {
-	dyfunc = dlsym(RTLD_DEFAULT, "_OAInitialize");
-    }
-    if (NULL != dyfunc) {
-	dyfunc();
-	__CFObjectAllocRecordAllocationFunction = dlsym(RTLD_DEFAULT, "_OARecordAllocationEvent");
-	__CFObjectAllocSetLastAllocEventNameFunction = dlsym(RTLD_DEFAULT, "_OASetLastAllocationEventName");
-	__CFOASafe = true;
-    }
 }
 
 void __CFRecordAllocationEvent(int eventnum, void *ptr, int64_t size, uint64_t data, const char *classname) {
@@ -205,8 +199,8 @@ static const CFRuntimeClass __CFTypeClass = {
 
 // the lock does not protect most reading of these; we just leak the old table to allow read-only accesses to continue to work
 static CFSpinLock_t __CFBigRuntimeFunnel = CFSpinLockInit;
-static CFRuntimeClass * __CFRuntimeClassTable[__CFRuntimeClassTableSize] = {0};
-static int32_t __CFRuntimeClassTableCount = 0;
+__private_extern__ CFRuntimeClass * __CFRuntimeClassTable[__CFRuntimeClassTableSize] = {0};
+__private_extern__ int32_t __CFRuntimeClassTableCount = 0;
 
 __private_extern__ uintptr_t __CFRuntimeObjCClassTable[__CFRuntimeClassTableSize] = {0};
 
@@ -214,13 +208,22 @@ __private_extern__ uintptr_t __CFRuntimeObjCClassTable[__CFRuntimeClassTableSize
 bool (*__CFObjCIsCollectable)(void *) = NULL;
 #endif
 
+#if !__CONSTANT_CFSTRINGS__ || DEPLOYMENT_TARGET_EMBEDDED_MINI
 // Compiler uses this symbol name; must match compiler built-in decl, so we use 'int'
 #if __LP64__
 int __CFConstantStringClassReference[24] = {0};
 #else
 int __CFConstantStringClassReference[12] = {0};
 #endif
-void *__CFConstantStringClassReferencePtr = &__CFConstantStringClassReference;
+#endif
+
+#if __LP64__
+int __CFConstantStringClassReference[24] = {0};
+#else
+int __CFConstantStringClassReference[12] = {0};
+#endif
+
+void *__CFConstantStringClassReferencePtr = NULL;
 
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     return CF_IS_OBJC(typeID, obj);
@@ -266,8 +269,9 @@ void _CFRuntimeUnregisterClassWithTypeID(CFTypeID typeID) {
 __private_extern__ uint8_t __CFZombieEnabled = 0;
 __private_extern__ uint8_t __CFDeallocateZombies = 0;
 
+extern void __CFZombifyNSObject(void);  // from NSObject.m
+
 void _CFEnableZombies(void) {
-    __CFZombieEnabled = 0xFF;
 }
 
 #endif /* DEBUG */
@@ -402,7 +406,7 @@ enum {
 #if DEPLOYMENT_TARGET_MACOSX
 #define NUM_EXTERN_TABLES 8
 #define EXTERN_TABLE_IDX(O) (((uintptr_t)(O) >> 8) & 0x7)
-#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
 #define NUM_EXTERN_TABLES 1
 #define EXTERN_TABLE_IDX(O) 0
 #else
@@ -545,7 +549,7 @@ __private_extern__ void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, co
 
 CFTypeID CFGetTypeID(CFTypeRef cf) {
 #if defined(DEBUG)
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFGetTypeID() called with NULL ***"); HALT; }
 #endif
     CFTYPE_OBJC_FUNCDISPATCH0(CFTypeID, cf, _cfTypeID);
     __CFGenericAssertIsCF(cf);
@@ -562,7 +566,7 @@ CFStringRef CFCopyTypeIDDescription(CFTypeID type) {
 static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR);
 
 CFTypeRef CFRetain(CFTypeRef cf) {
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFRetain() called with NULL ***"); HALT; }
     if (cf) __CFGenericAssertIsCF(cf);
     return _CFRetain(cf, false);
 }
@@ -570,7 +574,7 @@ CFTypeRef CFRetain(CFTypeRef cf) {
 static void _CFRelease(CFTypeRef cf);
 
 void CFRelease(CFTypeRef cf) {
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFRelease() called with NULL ***"); HALT; }
 #if 0
     void **addrs[2] = {&&start, &&end};
     start:;
@@ -590,7 +594,7 @@ void CFRelease(CFTypeRef cf) {
 __private_extern__ void __CFAllocatorDeallocate(CFTypeRef cf);
 
 __private_extern__ const void *__CFStringCollectionCopy(CFAllocatorRef allocator, const void *ptr) {
-    if (NULL == ptr) HALT;
+    if (NULL == ptr) { CRSetCrashLogMessage("*** __CFStringCollectionCopy() called with NULL ***"); HALT; }
     CFStringRef theString = (CFStringRef)ptr;
     CFStringRef result = CFStringCreateCopy(_CFConvertAllocatorToGCRefZeroEquivalent(allocator), theString);
     return (const void *)result;
@@ -599,7 +603,7 @@ __private_extern__ const void *__CFStringCollectionCopy(CFAllocatorRef allocator
 extern void CFCollection_non_gc_storage_error(void);
 
 __private_extern__ const void *__CFTypeCollectionRetain(CFAllocatorRef allocator, const void *ptr) {
-    if (NULL == ptr) HALT;
+    if (NULL == ptr) { CRSetCrashLogMessage("*** __CFTypeCollectionRetain() called with NULL; likely a collection has been corrupted ***"); HALT; }
     CFTypeRef cf = (CFTypeRef)ptr;
     // only collections allocated in the GC zone can opt-out of reference counting.
     if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
@@ -634,7 +638,7 @@ __private_extern__ const void *__CFTypeCollectionRetain(CFAllocatorRef allocator
 
 
 __private_extern__ void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *ptr) {
-    if (NULL == ptr) HALT;
+    if (NULL == ptr) { CRSetCrashLogMessage("*** __CFTypeCollectionRelease() called with NULL; likely a collection has been corrupted ***"); HALT; }
     CFTypeRef cf = (CFTypeRef)ptr;
     // only collections allocated in the GC zone can opt-out of reference counting.
     if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
@@ -671,7 +675,7 @@ static CFSpinLock_t __CFRuntimeExternRefCountTableLock = CFSpinLockInit;
 #endif
 
 static uint64_t __CFGetFullRetainCount(CFTypeRef cf) {
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** __CFGetFullRetainCount() called with NULL ***"); HALT; }
 #if __LP64__
     uint32_t lowBits = ((CFRuntimeBase *)cf)->_rc;
     if (0 == lowBits) {
@@ -693,7 +697,7 @@ static uint64_t __CFGetFullRetainCount(CFTypeRef cf) {
 }
 
 CFIndex CFGetRetainCount(CFTypeRef cf) {
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFGetRetainCount() called with NULL ***"); HALT; }
     uint32_t cfinfo = *(uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     if (cfinfo & 0x800000) { // custom ref counting for object
         CFTypeID typeID = (cfinfo >> 8) & 0x03FF; // mask up to 0x0FFF
@@ -732,8 +736,8 @@ CFTypeRef CFMakeUncollectable(CFTypeRef cf) {
 }
 
 Boolean CFEqual(CFTypeRef cf1, CFTypeRef cf2) {
-    if (NULL == cf1) HALT;
-    if (NULL == cf2) HALT;
+    if (NULL == cf1) { CRSetCrashLogMessage("*** CFEqual() called with NULL first argument ***"); HALT; }
+    if (NULL == cf2) { CRSetCrashLogMessage("*** CFEqual() called with NULL second argument ***"); HALT; }
     if (cf1 == cf2) return true;
     CFTYPE_OBJC_FUNCDISPATCH1(Boolean, cf1, isEqual:, cf2);
     CFTYPE_OBJC_FUNCDISPATCH1(Boolean, cf2, isEqual:, cf1);
@@ -747,7 +751,7 @@ Boolean CFEqual(CFTypeRef cf1, CFTypeRef cf2) {
 }
 
 CFHashCode CFHash(CFTypeRef cf) {
-    if (NULL == cf) HALT;
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFHash() called with NULL ***"); HALT; }
     CFTYPE_OBJC_FUNCDISPATCH0(CFHashCode, cf, hash);
     __CFGenericAssertIsCF(cf);
     CFHashCode (*hash)(CFTypeRef cf) = __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->hash; 
@@ -802,7 +806,7 @@ extern void __CFStorageInitialize(void);
 extern void __CFErrorInitialize(void);
 extern void __CFTreeInitialize(void);
 extern void __CFURLInitialize(void);
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 extern void __CFMachPortInitialize(void);
 #endif
 extern void __CFMessagePortInitialize(void);
@@ -810,6 +814,7 @@ extern void __CFRunLoopInitialize(void);
 extern void __CFRunLoopObserverInitialize(void);
 extern void __CFRunLoopSourceInitialize(void);
 extern void __CFRunLoopTimerInitialize(void);
+extern void __CFPFactoryInitialize(void);
 extern void __CFBundleInitialize(void);
 extern void __CFPlugInInitialize(void);
 extern void __CFPlugInInstanceInitialize(void);
@@ -832,12 +837,15 @@ extern void __CFTimeZoneInitialize();
 extern void __CFCalendarInitialize();
 extern void __CFTimeZoneInitialize();
 #endif
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+extern void __CFXPreferencesInitialize(void);
+#endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 __private_extern__ uint8_t __CF120290 = false;
 __private_extern__ uint8_t __CF120291 = false;
 __private_extern__ uint8_t __CF120293 = false;
-__private_extern__ char * __crashreporter_info__ = NULL;
+__private_extern__ char * __crashreporter_info__ = NULL; // Keep this symbol, since it was exported and other things may be linking against it, like GraphicsServices.framework on iOS
 asm(".desc ___crashreporter_info__, 0x10");
 
 static void __01121__(void) {
@@ -851,11 +859,13 @@ static void __01123__(void) {
     // This is not a problem for CF.
     if (__CF120290) {
 	__CF120293 = true;
+#if DEPLOYMENT_TARGET_MACOSX
 	if (__CF120291) {
-	    __crashreporter_info__ = "*** multi-threaded process forked ***";
+	    CRSetCrashLogMessage2("*** multi-threaded process forked ***");
 	} else {
-	    __crashreporter_info__ = "*** single-threaded process forked ***";
+	    CRSetCrashLogMessage2("*** single-threaded process forked ***");
 	}
+#endif
     }
 }
 
@@ -874,12 +884,13 @@ CF_EXPORT const void *__CFArgStuff;
 const void *__CFArgStuff = NULL;
 __private_extern__ void *__CFAppleLanguages = NULL;
 
+// do not cache CFFIXED_USER_HOME or HOME, there are situations where they can change
+
 static struct {
     const char *name;
     const char *value;
 } __CFEnv[] = {
     {"PATH", NULL},
-    {"HOME", NULL},
     {"USER", NULL},
     {"HOMEPATH", NULL},
     {"HOMEDRIVE", NULL},
@@ -889,7 +900,6 @@ static struct {
     {"NEXT_ROOT", NULL},
     {"DYLD_IMAGE_SUFFIX", NULL},
     {"CFProcessPath", NULL},
-    {"CFFIXED_USER_HOME", NULL},
     {"CFNETWORK_LIBRARY_PATH", NULL},
     {"CFUUIDVersionNumber", NULL},
     {"CFDebugNamedDataSharing", NULL},
@@ -902,8 +912,9 @@ static struct {
     {"CF_CHARSET_PATH", NULL},
     {"__CF_USER_TEXT_ENCODING", NULL},
     {"__CFPREFERENCES_AUTOSYNC_INTERVAL", NULL},
-    {"__CFPREFERENCES_USE_OLD_UID_BEHAVIOR", NULL},
+    {"__CFPREFERENCES_LOG_FAILURES", NULL},
     {"CFNumberDisableCache", NULL},
+    {"__CFPREFERENCES_AVOID_DAEMON", NULL},
     {NULL, NULL}, // the last one is for optional "COMMAND_MODE" "legacy", do not use this slot, insert before
 };
 
@@ -944,7 +955,7 @@ void __CFInitialize(void) {
     if (!__CFInitialized && !__CFInitializing) {
         __CFInitializing = 1;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
 	if (!pthread_main_np()) HALT;	// CoreFoundation must be initialized on the main thread
 #endif
 
@@ -959,10 +970,10 @@ void __CFInitialize(void) {
         
         __CFProphylacticAutofsAccess = true;
 
-	for (CFIndex idx = 0; idx < sizeof(__CFEnv) / sizeof(__CFEnv[0]); idx++) {
-	    __CFEnv[idx].value = __CFEnv[idx].name ? getenv(__CFEnv[idx].name) : NULL;
-	}
-
+        for (CFIndex idx = 0; idx < sizeof(__CFEnv) / sizeof(__CFEnv[0]); idx++) {
+            __CFEnv[idx].value = __CFEnv[idx].name ? getenv(__CFEnv[idx].name) : NULL;
+        }
+        
 #if !defined(kCFUseCollectableAllocator)
         kCFUseCollectableAllocator = objc_collectingEnabled();
 #endif
@@ -971,19 +982,12 @@ void __CFInitialize(void) {
             __CFObjCIsCollectable = (bool (*)(void *))objc_isAuto;
 #endif
         }
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 	UInt32 s, r;
 	__CFStringGetUserDefaultEncoding(&s, &r); // force the potential setenv to occur early
 	pthread_atfork(__01121__, NULL, __01123__);
 #endif
 
-#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
-	const char *value = __CFgetenv("NSZombieEnabled");
-	if (value && (*value == 'Y' || *value == 'y')) __CFZombieEnabled = 0xff;
-	value = __CFgetenv("NSDeallocateZombies");
-	if (value && (*value == 'Y' || *value == 'y')) __CFDeallocateZombies = 0xff;
-
-#endif
 
         memset(__CFRuntimeClassTable, 0, sizeof(__CFRuntimeClassTable));
         memset(__CFRuntimeObjCClassTable, 0, sizeof(__CFRuntimeObjCClassTable));
@@ -1047,39 +1051,44 @@ void __CFInitialize(void) {
         
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
         __CFBundleInitialize();
+        __CFPFactoryInitialize();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
         __CFPlugInInitialize();
         __CFPlugInInstanceInitialize();
 #endif
         __CFUUIDInitialize();
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
 	__CFMessagePortInitialize();
 #endif
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
         __CFMachPortInitialize();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
         __CFStreamInitialize();
 #endif
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_WINDOWS
+        __CFWindowsNamedPipeInitialize();
+#endif
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
         __CFRunLoopInitialize();
         __CFRunLoopObserverInitialize();
         __CFRunLoopSourceInitialize();
         __CFRunLoopTimerInitialize();
 #endif
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
         __CFTimeZoneInitialize();
         __CFCalendarInitialize();
 #if DEPLOYMENT_TARGET_LINUX
         __CFTimeZoneInitialize();
         __CFCalendarInitialize();
 #endif
-        
+#endif
 
         {
             CFIndex idx, cnt;
             char **args;
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
             args = *_NSGetArgv();
             cnt = *_NSGetArgc();
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -1117,13 +1126,18 @@ void __CFInitialize(void) {
 
         _CFProcessPath();	// cache this early
 
-
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
         __CFOAInitialize();
-#endif
+        
 
         if (__CFRuntimeClassTableCount < 256) __CFRuntimeClassTableCount = 256;
 
+
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
+        const char *value = __CFgetenv("NSZombieEnabled");
+        if (value && (*value == 'Y' || *value == 'y')) _CFEnableZombies();
+        value = __CFgetenv("NSDeallocateZombies");
+        if (value && (*value == 'Y' || *value == 'y')) __CFDeallocateZombies = 0xff;
+#endif
 
 #if defined(DEBUG) && (DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
         CFLog(kCFLogLevelWarning, CFSTR("Assertions enabled"));
@@ -1137,6 +1151,11 @@ void __CFInitialize(void) {
 
 
 #if DEPLOYMENT_TARGET_WINDOWS
+
+__private_extern__ void __CFStringCleanup(void);
+__private_extern__ void __CFSocketCleanup(void);
+__private_extern__ void __CFUniCharCleanup(void);
+__private_extern__ void __CFStreamCleanup(void);
 
 static CFBundleRef RegisterCoreFoundationBundle(void) {
 #ifdef _DEBUG
@@ -1223,7 +1242,7 @@ int DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID pReserved ) {
 #define RC_DEALLOCATING_BIT	(0x400000ULL)
 #endif
 
-#if COCOA_ARR1 && __LP64__
+#if !DEPLOYMENT_TARGET_WINDOWS && __LP64__
 static bool (*CAS64)(int64_t, int64_t, volatile int64_t *) = OSAtomicCompareAndSwap64Barrier;
 #else
 static bool (*CAS32)(int32_t, int32_t, volatile int32_t *) = OSAtomicCompareAndSwap32Barrier;
@@ -1252,7 +1271,7 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
     Boolean didAuto = false;
 #if __LP64__
     if (0 == ((CFRuntimeBase *)cf)->_rc && !CF_IS_COLLECTABLE(cf)) return cf;	// Constant CFTypeRef
-#if COCOA_ARR1
+#if !DEPLOYMENT_TARGET_WINDOWS
     uint64_t allBits;
     do {
         allBits = *(uint64_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
@@ -1283,7 +1302,7 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
     bool success = 0;
     do {
         cfinfo = *infoLocation;
-#if COCOA_ARR1
+#if !DEPLOYMENT_TARGET_WINDOWS
         // if already deallocating, don't allow new retain
         if (tryR && (cfinfo & 0x400000)) return NULL;
 #endif
@@ -1326,11 +1345,13 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
 // Never called under GC, only called via ARR weak subsystem; a return of NULL is failure
 CFTypeRef _CFTryRetain(CFTypeRef cf) {
     if (NULL == cf) return NULL;
+    if (CF_IS_TAGGED_OBJ(cf)) return cf; // success
     return _CFRetain(cf, true);
 }
 
 Boolean _CFIsDeallocating(CFTypeRef cf) {
     if (NULL == cf) return false;
+    if (CF_IS_TAGGED_OBJ(cf)) return false;
     uint32_t cfinfo = *(uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     if (cfinfo & 0x800000) { // custom ref counting for object
         return true;   // lie for now; this weak references to these objects cannot be formed
@@ -1357,10 +1378,11 @@ static void _CFRelease(CFTypeRef cf) {
         return;
     }
 
+    CFIndex start_rc = __builtin_expect(__CFOASafe, 0) ? CFGetRetainCount(cf) : 0;
     Boolean isAllocator = (__kCFAllocatorTypeID_CONST == typeID);
     Boolean didAuto = false;
 #if __LP64__
-#if COCOA_ARR1
+#if !DEPLOYMENT_TARGET_WINDOWS
     uint32_t lowBits;
     uint64_t allBits;
     again:;
@@ -1438,7 +1460,7 @@ static void _CFRelease(CFTypeRef cf) {
     }
 #endif
 #else
-#if COCOA_ARR1
+#if !DEPLOYMENT_TARGET_WINDOWS
     again:;
     volatile uint32_t *infoLocation = (uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     CFIndex rcLowBits = __CFBitfieldGetValue(cfinfo, RC_END, RC_START);
@@ -1586,7 +1608,7 @@ static void _CFRelease(CFTypeRef cf) {
 #endif
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {
-	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, CFGetRetainCount(cf), NULL);
+	__CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, start_rc - 1, NULL);
     }
     return;
 

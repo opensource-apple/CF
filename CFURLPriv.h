@@ -22,7 +22,7 @@
  */
 
 /*	CFURLPriv.h
-	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
  */
 
 #if !defined(__COREFOUNDATION_CFURLPRIV__)
@@ -46,7 +46,6 @@ CF_EXTERN_C_BEGIN
 
 #if TARGET_OS_MAC
 
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
 enum {
     // Resource I/O related errors, with kCFErrorURLKey containing URL
     kCFURLNoSuchResourceError = 4,			   // Attempt to do a file system operation on a non-existent file
@@ -67,13 +66,7 @@ enum {
     kCFURLWriteUnsupportedSchemeError = 518,		   // Write error (unsupported URL scheme)
     kCFURLWriteOutOfSpaceError = 640,                      // Write error (out of storage space)
     kCFURLWriteVolumeReadOnlyError = 642,		   // Write error (readonly volume)
-};
-#endif
-
-
-enum {
-    kCFURLFileReferencePathStyle = 14,
-};
+} CF_ENUM_AVAILABLE(10_5, 2_0);
 
 
 /*
@@ -100,9 +93,6 @@ CF_EXPORT const CFStringRef _kCFURLFileIDKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT const CFStringRef _kCFURLParentDirectoryIDKey CF_AVAILABLE(10_6, 4_0);
     /* 64-bit file ID (for tracking a parent directory by ID. This may or may not be the inode number) (CFNumber) */
-
-/* OBSOLETE */CF_EXPORT const CFStringRef _kCFURLFilePathKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
-    /* _kCFURLFilePathKey was never implemented. Use _kCFURLPathKey instead. */
 
 CF_EXPORT const CFStringRef _kCFURLDistinctLocalizedNameKey CF_AVAILABLE(10_6, 4_0);
     /* The localized name, if it is disnct from the real name. Otherwise, NULL (CFString) */
@@ -187,6 +177,9 @@ CF_EXPORT const CFStringRef _kCFURLApplicationHighResolutionModeIsMagnifiedKey C
 
 CF_EXPORT const CFStringRef _kCFURLCanSetApplicationHighResolutionModeIsMagnifiedKey CF_AVAILABLE(10_7, NA);
     /* True if the app can run in either magnified or native resolution modes (Read only, CFBoolean) */
+
+CF_EXPORT const CFStringRef _kCFURLWriterBundleIdentifierKey CF_AVAILABLE(10_8, NA);
+    /* The bundle identifier of the process writing to this object (Read-write, value type CFString) */
 
 /* Additional volume properties */
 
@@ -322,7 +315,7 @@ Boolean _CFURLGetResourcePropertyFlags(CFURLRef url, CFURLResourcePropertyFlags 
 /*
     File resource properties which can be obtained with _CFURLCopyFilePropertyValuesAndFlags().
  */
-enum {
+typedef CF_OPTIONS(unsigned long long, CFURLFilePropertyBitmap) {
     kCFURLName				    = 0x0000000000000001,
     kCFURLLinkCount			    = 0x0000000000000002,
     kCFURLVolumeIdentifier		    = 0x0000000000000004,
@@ -337,7 +330,6 @@ enum {
     kCFURLFinderInfo			    = 0x0000000000000800,
     kCFURLFileSecurity			    = 0x0000000000001000,
 };
-typedef unsigned long long CFURLFilePropertyBitmap;
 
 /*
     The structure where _CFURLCopyFilePropertyValuesAndFlags() returns file resource properties.
@@ -373,7 +365,7 @@ Boolean _CFURLCopyResourcePropertyValuesAndFlags( CFURLRef url, CFURLFilePropert
 /*
     Volume property flags
  */
-enum {
+typedef CF_OPTIONS(unsigned long long, CFURLVolumePropertyFlags) {
 	kCFURLVolumeIsLocal				=                0x1LL,	// Local device (vs. network device)
 	kCFURLVolumeIsAutomount				=                0x2LL,	// Mounted by the automounter
 	kCFURLVolumeDontBrowse				=                0x4LL,	// Hidden from user browsing
@@ -424,7 +416,6 @@ enum {
 	kCFURLVolumeHas64BitObjectIDs			= 0x1000000000000000LL,
 	kCFURLVolumePropertyFlagsAll			= 0xffffffffffffffffLL
 };
-typedef unsigned long long CFURLVolumePropertyFlags;
 
 
 /*
@@ -481,15 +472,6 @@ Boolean _CFURLSetResourcePropertyForKeyAndUpdateFileCache(CFURLRef url, CFString
  */
 CF_EXPORT
 CFArrayRef _CFURLCreateDisplayPathComponentsArray(CFURLRef url, CFErrorRef *error) CF_AVAILABLE(10_7, 4_0);
-
-#if 0
-/* Not implemented */
-CF_EXPORT
-CFURLRef _CFURLCreateFileIDURLFromFSRef(CFAllocatorRef allocator, const struct FSRef *fsRef);
-#endif
-
-CF_EXPORT
-CFURLRef _CFURLCreateAbsoluteURLWithDirectoryURLAndName(CFAllocatorRef allocator, CFURLRef directoryURL, CFStringRef name) CF_AVAILABLE(10_6, 4_0);
 
 /* Returns true for URLs that locate file system resources. */
 CF_EXPORT
@@ -567,10 +549,10 @@ enum {
 };
 
 enum {
-    kCFBookmarkResolutionPerformRelativeResolutionFirstMask = ( 1 << 10 ), // perform relative resolution before absolute resolution.  If this bit is set, for this to be useful a relative URL must also have been passed in and the bookmark when created must have been created relative to another url.
+    kCFBookmarkResolutionPerformRelativeResolutionFirstMask CF_ENUM_AVAILABLE(10_8,6_0) = ( 1 << 11 ), // perform relative resolution before absolute resolution.  If this bit is set, for this to be useful a relative URL must also have been passed in and the bookmark when created must have been created relative to another url.
 };
 
-enum {
+typedef CF_ENUM(CFIndex, CFURLBookmarkMatchResult) {
     kCFURLBookmarkComparisonUnableToCompare = 0x00000000,   /* the two bookmarks could not be compared for some reason */
     kCFURLBookmarkComparisonNoMatch         = 0x00001000,   /* Bookmarks do not refer to the same item */
     kCFURLBookmarkComparisonUnlikelyToMatch = 0x00002000,   /* it is unlikely that the two items refer to the same filesystem item */
@@ -578,7 +560,6 @@ enum {
     kCFURLBookmarkComparisonMatch           = 0x00008000,   /* the two items refer to the same item, but other information in the bookmarks may not match */
     kCFURLBookmarkComparisonExactMatch      = 0x0000f000    /* the two bookmarks are identical */
 };
-typedef CFIndex CFURLBookmarkMatchResult;
 
 /*  Keys specific to bookmarks at this time */
 CF_EXPORT const CFStringRef _kCFURLPropertyKeyFullPathString;	    //	the full filesystem path of the item the bookmark was create against

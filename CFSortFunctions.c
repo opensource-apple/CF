@@ -22,7 +22,7 @@
  */
 
 /*	CFSortFunctions.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -30,6 +30,9 @@
 #include "CFInternal.h"
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <dispatch/dispatch.h>
+#endif
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#include <dispatch/private.h>
 #endif
 
 enum {

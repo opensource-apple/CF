@@ -22,7 +22,7 @@
  */
 
 /*	CFLocale.h
-	Copyright (c) 2002-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFLOCALE__)
@@ -32,6 +32,7 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFDictionary.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 typedef const struct __CFLocale *CFLocaleRef;
@@ -108,14 +109,13 @@ CF_EXPORT
 uint32_t CFLocaleGetWindowsLocaleCodeFromLocaleIdentifier(CFStringRef localeIdentifier) CF_AVAILABLE(10_6, 4_0);
 	// Map a locale identifier to a Windows LCID.
 
-enum {
+typedef CF_ENUM(CFIndex, CFLocaleLanguageDirection) {
     kCFLocaleLanguageDirectionUnknown = 0,
     kCFLocaleLanguageDirectionLeftToRight = 1,
     kCFLocaleLanguageDirectionRightToLeft = 2,
     kCFLocaleLanguageDirectionTopToBottom = 3,
     kCFLocaleLanguageDirectionBottomToTop = 4
 };
-typedef CFIndex CFLocaleLanguageDirection;
 
 CF_EXPORT
 CFLocaleLanguageDirection CFLocaleGetLanguageCharacterDirection(CFStringRef isoLangCode) CF_AVAILABLE(10_6, 4_0);
@@ -208,6 +208,7 @@ CF_EXPORT const CFStringRef kCFIndianCalendar CF_AVAILABLE(10_6, 4_0);
 CF_EXPORT const CFStringRef kCFISO8601Calendar CF_AVAILABLE(10_6, 4_0);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFLOCALE__ */
 

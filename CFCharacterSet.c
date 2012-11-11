@@ -22,7 +22,7 @@
  */
 
 /*	CFCharacterSet.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -1484,7 +1484,7 @@ CFCharacterSetRef CFCharacterSetCreateWithBitmapRepresentation(CFAllocatorRef al
 CFCharacterSetRef CFCharacterSetCreateInvertedSet(CFAllocatorRef alloc, CFCharacterSetRef theSet) {
     CFMutableCharacterSetRef cset;
     
-    CF_OBJC_FUNCDISPATCH0(__kCFCharacterSetTypeID, CFCharacterSetRef , theSet, "invertedSet");
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, CFCharacterSetRef , (NSCharacterSet *)theSet, invertedSet);
 
     cset = CFCharacterSetCreateMutableCopy(alloc, theSet);
     CFCharacterSetInvert(cset);
@@ -1508,7 +1508,7 @@ CFMutableCharacterSetRef CFCharacterSetCreateMutable(CFAllocatorRef allocator) {
 static CFMutableCharacterSetRef __CFCharacterSetCreateCopy(CFAllocatorRef alloc, CFCharacterSetRef theSet, bool isMutable) {
     CFMutableCharacterSetRef cset;
 
-    CF_OBJC_FUNCDISPATCH0(__kCFCharacterSetTypeID, CFMutableCharacterSetRef , theSet, "mutableCopy");
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, CFMutableCharacterSetRef , (NSCharacterSet *)theSet, mutableCopy);
 
     __CFGenericValidateType(theSet, __kCFCharacterSetTypeID);
 
@@ -1606,7 +1606,7 @@ Boolean CFCharacterSetIsCharacterMember(CFCharacterSetRef theSet, UniChar theCha
     Boolean isInverted;
     Boolean result = false;
     
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, Boolean, theSet, "longCharacterIsMember:", theChar);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, Boolean, (NSCharacterSet *)theSet, longCharacterIsMember:(UTF32Char)theChar);
     
     __CFGenericValidateType(theSet, __kCFCharacterSetTypeID);
     
@@ -1649,7 +1649,7 @@ Boolean CFCharacterSetIsLongCharacterMember(CFCharacterSetRef theSet, UTF32Char 
     Boolean isInverted;
     Boolean result = false;
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, Boolean, theSet, "longCharacterIsMember:", theChar);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, Boolean, (NSCharacterSet *)theSet, longCharacterIsMember:(UTF32Char)theChar);
 
     __CFGenericValidateType(theSet, __kCFCharacterSetTypeID);
 
@@ -1715,7 +1715,7 @@ Boolean CFCharacterSetIsSurrogatePairMember(CFCharacterSetRef theSet, UniChar su
 
 
 static inline CFCharacterSetRef __CFCharacterSetGetExpandedSetForNSCharacterSet(const void *characterSet) {
-    CF_OBJC_FUNCDISPATCH0(__kCFCharacterSetTypeID, CFCharacterSetRef , characterSet, "_expandedCFCharacterSet");
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, CFCharacterSetRef , (NSCharacterSet *)characterSet, _expandedCFCharacterSet);
     return NULL;
 }
 
@@ -1818,7 +1818,7 @@ Boolean CFCharacterSetIsSupersetOfSet(CFCharacterSetRef theSet, CFCharacterSetRe
 Boolean CFCharacterSetHasMemberInPlane(CFCharacterSetRef theSet, CFIndex thePlane) {
     Boolean isInverted = __CFCSetIsInverted(theSet);
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, Boolean, theSet, "hasMemberInPlane:", thePlane);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, Boolean, (NSCharacterSet *)theSet, hasMemberInPlane:(uint8_t)thePlane);
 
     if (__CFCSetIsEmpty(theSet)) {
         return (isInverted ? TRUE : FALSE);
@@ -1903,7 +1903,7 @@ CFDataRef CFCharacterSetCreateBitmapRepresentation(CFAllocatorRef alloc, CFChara
     int length;
     bool isAnnexInverted;
 
-    CF_OBJC_FUNCDISPATCH0(__kCFCharacterSetTypeID, CFDataRef , theSet, "_retainedBitmapRepresentation");
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, CFDataRef , (NSCharacterSet *)theSet, _retainedBitmapRepresentation);
 
     __CFGenericValidateType(theSet, __kCFCharacterSetTypeID);
 
@@ -2059,7 +2059,7 @@ CFDataRef CFCharacterSetCreateBitmapRepresentation(CFAllocatorRef alloc, CFChara
 
 /*** MutableCharacterSet functions ***/
 void CFCharacterSetAddCharactersInRange(CFMutableCharacterSetRef theSet, CFRange theRange) {
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "addCharactersInRange:", theRange);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, addCharactersInRange:NSMakeRange(theRange.location, theRange.length));
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
     __CFCSetValidateRange(theRange, __PRETTY_FUNCTION__);
@@ -2078,7 +2078,7 @@ void CFCharacterSetAddCharactersInRange(CFMutableCharacterSetRef theSet, CFRange
             CFIndex length = __CFCSetRangeLength(theSet);
 
             if (firstChar == theRange.location) {
-                __CFCSetPutRangeLength(theSet, __CFMin(length, theRange.length));
+                __CFCSetPutRangeLength(theSet, __CFMax(length, theRange.length));
                 __CFCSetPutHasHashValue(theSet, false);
                 return;
             } else if (firstChar < theRange.location && theRange.location <= firstChar + length) {
@@ -2117,7 +2117,7 @@ void CFCharacterSetAddCharactersInRange(CFMutableCharacterSetRef theSet, CFRange
 }
 
 void CFCharacterSetRemoveCharactersInRange(CFMutableCharacterSetRef theSet, CFRange theRange) {
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "removeCharactersInRange:", theRange);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, removeCharactersInRange:NSMakeRange(theRange.location, theRange.length));
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
     __CFCSetValidateRange(theRange, __PRETTY_FUNCTION__);
@@ -2184,7 +2184,7 @@ void CFCharacterSetAddCharactersInString(CFMutableCharacterSetRef theSet,  CFStr
     CFIndex length;
     BOOL hasSurrogate = NO;
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "addCharactersInString:", theString);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, addCharactersInString:(NSString *)theString);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
 
@@ -2268,7 +2268,7 @@ void CFCharacterSetRemoveCharactersInString(CFMutableCharacterSetRef theSet, CFS
     CFIndex length;
     BOOL hasSurrogate = NO;
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "removeCharactersInString:", theString);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, removeCharactersInString:(NSString *)theString);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
 
@@ -2344,7 +2344,7 @@ void CFCharacterSetRemoveCharactersInString(CFMutableCharacterSetRef theSet, CFS
 void CFCharacterSetUnion(CFMutableCharacterSetRef theSet, CFCharacterSetRef theOtherSet) {
     CFCharacterSetRef expandedSet = NULL;
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "formUnionWithCharacterSet:", theOtherSet);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, formUnionWithCharacterSet:(NSCharacterSet *)theOtherSet);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
 
@@ -2467,7 +2467,7 @@ void CFCharacterSetUnion(CFMutableCharacterSetRef theSet, CFCharacterSetRef theO
 void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef theOtherSet) {
     CFCharacterSetRef expandedSet = NULL;
 
-    CF_OBJC_FUNCDISPATCH1(__kCFCharacterSetTypeID, void, theSet, "formIntersectionWithCharacterSet:", theOtherSet);
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, formIntersectionWithCharacterSet:(NSCharacterSet *)theOtherSet);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
 
@@ -2648,7 +2648,7 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
 
 void CFCharacterSetInvert(CFMutableCharacterSetRef theSet) {
 
-    CF_OBJC_FUNCDISPATCH0(__kCFCharacterSetTypeID, void, theSet, "invert");
+    CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, invert);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
 

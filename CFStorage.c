@@ -22,7 +22,7 @@
  */
 
 /*	CFStorage.c
- Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+ Copyright (c) 1999-2012, Apple Inc. All rights reserved.
  Responsibility: Ali Ozer
  */
 
@@ -162,7 +162,7 @@ CF_INLINE void __CFStorageAllocLeafNodeMemory(CFAllocatorRef allocator, CFStorag
 }
 
 #if 0
-#define ASSERT(x) do { if (! (x)) { fprintf(stderr, "Assertion %s failed on line %d\n", #x, __LINE__); abort(); } } while (0)
+#define ASSERT(x) do { if (! (x)) { fprintf(stderr, "Assertion %s failed on line %d\n", #x, __LINE__); HALT; } } while (0)
 #else
 #define ASSERT(x) do { if (0 && ! (x)) { } } while(0)
 #endif

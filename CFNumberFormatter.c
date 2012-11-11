@@ -22,18 +22,20 @@
  */
 
 /*	CFNumberFormatter.c
-	Copyright (c) 2002-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2012, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
 #include <CoreFoundation/CFNumberFormatter.h>
 #include <CoreFoundation/ForFoundationOnly.h>
+#include <CoreFoundation/CFBigNumber.h>
 #include "CFInternal.h"
 #include "CFLocaleInternal.h"
 #include <unicode/unum.h>
 #include <unicode/ucurr.h>
 #include <math.h>
 #include <float.h>
+
 
 static void __CFNumberFormatterCustomize(CFNumberFormatterRef formatter);
 static CFStringRef __CFNumberFormatterCreateCompressedString(CFStringRef inString, Boolean isFormat, CFRange *rangep);
@@ -406,6 +408,18 @@ void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef form
     }
 }
 
+#define GET_MULTIPLIER                      \
+        double multiplier = 1.0;            \
+        double dummy = 0.0;                 \
+        if (formatter->_multiplier) {       \
+            if (!CFNumberGetValue(formatter->_multiplier, kCFNumberFloat64Type, &multiplier)) { \
+                multiplier = 1.0;           \
+            }                               \
+        }                                   \
+        if (modf(multiplier, &dummy) < FLT_EPSILON) {   \
+            multiplier = floor(multiplier);             \
+        }
+
 CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberRef number) {
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
@@ -417,16 +431,11 @@ CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CF
     return CFNumberFormatterCreateStringWithValue(allocator, formatter, type, buffer);
 }
 
-#define FORMAT(T, FUNC)							\
+#define FORMAT_FLT(T, FUNC)							\
 	T value = *(T *)valuePtr;					\
 	if (0 == value && formatter->_zeroSym) { return (CFStringRef)CFRetain(formatter->_zeroSym); }	\
 	if (1.0 != multiplier) {					\
-		double dummy;						\
-		if (modf(multiplier, &dummy) < FLT_EPSILON) { /* float epsilon specifically chosen cuz it is a bit bigger */	\
-			value = value * (T)floor(multiplier);		\
-		} else {						\
-			value = (T)(value * multiplier);		\
-		}							\
+		value = (T)(value * multiplier);                     \
 	}								\
 	status = U_ZERO_ERROR;						\
 	used = FUNC(formatter->_nf, value, ubuffer, cnt, NULL, &status); \
@@ -437,37 +446,51 @@ CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CF
 	    used = FUNC(formatter->_nf, value, ustr, cnt, NULL, &status); \
 	}
 
+#define FORMAT_INT(T, FUN)                                                   \
+        T value = *(T *)valuePtr;					\
+        if (0 == value && formatter->_zeroSym) { return (CFStringRef)CFRetain(formatter->_zeroSym); }	\
+        if (1.0 != multiplier) {					\
+            value = (T)(value * multiplier);                        \
+        }                                                           \
+        _CFBigNum bignum;                                           \
+        FUN(&bignum, value);                                        \
+        char buffer[BUFFER_SIZE];                                           \
+        _CFBigNumToCString(&bignum, false, true, buffer, BUFFER_SIZE);      \
+        status = U_ZERO_ERROR;                                      \
+        used = unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ubuffer, BUFFER_SIZE, NULL, &status);     \
+        if (status == U_BUFFER_OVERFLOW_ERROR || cnt < used) {      \
+            cnt = used + 1;                                         \
+            ustr = (UChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UChar) * cnt, 0);                 \
+            status = U_ZERO_ERROR;                                  \
+            used = unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ustr, cnt, NULL, &status);            \
+        }                                                           \
+
 CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberType numberType, const void *valuePtr) {
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
-    double multiplier = 1.0;
-    if (formatter->_multiplier) {
-	if (!CFNumberGetValue(formatter->_multiplier, kCFNumberFloat64Type, &multiplier)) {
-	    multiplier = 1.0;
-	}
-    }
+    GET_MULTIPLIER;
     UChar *ustr = NULL, ubuffer[BUFFER_SIZE];
     UErrorCode status = U_ZERO_ERROR;
     CFIndex used, cnt = BUFFER_SIZE;
     if (numberType == kCFNumberFloat64Type || numberType == kCFNumberDoubleType) {
-	FORMAT(double, unum_formatDouble)
+	FORMAT_FLT(double, unum_formatDouble)
     } else if (numberType == kCFNumberFloat32Type || numberType == kCFNumberFloatType) {
-	FORMAT(float, unum_formatDouble)
+	FORMAT_FLT(float, unum_formatDouble)
     } else if (numberType == kCFNumberSInt64Type || numberType == kCFNumberLongLongType) {
-	FORMAT(int64_t, unum_formatInt64)
+	FORMAT_INT(int64_t, _CFBigNumInitWithInt64)
     } else if (numberType == kCFNumberLongType || numberType == kCFNumberCFIndexType) {
 #if __LP64__
-	FORMAT(int64_t, unum_formatInt64)
+	FORMAT_INT(int64_t, _CFBigNumInitWithInt64)
 #else
-	FORMAT(int32_t, unum_formatInt64)
+	FORMAT_INT(int32_t, _CFBigNumInitWithInt32)
 #endif
     } else if (numberType == kCFNumberSInt32Type || numberType == kCFNumberIntType) {
-	FORMAT(int32_t, unum_formatInt64)
+	FORMAT_INT(int32_t, _CFBigNumInitWithInt32)
     } else if (numberType == kCFNumberSInt16Type || numberType == kCFNumberShortType) {
-	FORMAT(int16_t, unum_formatInt64)
+	FORMAT_INT(int16_t, _CFBigNumInitWithInt16)
     } else if (numberType == kCFNumberSInt8Type || numberType == kCFNumberCharType) {
-	FORMAT(int8_t, unum_formatInt64)
+	FORMAT_INT(int8_t, _CFBigNumInitWithInt8)
     } else {
 	CFAssert2(0, __kCFLogAssertion, "%s(): unknown CFNumberType (%d)", __PRETTY_FUNCTION__, numberType);
 	return NULL;
@@ -480,17 +503,92 @@ CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFN
     return string;
 }
 
-#undef FORMAT
+#undef FORMAT_FLT
+#undef FORMAT_INT
+#undef GET_MULTIPLIER
 
 CFNumberRef CFNumberFormatterCreateNumberFromString(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFStringRef string, CFRange *rangep, CFOptionFlags options) {
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(string, CFStringGetTypeID());
-    CFNumberType type = (options & kCFNumberFormatterParseIntegersOnly) ? kCFNumberSInt64Type : kCFNumberFloat64Type;
-    char buffer[16];
-    if (CFNumberFormatterGetValueFromString(formatter, string, rangep, type, buffer)) {
-	return CFNumberCreate(allocator, type, buffer);
+    char buffer[16] __attribute__ ((aligned (8)));
+    CFRange r = rangep ? *rangep : CFRangeMake(0, CFStringGetLength(string));
+    CFNumberRef multiplierRef = formatter->_multiplier;
+    formatter->_multiplier = NULL;
+    Boolean b = CFNumberFormatterGetValueFromString(formatter, string, &r, kCFNumberSInt64Type, buffer);
+    formatter->_multiplier = multiplierRef;
+    if (b) {
+        Boolean passedMultiplier = true;
+        // We handle the multiplier case here manually; the final
+        // result is supposed to be (parsed value) / (multiplier), but
+        // the int case here should only succeed if the parsed value
+        // is an exact multiple of the multiplier.
+        if (multiplierRef) {
+            int64_t tmp = *(int64_t *)buffer;
+            double multiplier = 1.0;
+            if (!CFNumberGetValue(multiplierRef, kCFNumberFloat64Type, &multiplier)) {
+                multiplier = 1.0;
+            }
+            double dummy;
+            if (llabs(tmp) < fabs(multiplier)) {
+                passedMultiplier = false;
+            } else if (fabs(multiplier) < 1.0) { // We can't handle this math yet
+                passedMultiplier = false;
+            } else if (modf(multiplier, &dummy) == 0.0) { // multiplier is an integer
+                int64_t imult = (int64_t)multiplier;
+                int64_t rem = tmp % imult;
+                if (rem != 0) passedMultiplier = false;
+                if (passedMultiplier) {
+                    tmp = tmp / imult;
+                    *(int64_t *)buffer = tmp;
+                }
+            } else if (multiplier == -1.0) { // simple
+                tmp = tmp * -1;
+                *(int64_t *)buffer = tmp;
+            } else if (multiplier != 1.0) {
+                // First, throw away integer multiples of the multiplier to
+                // bring the value down to less than 2^53, so that we can
+                // cast it to double without losing any precision, important
+                // for the "remainder is zero" test.
+                // Find power of two which, when multiplier is multiplied by it,
+                // results in an integer value. pwr will be <= 52 since multiplier
+                // is at least 1.
+                int pwr = 0;
+                double intgrl;
+                while (modf(scalbn(multiplier, pwr), &intgrl) != 0.0) pwr++;
+                int64_t i2 = (int64_t)intgrl;
+                // scale pwr and i2 up to a reasonably large value so the next loop doesn't take forever
+                while (llabs(i2) < (1LL << 50)) { i2 *= 2; pwr++; }
+                int64_t cnt = 0;
+                while ((1LL << 53) <= llabs(tmp)) {
+		    // subtract (multiplier * 2^pwr) each time
+                    tmp -= i2; // move tmp toward zero
+                    cnt += (1LL << pwr); // remember how many 2^pwr we subtracted
+                }
+                // If the integer is less than 2^53, there is no loss
+                // in converting it to double, so we can just do the
+                // direct operation now.
+                double rem = fmod((double)tmp, multiplier);
+                if (rem != 0.0) passedMultiplier = false;
+                if (passedMultiplier) {
+		    // The original tmp, which we need to divide by multiplier, is at this point:
+                    //   tmp + k * 2^n * multiplier, where k is the number of loop iterations
+                    // That original value needs to be divided by multiplier and put back in the
+                    // buffer.  Noting that k * 2^n == cnt, and after some algebra, we have:
+                    tmp = (int64_t)((double)tmp / multiplier) + cnt;
+                    *(int64_t *)buffer = tmp;
+                }
+            }
+        }
+        if (passedMultiplier && ((r.length == CFStringGetLength(string)) || (options & kCFNumberFormatterParseIntegersOnly))) {
+            if (rangep) *rangep = r;
+	    return CFNumberCreate(allocator, kCFNumberSInt64Type, buffer);
+        }
+    }
+    if (options & kCFNumberFormatterParseIntegersOnly) return NULL;
+    if (CFNumberFormatterGetValueFromString(formatter, string, rangep, kCFNumberFloat64Type, buffer)) {
+	return CFNumberCreate(allocator, kCFNumberFloat64Type, buffer);
     }
     return NULL;
 }
@@ -532,7 +630,13 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
     } else if (!formatter->_isLenient) {
 	ustr += range.location;
     }
-    if (formatter->_isLenient) __CFNumberFormatterApplyPattern(formatter, formatter->_compformat);
+    CFNumberRef multiplierRef = formatter->_multiplier;
+    formatter->_multiplier = NULL;
+    if (formatter->_isLenient) {
+        __CFNumberFormatterApplyPattern(formatter, formatter->_compformat);
+        if (formatter->_multiplier) CFRelease(formatter->_multiplier);
+        formatter->_multiplier = NULL;
+    }
     Boolean integerOnly = 1;
     switch (numberType) {
     case kCFNumberSInt8Type: case kCFNumberCharType:
@@ -554,10 +658,20 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
     if (isZero) {
 	dpos = rangep ? rangep->length : 0;
     } else {
-	if (integerOnly) {
-	    dreti = unum_parseInt64(formatter->_nf, ustr, range.length, &dpos, &status);
-	} else {
-	    dretd = unum_parseDouble(formatter->_nf, ustr, range.length, &dpos, &status);
+	char buffer[1024];
+        memset(buffer, 0, sizeof(buffer));
+	int32_t len = unum_parseDecimal(formatter->_nf, ustr, range.length, &dpos, buffer, sizeof(buffer), &status);
+        if (!U_FAILURE(status) && 0 < len && integerOnly) {
+	    char *endptr = NULL;
+	    errno = 0;
+	    dreti = strtoll_l(buffer, &endptr, 10, NULL);
+	    if (!(errno == 0 && *endptr == '\0')) status = U_INVALID_FORMAT_ERROR;
+	}
+	if (!U_FAILURE(status) && 0 < len) {
+	    char *endptr = NULL;
+	    errno = 0;
+	    dretd = strtod_l(buffer, &endptr, NULL);
+	    if (!(errno == 0 && *endptr == '\0')) status = U_INVALID_FORMAT_ERROR;
 	}
     }
     if (formatter->_isLenient) {
@@ -570,9 +684,12 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
 	    rangep->length = uncompIdx - rangep->location;
 	}
 	__CFNumberFormatterApplyPattern(formatter, formatter->_format);
+        if (formatter->_multiplier) CFRelease(formatter->_multiplier);
+        formatter->_multiplier = NULL;
     } else if (rangep) {
         rangep->length = dpos + (range.location - rangep->location);
     }
+    formatter->_multiplier = multiplierRef;
     CFRelease(stringToParse);
     if (U_FAILURE(status)) {
 	return false;
@@ -582,7 +699,7 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
         if (!CFNumberGetValue(formatter->_multiplier, kCFNumberFloat64Type, &multiplier)) {
             multiplier = 1.0;
         }
-        dreti = (int64_t)((double)dreti / multiplier); // integer truncation
+        dreti = (int64_t)((double)dreti / multiplier); // integer truncation, plus double cast can be lossy for dreti > 2^53
         dretd = dretd / multiplier;
     }
     switch (numberType) {

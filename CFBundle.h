@@ -22,7 +22,7 @@
  */
 
 /*	CFBundle.h
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE__)
@@ -261,14 +261,12 @@ CFArrayRef CFBundleCopyExecutableArchitecturesForURL(CFURLRef url) CF_AVAILABLE(
 CF_EXPORT
 CFURLRef CFBundleCopyExecutableURL(CFBundleRef bundle);
 
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
 enum {
     kCFBundleExecutableArchitectureI386     = 0x00000007,
     kCFBundleExecutableArchitecturePPC      = 0x00000012,
     kCFBundleExecutableArchitectureX86_64   = 0x01000007,
     kCFBundleExecutableArchitecturePPC64    = 0x01000012
-};
-#endif /* MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED */
+} CF_ENUM_AVAILABLE(10_5, 2_0);
 
 CF_EXPORT
 CFArrayRef CFBundleCopyExecutableArchitectures(CFBundleRef bundle) CF_AVAILABLE(10_5, 2_0);

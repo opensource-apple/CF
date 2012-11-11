@@ -22,7 +22,7 @@
  */
 
 /*	CFPropertyList.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFPROPERTYLIST__)
@@ -36,14 +36,16 @@
 #include <CoreFoundation/CFStream.h>
 #endif
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFPropertyListMutabilityOptions) {
     kCFPropertyListImmutable = 0,
     kCFPropertyListMutableContainers,
     kCFPropertyListMutableContainersAndLeaves
 };
-typedef CFOptionFlags CFPropertyListMutabilityOptions;
+
+CF_IMPLICIT_BRIDGING_DISABLED
 
 /*
 	Creates a property list object from its XML description; xmlData should
@@ -73,6 +75,8 @@ CFPropertyListRef CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDa
 CF_EXPORT
 CFDataRef CFPropertyListCreateXMLData(CFAllocatorRef allocator, CFPropertyListRef propertyList);
 
+CF_IMPLICIT_BRIDGING_ENABLED
+
 /*
 	Recursively creates a copy of the given property list (so nested arrays
 	and dictionaries are copied as well as the top-most container). The
@@ -82,12 +86,11 @@ CFDataRef CFPropertyListCreateXMLData(CFAllocatorRef allocator, CFPropertyListRe
 CF_EXPORT
 CFPropertyListRef CFPropertyListCreateDeepCopy(CFAllocatorRef allocator, CFPropertyListRef propertyList, CFOptionFlags mutabilityOption);
 
-enum {
+typedef CF_ENUM(CFIndex, CFPropertyListFormat) {
     kCFPropertyListOpenStepFormat = 1,
     kCFPropertyListXMLFormat_v1_0 = 100,
     kCFPropertyListBinaryFormat_v1_0 = 200
 };
-typedef CFIndex CFPropertyListFormat;
 
 /* Returns true if the object graph rooted at plist is a valid property list
  * graph -- that is, no cycles, containing only plist objects, and dictionary
@@ -98,6 +101,7 @@ CF_EXPORT
 Boolean CFPropertyListIsValid(CFPropertyListRef plist, CFPropertyListFormat format);
 
 #if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_EMBEDDED
+CF_IMPLICIT_BRIDGING_DISABLED
 
 /* Writes the bytes of a plist serialization out to the stream.  The
  * stream must be opened and configured -- the function simply writes
@@ -127,16 +131,17 @@ CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStrea
 CF_EXPORT
 CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex streamLength, CFOptionFlags mutabilityOption, CFPropertyListFormat *format, CFStringRef *errorString);
 
+CF_IMPLICIT_BRIDGING_ENABLED
 #endif
 
-#if MAC_OS_X_VERSION_10_6 <= MAC_OS_X_VERSION_MAX_ALLOWED || __IPHONE_4_0 <=  __IPHONE_OS_VERSION_MAX_ALLOWED
+CF_IMPLICIT_BRIDGING_DISABLED
+
 enum {
     kCFPropertyListReadCorruptError = 3840,              // Error parsing a property list
     kCFPropertyListReadUnknownVersionError = 3841,       // The version number in the property list is unknown
     kCFPropertyListReadStreamError = 3842,               // Stream error reading a property list
     kCFPropertyListWriteStreamError = 3851,              // Stream error writing a property list
-};
-#endif
+} CF_ENUM_AVAILABLE(10_6, 4_0);
 
 /* Create a property list with a CFData input. If the format parameter is non-NULL, it will be set to the format of the data after parsing is complete. The options parameter is used to specify CFPropertyListMutabilityOptions. If an error occurs while parsing the data, the return value will be NULL. Additionally, if an error occurs and the error parameter is non-NULL, the error parameter will be set to a CFError describing the problem, which the caller must release. If the parse succeeds, the returned value is a reference to the new property list. It is the responsibility of the caller to release this value.
  */
@@ -162,8 +167,10 @@ CFIndex CFPropertyListWrite(CFPropertyListRef propertyList, CFWriteStreamRef str
 CF_EXPORT
 CFDataRef CFPropertyListCreateData(CFAllocatorRef allocator, CFPropertyListRef propertyList, CFPropertyListFormat format, CFOptionFlags options, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
+CF_IMPLICIT_BRIDGING_ENABLED
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFPROPERTYLIST__ */
 

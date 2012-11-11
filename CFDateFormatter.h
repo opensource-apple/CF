@@ -22,7 +22,7 @@
  */
 
 /*	CFDateFormatter.h
-	Copyright (c) 2003-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2003-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFDATEFORMATTER__)
@@ -45,14 +45,13 @@ CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator
 CF_EXPORT
 CFTypeID CFDateFormatterGetTypeID(void);
 
-enum {	// date and time format styles
+typedef CF_ENUM(CFIndex, CFDateFormatterStyle) {	// date and time format styles
 	kCFDateFormatterNoStyle = 0,
 	kCFDateFormatterShortStyle = 1,
 	kCFDateFormatterMediumStyle = 2,
 	kCFDateFormatterLongStyle = 3,
 	kCFDateFormatterFullStyle = 4
 };
-typedef CFIndex CFDateFormatterStyle;
 
 // The exact formatted result for these date and time styles depends on the
 // locale, but generally:
@@ -165,7 +164,7 @@ CF_EXPORT const CFStringRef kCFDateFormatterDoesRelativeDateFormattingKey CF_AVA
 //	const CFStringRef kCFRepublicOfChinaCalendar;
 //	const CFStringRef kCFPersianCalendar;
 //	const CFStringRef kCFIndianCalendar;
-//	const CFStringRef kCFISO8601Calendar;   not yet implemented
+//	const CFStringRef kCFISO8601Calendar;
 
 CF_EXTERN_C_END
 

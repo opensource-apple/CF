@@ -22,7 +22,7 @@
  */
 
 /*	CFTimeZone.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFTIMEZONE__)
@@ -35,6 +35,7 @@
 #include <CoreFoundation/CFDictionary.h>
 #include <CoreFoundation/CFString.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 CF_EXPORT
@@ -91,17 +92,14 @@ CFTimeInterval CFTimeZoneGetDaylightSavingTimeOffset(CFTimeZoneRef tz, CFAbsolut
 CF_EXPORT
 CFAbsoluteTime CFTimeZoneGetNextDaylightSavingTimeTransition(CFTimeZoneRef tz, CFAbsoluteTime at) CF_AVAILABLE(10_5, 2_0);
 
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
-enum {
+typedef CF_ENUM(CFIndex, CFTimeZoneNameStyle) {
 	kCFTimeZoneNameStyleStandard,
 	kCFTimeZoneNameStyleShortStandard,
 	kCFTimeZoneNameStyleDaylightSaving,
 	kCFTimeZoneNameStyleShortDaylightSaving,
 	kCFTimeZoneNameStyleGeneric,
 	kCFTimeZoneNameStyleShortGeneric
-};
-#endif
-typedef CFIndex CFTimeZoneNameStyle;
+} CF_ENUM_AVAILABLE(10_5, 2_0);
 
 CF_EXPORT
 CFStringRef CFTimeZoneCopyLocalizedName(CFTimeZoneRef tz, CFTimeZoneNameStyle style, CFLocaleRef locale) CF_AVAILABLE(10_5, 2_0);
@@ -110,6 +108,7 @@ CF_EXPORT
 const CFStringRef kCFTimeZoneSystemTimeZoneDidChangeNotification CF_AVAILABLE(10_5, 2_0);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFTIMEZONE__ */
 

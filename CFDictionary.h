@@ -22,7 +22,7 @@
  */
 
 /*	CFDictionary.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 /*!
@@ -84,6 +84,7 @@
 
 #include <CoreFoundation/CFBase.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 /*!
@@ -685,6 +686,7 @@ CF_EXPORT
 void CFDictionaryRemoveAllValues(CFMutableDictionaryRef theDict);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFDICTIONARY__ */
 

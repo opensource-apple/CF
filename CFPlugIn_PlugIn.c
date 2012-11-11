@@ -22,8 +22,8 @@
  */
 
 /*      CFPlugIn_PlugIn.c
-        Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
-        Responsibility: David Smith
+        Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Responsibility: Tony Parker
 */
 
 #include "CFBundle_Internal.h"
@@ -154,7 +154,7 @@ __private_extern__ void _CFBundleDeallocatePlugIn(CFBundleRef bundle) {
 
         /* Go through factories disabling them.  Disabling these factories should cause them to dealloc since we wouldn't be deallocating if any of the factories had outstanding instances.  So go backwards. */
         c = CFArrayGetCount(__CFBundleGetPlugInData(bundle)->_factories);
-        while (c-- > 0) _CFPFactoryDisable((_CFPFactory *)CFArrayGetValueAtIndex(__CFBundleGetPlugInData(bundle)->_factories, c));
+        while (c-- > 0) _CFPFactoryDisable((_CFPFactoryRef)CFArrayGetValueAtIndex(__CFBundleGetPlugInData(bundle)->_factories, c));
         CFRelease(__CFBundleGetPlugInData(bundle)->_factories);
 
         __CFBundleGetPlugInData(bundle)->_isPlugIn = false;
@@ -200,7 +200,7 @@ __private_extern__ void _CFPlugInWillUnload(CFPlugInRef plugIn) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         SInt32 c = CFArrayGetCount(__CFBundleGetPlugInData(plugIn)->_factories);
         /* First, flush all the function pointers that may be cached by our factories. */
-        while (c-- > 0) _CFPFactoryFlushFunctionCache((_CFPFactory *)CFArrayGetValueAtIndex(__CFBundleGetPlugInData(plugIn)->_factories, c));
+        while (c-- > 0) _CFPFactoryFlushFunctionCache((_CFPFactoryRef)CFArrayGetValueAtIndex(__CFBundleGetPlugInData(plugIn)->_factories, c));
     }
 }
 
@@ -228,11 +228,11 @@ __private_extern__ void _CFPlugInRemovePlugInInstance(CFPlugInRef plugIn) {
     }
 }
 
-__private_extern__ void _CFPlugInAddFactory(CFPlugInRef plugIn, _CFPFactory *factory) {
+__private_extern__ void _CFPlugInAddFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) CFArrayAppendValue(__CFBundleGetPlugInData(plugIn)->_factories, factory);
 }
 
-__private_extern__ void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory) {
+__private_extern__ void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         SInt32 idx = CFArrayGetFirstIndexOfValue(__CFBundleGetPlugInData(plugIn)->_factories, CFRangeMake(0, CFArrayGetCount(__CFBundleGetPlugInData(plugIn)->_factories)), factory);
         if (idx >= 0) CFArrayRemoveValueAtIndex(__CFBundleGetPlugInData(plugIn)->_factories, idx);

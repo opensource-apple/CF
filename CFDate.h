@@ -22,7 +22,7 @@
  */
 
 /*	CFDate.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFDATE__)
@@ -30,6 +30,7 @@
 
 #include <CoreFoundation/CFBase.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 typedef double CFTimeInterval;
@@ -62,6 +63,8 @@ CFTimeInterval CFDateGetTimeIntervalSinceDate(CFDateRef theDate, CFDateRef other
 CF_EXPORT
 CFComparisonResult CFDateCompare(CFDateRef theDate, CFDateRef otherDate, void *context);
 
+CF_IMPLICIT_BRIDGING_DISABLED
+
 typedef const struct __CFTimeZone * CFTimeZoneRef;
 
 typedef struct {
@@ -82,7 +85,7 @@ typedef struct {
     double seconds;
 } CFGregorianUnits;
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFGregorianUnitFlags) {
     kCFGregorianUnitsYears = (1UL << 0),
     kCFGregorianUnitsMonths = (1UL << 1),
     kCFGregorianUnitsDays = (1UL << 2),
@@ -91,7 +94,6 @@ enum {
     kCFGregorianUnitsSeconds = (1UL << 5),
     kCFGregorianAllUnits = 0x00FFFFFF
 };
-typedef CFOptionFlags CFGregorianUnitFlags;
 
 CF_EXPORT
 Boolean CFGregorianDateIsValid(CFGregorianDate gdate, CFOptionFlags unitFlags);

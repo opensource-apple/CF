@@ -22,7 +22,7 @@
  */
 
 /*	CFError_Private.h
-        Copyright (c) 2006-2011, Apple Inc. All rights reserved.
+        Copyright (c) 2006-2012, Apple Inc. All rights reserved.
 	
 	This is Apple-internal SPI for CFError.
 */

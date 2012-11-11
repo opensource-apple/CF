@@ -22,7 +22,7 @@
  */
 
 /*        CFDateFormatter.c
-        Copyright (c) 2002-2011, Apple Inc. All rights reserved.
+        Copyright (c) 2002-2012, Apple Inc. All rights reserved.
         Responsibility: David Smith
 */
 
@@ -40,6 +40,17 @@
 #include <unicode/udatpg.h>
 #include <math.h>
 #include <float.h>
+
+typedef CF_ENUM(CFIndex, CFDateFormatterAmbiguousYearHandling) {
+    kCFDateFormatterAmbiguousYearFailToParse = 0, // fail the parse; the default formatter behavior
+    kCFDateFormatterAmbiguousYearAssumeToNone = 1, // default to assuming era 1, or the year 0-99
+    kCFDateFormatterAmbiguousYearAssumeToCurrent = 2, // default to assuming the current century or era
+    kCFDateFormatterAmbiguousYearAssumeToCenteredAroundCurrentDate = 3,
+    kCFDateFormatterAmbiguousYearAssumeToFuture = 4,
+    kCFDateFormatterAmbiguousYearAssumeToPast = 5,
+    kCFDateFormatterAmbiguousYearAssumeToLikelyFuture = 6,
+    kCFDateFormatterAmbiguousYearAssumeToLikelyPast = 7
+};
 
 extern UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID, CFStringRef localeID, CFTimeZoneRef tz);
 static void __CFDateFormatterCustomize(CFDateFormatterRef formatter);
@@ -148,7 +159,7 @@ struct __CFDateFormatter {
         CFBooleanRef _IsLenient;
 	CFBooleanRef _DoesRelativeDateFormatting;
 	CFBooleanRef _HasCustomFormat;
-        CFTimeZoneRef _TimeZone; 
+        CFTimeZoneRef _TimeZone;
         CFCalendarRef _Calendar;
         CFStringRef _CalendarName;
         CFDateRef _TwoDigitStartDate;
@@ -174,6 +185,7 @@ struct __CFDateFormatter {
         CFArrayRef _ShortStandaloneQuarterSymbols;
         CFStringRef _AMSymbol;
         CFStringRef _PMSymbol;
+        CFNumberRef _AmbiguousYearStrategy;
     } _property;
 };
 
@@ -216,6 +228,7 @@ static void __CFDateFormatterDeallocate(CFTypeRef cf) {
     CFReleaseIfNotNull(formatter->_property._ShortStandaloneQuarterSymbols);
     CFReleaseIfNotNull(formatter->_property._AMSymbol);
     CFReleaseIfNotNull(formatter->_property._PMSymbol);
+    CFReleaseIfNotNull(formatter->_property._AmbiguousYearStrategy);
 }
 
 static CFStringRef __CFDateFormatterCreateForcedString(CFDateFormatterRef formatter, CFStringRef inString);
@@ -261,7 +274,7 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
     }
     Boolean wantRelative = (NULL != df->_property._DoesRelativeDateFormatting && df->_property._DoesRelativeDateFormatting == kCFBooleanTrue);
     Boolean hasFormat = (NULL != df->_property._HasCustomFormat && df->_property._HasCustomFormat == kCFBooleanTrue) || goingToHaveCustomFormat;
-    if (wantRelative && !hasFormat) {
+    if (wantRelative && !hasFormat && kCFDateFormatterNoStyle != df->_dateStyle) {
 	udstyle |= UDAT_RELATIVE;
     }
 
@@ -272,7 +285,12 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
     }
     udat_setLenient(icudf, 0);
     if (kCFDateFormatterNoStyle == df->_dateStyle && kCFDateFormatterNoStyle == df->_timeStyle) {
-        udat_applyPattern(icudf, false, NULL, 0);
+        if (wantRelative && !hasFormat && kCFDateFormatterNoStyle != df->_dateStyle) {
+            UErrorCode s = U_ZERO_ERROR;
+            udat_applyPatternRelative(icudf, NULL, 0, NULL, 0, &s);
+        } else {
+            udat_applyPattern(icudf, false, NULL, 0);
+        }
     }
     CFStringRef calident = (CFStringRef)CFLocaleGetValue(df->_locale, kCFLocaleCalendarIdentifierKey);
     if (calident && CFEqual(calident, kCFCalendarIdentifierGregorian)) {
@@ -283,34 +301,80 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
 
     __CFDateFormatterCustomize(df);
 
-    UChar ubuffer[BUFFER_SIZE];
-    status = U_ZERO_ERROR;
-    int32_t ret = udat_toPattern(icudf, false, ubuffer, BUFFER_SIZE, &status);
-    if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
-        CFStringRef newFormat = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)ubuffer, ret);
-        CFStringRef formatString = __CFDateFormatterCreateForcedString(df, newFormat);
-        CFIndex cnt = CFStringGetLength(formatString);
-        CFAssert1(cnt <= 1024, __kCFLogAssertion, "%s(): format string too long", __PRETTY_FUNCTION__);
-        if (df->_format != formatString && cnt <= 1024) {
-            STACK_BUFFER_DECL(UChar, ubuffer, cnt);
-            const UChar *ustr = (UChar *)CFStringGetCharactersPtr((CFStringRef)formatString);
-            if (NULL == ustr) {
-                CFStringGetCharacters(formatString, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-                ustr = ubuffer;
+    if (wantRelative && !hasFormat && kCFDateFormatterNoStyle != df->_dateStyle) {
+        UChar dateBuffer[BUFFER_SIZE];
+        UChar timeBuffer[BUFFER_SIZE];
+        status = U_ZERO_ERROR;
+        CFIndex dateLen = udat_toPatternRelativeDate(icudf, dateBuffer, BUFFER_SIZE, &status);
+        CFIndex timeLen = (utstyle != UDAT_NONE) ? udat_toPatternRelativeTime(icudf, timeBuffer, BUFFER_SIZE, &status) : 0;
+        if (U_SUCCESS(status) && dateLen <= BUFFER_SIZE && timeLen <= BUFFER_SIZE) {
+            // We assume that the 12/24-hour forcing preferences only affect the Time component
+            CFStringRef newFormat = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)timeBuffer, timeLen);
+            CFStringRef formatString = __CFDateFormatterCreateForcedString(df, newFormat);
+            CFIndex cnt = CFStringGetLength(formatString);
+            CFAssert1(cnt <= BUFFER_SIZE, __kCFLogAssertion, "%s(): time format string too long", __PRETTY_FUNCTION__);
+            if (cnt <= BUFFER_SIZE) {
+                CFStringGetCharacters(formatString, CFRangeMake(0, cnt), (UniChar *)timeBuffer);
+                timeLen = cnt;
+                status = U_ZERO_ERROR;
+                udat_applyPatternRelative(icudf, dateBuffer, dateLen, timeBuffer, timeLen, &status);
+                // ignore error and proceed anyway, what else can be done?
+
+                UChar ubuffer[BUFFER_SIZE];
+                status = U_ZERO_ERROR;
+                int32_t ret = udat_toPattern(icudf, false, ubuffer, BUFFER_SIZE, &status); // read out current pattern
+                if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
+                    if (df->_format) CFRelease(df->_format);
+                    df->_format = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)ubuffer, ret);
+                }
             }
-            UErrorCode status = U_ZERO_ERROR;
-//            udat_applyPattern(df->_df, false, ustr, cnt, &status);
-            udat_applyPattern(df->_df, false, ustr, cnt);
-            if (U_SUCCESS(status)) {
-                if (df->_format) CFRelease(df->_format);
-                df->_format = (CFStringRef)CFStringCreateCopy(CFGetAllocator(df), formatString);
-            }
+            CFRelease(formatString);
+            CFRelease(newFormat);
         }
-        CFRelease(formatString);
-        CFRelease(newFormat);
+    } else {
+        UChar ubuffer[BUFFER_SIZE];
+        status = U_ZERO_ERROR;
+        int32_t ret = udat_toPattern(icudf, false, ubuffer, BUFFER_SIZE, &status);
+        if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
+            CFStringRef newFormat = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)ubuffer, ret);
+            CFStringRef formatString = __CFDateFormatterCreateForcedString(df, newFormat);
+            CFIndex cnt = CFStringGetLength(formatString);
+            CFAssert1(cnt <= 1024, __kCFLogAssertion, "%s(): format string too long", __PRETTY_FUNCTION__);
+            if (df->_format != formatString && cnt <= 1024) {
+                STACK_BUFFER_DECL(UChar, ubuffer, cnt);
+                const UChar *ustr = (UChar *)CFStringGetCharactersPtr((CFStringRef)formatString);
+                if (NULL == ustr) {
+                    CFStringGetCharacters(formatString, CFRangeMake(0, cnt), (UniChar *)ubuffer);
+                    ustr = ubuffer;
+                }
+                UErrorCode status = U_ZERO_ERROR;
+//            udat_applyPattern(df->_df, false, ustr, cnt, &status);
+                udat_applyPattern(df->_df, false, ustr, cnt);
+                if (U_SUCCESS(status)) {
+                    if (df->_format) CFRelease(df->_format);
+                    df->_format = (CFStringRef)CFStringCreateCopy(CFGetAllocator(df), formatString);
+                }
+            }
+            CFRelease(formatString);
+            CFRelease(newFormat);
+        }
     }
     if (df->_defformat) CFRelease(df->_defformat);
     df->_defformat = df->_format ? (CFStringRef)CFRetain(df->_format) : NULL;
+
+    CFStringRef calName = df->_property._CalendarName ? (df->_property._CalendarName) : NULL;
+    if (!calName) {
+        calName = (CFStringRef)CFLocaleGetValue(df->_locale, kCFLocaleCalendarIdentifierKey);
+    }
+    if (calName && CFEqual(calName, kCFCalendarIdentifierGregorian)) {
+        UCalendar *cal = (UCalendar *)udat_getCalendar(df->_df);
+        status = U_ZERO_ERROR;
+        UDate udate = ucal_getGregorianChange(cal, &status);
+        CFAbsoluteTime at = U_SUCCESS(status) ? (udate / 1000.0 - kCFAbsoluteTimeIntervalSince1970) : -13197600000.0; // Oct 15, 1582
+        udate = (at + kCFAbsoluteTimeIntervalSince1970) * 1000.0;
+        status = U_ZERO_ERROR;
+        ucal_setGregorianChange(cal, udate, &status);
+    }
 
     RESET_PROPERTY(_IsLenient, kCFDateFormatterIsLenientKey);
     RESET_PROPERTY(_DoesRelativeDateFormatting, kCFDateFormatterDoesRelativeDateFormattingKey);
@@ -340,6 +404,7 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
     RESET_PROPERTY(_ShortStandaloneQuarterSymbols, kCFDateFormatterShortStandaloneQuarterSymbolsKey);
     RESET_PROPERTY(_AMSymbol, kCFDateFormatterAMSymbolKey);
     RESET_PROPERTY(_PMSymbol, kCFDateFormatterPMSymbolKey);
+    RESET_PROPERTY(_AmbiguousYearStrategy, kCFDateFormatterAmbiguousYearStrategyKey);
 }
 
 static CFTypeID __kCFDateFormatterTypeID = _kCFRuntimeNotATypeID;
@@ -352,7 +417,7 @@ static const CFRuntimeClass __CFDateFormatterClass = {
     __CFDateFormatterDeallocate,
     NULL,
     NULL,
-    NULL,        // 
+    NULL,        //
     __CFDateFormatterCopyDescription
 };
 
@@ -410,6 +475,7 @@ CFDateFormatterRef CFDateFormatterCreate(CFAllocatorRef allocator, CFLocaleRef l
     memory->_property._ShortStandaloneQuarterSymbols = NULL;
     memory->_property._AMSymbol = NULL;
     memory->_property._PMSymbol = NULL;
+    memory->_property._AmbiguousYearStrategy = NULL;
 
     switch (dateStyle) {
     case kCFDateFormatterNoStyle:
@@ -639,7 +705,7 @@ static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFS
         }
         if (emit) CFStringAppendCharacters(outString, &ch, 1);
     }
-    
+
     return outString;
 }
 
@@ -728,7 +794,7 @@ static CFStringRef __CFDateFormatterCreateForcedString(CFDateFormatterRef format
 static void __CFDateFormatterCustomize(CFDateFormatterRef formatter) {
     Boolean wantRelative = (NULL != formatter->_property._DoesRelativeDateFormatting && formatter->_property._DoesRelativeDateFormatting == kCFBooleanTrue);
     Boolean hasFormat = (NULL != formatter->_property._HasCustomFormat && formatter->_property._HasCustomFormat == kCFBooleanTrue);
-    if (wantRelative && !hasFormat) {
+    if (wantRelative && !hasFormat && kCFDateFormatterNoStyle != formatter->_dateStyle) {
         __substituteFormatStringFromPrefsDFRelative(formatter);
     } else {
         __substituteFormatStringFromPrefsDF(formatter, false);
@@ -796,6 +862,7 @@ void CFDateFormatterSetFormat(CFDateFormatterRef formatter, CFStringRef formatSt
         // the whole UDateFormat.
         if (formatter->_property._HasCustomFormat != kCFBooleanTrue && formatter->_property._DoesRelativeDateFormatting == kCFBooleanTrue) {
             __ResetUDateFormat(formatter, true);
+            // the "true" results in: if you set a custom format string, you don't get relative date formatting
         }
         STACK_BUFFER_DECL(UChar, ubuffer, cnt);
         const UChar *ustr = (UChar *)CFStringGetCharactersPtr((CFStringRef)formatString);
@@ -846,6 +913,256 @@ CFStringRef CFDateFormatterCreateStringWithAbsoluteTime(CFAllocatorRef allocator
     return string;
 }
 
+static UDate __CFDateFormatterCorrectTimeWithTarget(UCalendar *calendar, UDate at, int32_t target, Boolean isEra, UErrorCode *status) {
+    ucal_setMillis(calendar, at, status);
+    UCalendarDateFields field = isEra ? UCAL_ERA : UCAL_YEAR;
+    ucal_set(calendar, field, target);
+    return ucal_getMillis(calendar, status);
+}
+
+static UDate __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(UCalendar *calendar, UDate at, CFIndex period, CFIndex pastYears, CFIndex futureYears, Boolean isEra, UErrorCode *status) {
+    ucal_setMillis(calendar, ucal_getNow(), status);
+    int32_t currYear = ucal_get(calendar, UCAL_YEAR, status);
+    UCalendarDateFields field = isEra ? UCAL_ERA : UCAL_YEAR;
+    int32_t currEraOrCentury = ucal_get(calendar, field, status);
+    if (!isEra) {
+        currYear %= 100;
+        currEraOrCentury = currEraOrCentury / 100 * 100; // get century
+    }
+
+    CFIndex futureMax = currYear + futureYears;
+    CFIndex pastMin = currYear - pastYears;
+
+    CFRange currRange, futureRange, pastRange;
+    currRange.location = futureRange.location = pastRange.location = kCFNotFound;
+    currRange.length = futureRange.length = pastRange.length = 0;
+    if (!isEra) {
+        if (period < INT_MAX && futureMax >= period) {
+            futureRange.location = 0;
+            futureRange.length = futureMax - period + 1;
+        }
+        if (pastMin < 0) {
+            pastRange.location = period + pastMin;
+            pastRange.length = period - pastRange.location;
+        }
+        if (pastRange.location != kCFNotFound) {
+            currRange.location = 0;
+        } else {
+            currRange.location = pastMin;
+        }
+    } else {
+        if (period < INT_MAX && futureMax > period) {
+            futureRange.location = 1,
+            futureRange.length = futureMax - period;
+        }
+        if (pastMin <= 0) {
+            pastRange.location = period + pastMin;
+            pastRange.length = period - pastRange.location + 1;
+        }
+        if (pastRange.location != kCFNotFound) {
+            currRange.location = 1;
+        } else {
+            currRange.location = pastMin;
+        }
+
+    }
+    currRange.length = period - pastRange.length - futureRange.length;
+
+    ucal_setMillis(calendar, at, status);
+    int32_t atYear = ucal_get(calendar, UCAL_YEAR, status);
+    if (!isEra) {
+        atYear %= 100;
+        currEraOrCentury += atYear;
+    }
+
+    int32_t offset = 0; // current era or century
+    if (pastRange.location != kCFNotFound && atYear >= pastRange.location && atYear - pastRange.location + 1 <= pastRange.length) {
+        offset = -1; // past era or century
+    } else if (futureRange.location != kCFNotFound && atYear >= futureRange.location && atYear - futureRange.location + 1 <= futureRange.length) {
+        offset = 1; // next era or century
+    }
+    if (!isEra) offset *= 100;
+    return __CFDateFormatterCorrectTimeWithTarget(calendar, at, currEraOrCentury+offset, isEra, status);
+}
+
+static int32_t __CFDateFormatterGetMaxYearGivenJapaneseEra(UCalendar *calendar, int32_t era, UErrorCode *status) {
+    int32_t years = 0;
+    ucal_clear(calendar);
+    ucal_set(calendar, UCAL_ERA, era+1);
+    UDate target = ucal_getMillis(calendar, status);
+    ucal_set(calendar, UCAL_ERA, era);
+    years = ucal_getFieldDifference(calendar, target, UCAL_YEAR, status);
+    return years+1;
+}
+
+static Boolean __CFDateFormatterHandleAmbiguousYear(CFDateFormatterRef formatter, CFStringRef calendar_id, UDateFormat *df, UCalendar *cal, UDate *at, const UChar *ustr, CFIndex length, UErrorCode *status) {
+    Boolean success = true;
+    int64_t ambigStrat = kCFDateFormatterAmbiguousYearAssumeToNone;
+    if (formatter->_property._AmbiguousYearStrategy) {
+        CFNumberGetValue(formatter->_property._AmbiguousYearStrategy, kCFNumberSInt64Type, &ambigStrat);
+    }
+    if (calendar_id == kCFCalendarIdentifierChinese) {
+        // we default to era 1 if era is missing, however, we cannot just test if the era is 1 becuase we may get era 2 or larger if the year in the string is greater than 60
+        // now I just assume that the year will not be greater than 600 in the string
+        if (ucal_get(cal, UCAL_ERA, status) < 10) {
+            switch (ambigStrat) {
+                case kCFDateFormatterAmbiguousYearFailToParse:
+                    success = false;
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToCurrent: {
+                    ucal_setMillis(cal, ucal_getNow(), status);
+                    int32_t currEra = ucal_get(cal, UCAL_ERA, status);
+                    *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    break;
+                    }
+                case kCFDateFormatterAmbiguousYearAssumeToCenteredAroundCurrentDate:
+                    *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 60, 29, 30, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToFuture:
+                    *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 60, 0, 59, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToPast:
+                    *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 60, 59, 0, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToLikelyFuture:
+                    *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 60, 10, 49, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToLikelyPast:
+                    *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 60, 49, 10, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToNone:
+                default:
+                    break; // do nothing
+            }
+        }
+    } else if (calendar_id == kCFCalendarIdentifierJapanese) { // ??? need more work
+        ucal_clear(cal);
+        ucal_set(cal, UCAL_ERA, 1);
+        udat_parseCalendar(df, cal, ustr, length, NULL, status);
+        UDate test = ucal_getMillis(cal, status);
+        if (test != *at) { // missing era
+            ucal_setMillis(cal, *at, status);
+            int32_t givenYear = ucal_get(cal, UCAL_YEAR, status);
+            ucal_setMillis(cal, ucal_getNow(), status);
+            int32_t currYear = ucal_get(cal, UCAL_YEAR, status);
+            int32_t currEra = ucal_get(cal, UCAL_ERA, status);
+            switch (ambigStrat) {
+                case kCFDateFormatterAmbiguousYearFailToParse:
+                    success = false;
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToCurrent:
+                    *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToCenteredAroundCurrentDate:
+                    // we allow the ball up to 30 years
+                    // if the given year is larger than the current year + 30 years, we check the previous era
+                    if (givenYear > currYear + 30) {
+                        success = false; // if the previous era cannot have the given year, fail the parse
+                        int32_t years = __CFDateFormatterGetMaxYearGivenJapaneseEra(cal, currEra-1, status);
+                        if (givenYear <= years) {
+                            success = true;
+                            *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra-1, true, status);
+                        }
+                    } else { // current era
+                        *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    }
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToFuture:
+                    if (givenYear < currYear) { // we only consider current or the future
+                        success = false;
+                    } else { // current era
+                        *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    }
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToPast:
+                    if (givenYear > currYear) { // past era
+                        success = false;
+                        // we find the closest era that has the given year
+                        // if no era has such given year, we fail the parse
+                        for (CFIndex era = currEra-1; era >= 234; era--) { // Showa era (234) is the longest era
+                            int32_t years = __CFDateFormatterGetMaxYearGivenJapaneseEra(cal, era, status);
+                            if (givenYear > years) {
+                                continue;
+                            }
+                            success = true;
+                            *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, era, true, status);
+                            break;
+                        }
+                    } else { // current era
+                        *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    }
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToLikelyFuture:
+                    if (givenYear < currYear - 10) { // we allow 10 years to the past
+                        success = false;
+                    } else {
+                        *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    }
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToLikelyPast:
+                    if (givenYear > currYear + 10) {
+                        success = false;
+                        // we find the closest era that has the given year
+                        // if no era has such given year, we fail the parse
+                        for (CFIndex era = currEra-1; era >= 234; era--) { // Showa era (234) is the longest era
+                            int32_t years = __CFDateFormatterGetMaxYearGivenJapaneseEra(cal, era, status);
+                            if (givenYear > years) {
+                                continue;
+                            }
+                            success = true;
+                            *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, era, true, status);
+                            break;
+                        }
+                    } else { // current era
+                        *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, currEra, true, status);
+                    }
+                    break;
+                case kCFDateFormatterAmbiguousYearAssumeToNone:
+                default:
+                    break; // do nothing
+            }
+        }
+    } else { // calenders other than chinese and japanese
+        int32_t parsedYear = ucal_get(cal, UCAL_YEAR, status);
+        ucal_setMillis(cal, ucal_getNow(), status);
+        int32_t currYear = ucal_get(cal, UCAL_YEAR, status);
+        if (currYear + 1500 < parsedYear) { // most likely that the parsed string had a 2-digits year
+            switch (ambigStrat) {
+            case kCFDateFormatterAmbiguousYearFailToParse:
+                success = false;
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToCurrent:
+                *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, (currYear / 100 * 100) + parsedYear % 100, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToCenteredAroundCurrentDate:
+                *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 100, 50, 49, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToFuture:
+                *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 100, 0, 99, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToPast:
+                *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 100, 99, 0, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToLikelyFuture:
+                *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 100, 9, 90, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToLikelyPast:
+                *at = __CFDateFormatterCorrectTimeToARangeAroundCurrentDate(cal, *at, 100, 90, 9, false, status);
+                break;
+            case kCFDateFormatterAmbiguousYearAssumeToNone:
+            default:
+                if (calendar_id == kCFCalendarIdentifierGregorian) { // historical default behavior of 1950 - 2049
+                    int32_t twoDigits = parsedYear % 100;
+                    *at = __CFDateFormatterCorrectTimeWithTarget(cal, *at, ((twoDigits < 50) ? 2000 : 1900) + twoDigits, false, status);
+                }
+                break; // do nothing
+            }
+        }
+
+    }
+    return success;
+}
+
 CFDateRef CFDateFormatterCreateDateFromString(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFStringRef string, CFRange *rangep) {
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
@@ -879,26 +1196,54 @@ Boolean CFDateFormatterGetAbsoluteTimeFromString(CFDateFormatterRef formatter, C
     UDate udate;
     int32_t dpos = 0;
     UErrorCode status = U_ZERO_ERROR;
+    UDateFormat *df2 = udat_clone(formatter->_df, &status);
+    UCalendar *cal2 = (UCalendar *)udat_getCalendar(df2);
+    CFStringRef calendar_id = (CFStringRef) CFDateFormatterCopyProperty(formatter, kCFDateFormatterCalendarIdentifierKey);
+    // we can do this direct comparison because locale in the formatter normalizes the identifier
+    if (formatter->_property._TwoDigitStartDate) {
+        // if set, don't use hint, leave it all to ICU, as historically
+    } else if (calendar_id != kCFCalendarIdentifierChinese && calendar_id != kCFCalendarIdentifierJapanese) {
+        ucal_setMillis(cal2, ucal_getNow(), &status);
+        int32_t newYear = ((ucal_get(cal2, UCAL_YEAR, &status) / 100) + 16) * 100; // move ahead 1501-1600 years, to the beginning of a century
+        ucal_set(cal2, UCAL_YEAR, newYear);
+        ucal_set(cal2, UCAL_MONTH, ucal_getLimit(cal2, UCAL_MONTH, UCAL_ACTUAL_MINIMUM, &status));
+        ucal_set(cal2, UCAL_IS_LEAP_MONTH, 0);
+        ucal_set(cal2, UCAL_DAY_OF_MONTH, ucal_getLimit(cal2, UCAL_DAY_OF_MONTH, UCAL_ACTUAL_MINIMUM, &status));
+        ucal_set(cal2, UCAL_HOUR_OF_DAY, ucal_getLimit(cal2, UCAL_HOUR_OF_DAY, UCAL_ACTUAL_MINIMUM, &status));
+        ucal_set(cal2, UCAL_MINUTE, ucal_getLimit(cal2, UCAL_MINUTE, UCAL_ACTUAL_MINIMUM, &status));
+        ucal_set(cal2, UCAL_SECOND, ucal_getLimit(cal2, UCAL_SECOND, UCAL_ACTUAL_MINIMUM, &status));
+        ucal_set(cal2, UCAL_MILLISECOND, 0);
+        UDate future = ucal_getMillis(cal2, &status);
+        ucal_clear(cal2);
+        udat_set2DigitYearStart(df2, future, &status);
+    } else if (calendar_id == kCFCalendarIdentifierChinese) {
+        ucal_clear(cal2);
+        ucal_set(cal2, UCAL_ERA, 1); // default to era 1 if no era info in the string for chinese
+    } else if (calendar_id == kCFCalendarIdentifierJapanese) { // default to the current era
+        ucal_setMillis(cal2, ucal_getNow(), &status);
+        int32_t currEra = ucal_get(cal2, UCAL_ERA, &status);
+        ucal_clear(cal2);
+        ucal_set(cal2, UCAL_ERA, currEra);
+    }
     if (formatter->_property._DefaultDate) {
         CFAbsoluteTime at = CFDateGetAbsoluteTime(formatter->_property._DefaultDate);
         udate = (at + kCFAbsoluteTimeIntervalSince1970) * 1000.0;
-        UDateFormat *df2 = udat_clone(formatter->_df, &status);
-        UCalendar *cal2 = (UCalendar *)udat_getCalendar(df2);
         ucal_setMillis(cal2, udate, &status);
-        udat_parseCalendar(formatter->_df, cal2, ustr, range.length, &dpos, &status);
-        udate = ucal_getMillis(cal2, &status);
-        udat_close(df2);
-    } else {
-        udate = udat_parse(formatter->_df, ustr, range.length, &dpos, &status);
     }
+    udat_parseCalendar(df2, cal2, ustr, range.length, &dpos, &status);
+    udate = ucal_getMillis(cal2, &status);
     if (rangep) rangep->length = dpos;
-    if (U_FAILURE(status)) {
-        return false;
+    Boolean success = false;
+    // first status check is for parsing and the second status check is for the work done inside __CFDateFormatterHandleAmbiguousYear()
+    if (!U_FAILURE(status) && (formatter->_property._TwoDigitStartDate || __CFDateFormatterHandleAmbiguousYear(formatter, calendar_id, df2, cal2, &udate, ustr, range.length, &status)) && !U_FAILURE(status)) {
+        if (atp) {
+            *atp = (double)udate / 1000.0 - kCFAbsoluteTimeIntervalSince1970;
+        }
+        success = true;
     }
-    if (atp) {
-        *atp = (double)udate / 1000.0 - kCFAbsoluteTimeIntervalSince1970;
-    }
-    return true;
+    CFRelease(calendar_id);
+    udat_close(df2);
+    return success;
 }
 
 static void __CFDateFormatterSetSymbolsArray(UDateFormat *icudf, int32_t icucode, int index_base, CFTypeRef value) {
@@ -1163,6 +1508,11 @@ static void __CFDateFormatterSetProperty(CFDateFormatterRef formatter, CFStringR
 	if (!directToICU) {
             formatter->_property. _PMSymbol = (CFStringRef)CFDateFormatterCopyProperty(formatter, kCFDateFormatterPMSymbolKey);
 	}
+    } else if (kCFDateFormatterAmbiguousYearStrategyKey == key) {
+        oldProperty = formatter->_property._AmbiguousYearStrategy;
+        formatter->_property._AmbiguousYearStrategy = NULL;
+        __CFGenericValidateType(value, CFNumberGetTypeID());
+        formatter->_property._AmbiguousYearStrategy = (CFNumberRef)CFRetain(value);
     } else {
         CFAssert3(0, __kCFLogAssertion, "%s(): unknown key %p (%@)", __PRETTY_FUNCTION__, key, key);
     }
@@ -1277,7 +1627,7 @@ CFTypeRef CFDateFormatterCopyProperty(CFDateFormatterRef formatter, CFStringRef 
             if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
                 return CFStringCreateWithCharacters(CFGetAllocator(formatter), (UniChar *)ubuffer, ucnt);
             }
-        }        
+        }
     } else if (kCFDateFormatterPMSymbolKey == key) {
 	if (formatter->_property._PMSymbol) return CFRetain(formatter->_property._PMSymbol);
         CFIndex cnt = udat_countSymbols(formatter->_df, UDAT_AM_PMS);
@@ -1286,7 +1636,9 @@ CFTypeRef CFDateFormatterCopyProperty(CFDateFormatterRef formatter, CFStringRef 
             if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
                 return CFStringCreateWithCharacters(CFGetAllocator(formatter), (UniChar *)ubuffer, ucnt);
             }
-        }        
+        }
+    } else if (kCFDateFormatterAmbiguousYearStrategyKey == key) {
+        if (formatter->_property._AmbiguousYearStrategy) return CFRetain(formatter->_property._AmbiguousYearStrategy);
     } else {
         CFAssert3(0, __kCFLogAssertion, "%s(): unknown key %p (%@)", __PRETTY_FUNCTION__, key, key);
     }

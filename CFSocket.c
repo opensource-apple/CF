@@ -22,7 +22,7 @@
  */
 
 /*	CFSocket.c
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -34,6 +34,7 @@
 #include <CoreFoundation/CFSocket.h>
 #include "CFInternal.h"
 #include <dispatch/dispatch.h>
+#include <dispatch/private.h>
 #include <netinet/in.h>
 #include <sys/sysctl.h>
 #include <sys/socket.h>
@@ -953,7 +954,7 @@ Boolean __CFSocketGetBytesAvailable(CFSocketRef s, CFIndex* ctBytesAvailable) {
 #include <sys/types.h>
 #include <math.h>
 #include <limits.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #include <sys/sysctl.h>
 #include <sys/un.h>
 #include <libc.h>
@@ -981,11 +982,8 @@ Boolean __CFSocketGetBytesAvailable(CFSocketRef s, CFIndex* ctBytesAvailable) {
 typedef int32_t fd_mask;
 typedef int socklen_t;
 
-// not entirely correct, but good enough for what it's used for here
-void gettimeofday(struct timeval *tp, void *tzp) {
-    tp->tv_sec = 0;
-    tp->tv_usec = 0;
-}
+#define gettimeofday _NS_gettimeofday
+__private_extern__ int _NS_gettimeofday(struct timeval *tv, struct timezone *tz);
 
 // although this is only used for debug info, we define it for compatibility
 #define	timersub(tvp, uvp, vvp) \
@@ -1007,7 +1005,7 @@ void gettimeofday(struct timeval *tp, void *tzp) {
 
 //#define LOG_CFSOCKET
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #define INVALID_SOCKET (CFSocketNativeHandle)(-1)
 #define closesocket(a) close((a))
 #define ioctlsocket(a,b,c) ioctl((a),(b),(c))
@@ -1226,7 +1224,7 @@ CF_INLINE Boolean __CFSocketFdClr(CFSocketNativeHandle sock, CFMutableDataRef fd
 }
 
 static SInt32 __CFSocketCreateWakeupSocketPair(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     SInt32 error;
 
     error = socketpair(PF_LOCAL, SOCK_DGRAM, 0, __CFWakeupSocketPair);
@@ -2166,7 +2164,7 @@ static CFStringRef __CFSocketCopyDescription(CFTypeRef cf) {
     result = CFStringCreateMutable(CFGetAllocator(s), 0);
     __CFSocketLock(s);
     void *addr = s->_callout;
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     Dl_info info;
     const char *name = (dladdr(addr, &info) && info.dli_saddr == addr && info.dli_sname) ? info.dli_sname : "???";
 #else
@@ -2229,7 +2227,7 @@ static const CFRuntimeClass __CFSocketClass = {
 CFTypeID CFSocketGetTypeID(void) {
     if (_kCFRuntimeNotATypeID == __kCFSocketTypeID) {
 	__kCFSocketTypeID = _CFRuntimeRegisterClass(&__CFSocketClass);
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
         struct rlimit lim1;
         int ret1 = getrlimit(RLIMIT_NOFILE, &lim1);
         int mib[] = {CTL_KERN, KERN_MAXFILESPERPROC};
@@ -2389,10 +2387,11 @@ void CFSocketInvalidate(CFSocketRef s) {
             s->_addressQueue = NULL;
         }
         s->_socketSetCount = 0;
-        for (idx = CFArrayGetCount(s->_runLoops); idx--;) {
-            CFRunLoopWakeUp((CFRunLoopRef)CFArrayGetValueAtIndex(s->_runLoops, idx));
-        }
+        
+        // we'll need this later
+        CFArrayRef runLoops = (CFArrayRef)CFRetain(s->_runLoops);        
         CFRelease(s->_runLoops);
+        
         s->_runLoops = NULL;
         source0 = s->_source0;
         s->_source0 = NULL;
@@ -2403,6 +2402,13 @@ void CFSocketInvalidate(CFSocketRef s) {
         s->_context.release = 0;
         s->_context.copyDescription = 0;
         __CFSocketUnlock(s);
+        
+        // Do this after the socket unlock to avoid deadlock (10462525)
+        for (idx = CFArrayGetCount(runLoops); idx--;) {
+            CFRunLoopWakeUp((CFRunLoopRef)CFArrayGetValueAtIndex(runLoops, idx));
+        }
+        CFRelease(runLoops);
+
         if (NULL != contextRelease) {
             contextRelease(contextInfo);
         }
@@ -2947,7 +2953,7 @@ CFSocketError CFSocketSetAddress(CFSocketRef s, CFDataRef address) {
     if (!name || namelen <= 0) return kCFSocketError;
     
     CFSocketNativeHandle sock = CFSocketGetNative(s);
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     // Verify that the namelen is correct. If not, we have to fix it up. Developers will often incorrectly use 0 or strlen(path). See 9217961 and the second half of 9098274.
     // Max size is a size byte, plus family byte, plus path of 255, plus a null byte.
     char newName[255];
@@ -2992,7 +2998,7 @@ CFSocketError CFSocketConnectToAddress(CFSocketRef s, CFDataRef address, CFTimeI
     if (!name || namelen <= 0) return kCFSocketError;
     CFSocketNativeHandle sock = CFSocketGetNative(s);
     {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
         SInt32 flags = fcntl(sock, F_GETFL, 0);
         if (flags >= 0) wasBlocking = ((flags & O_NONBLOCK) == 0);
         if (wasBlocking && (timeout > 0.0 || timeout < 0.0)) ioctlsocket(sock, FIONBIO, (u_long *)&yes);
@@ -3060,7 +3066,7 @@ CFSocketRef CFSocketCreate(CFAllocatorRef allocator, SInt32 protocolFamily, SInt
         if (0 >= protocol && SOCK_STREAM == socketType) protocol = IPPROTO_TCP;
         if (0 >= protocol && SOCK_DGRAM == socketType) protocol = IPPROTO_UDP;
     }
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     if (PF_LOCAL == protocolFamily && 0 >= socketType) socketType = SOCK_STREAM;
 #endif
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -3147,7 +3153,7 @@ static void __CFSocketSendNameRegistryRequest(CFSocketSignature *signature, CFDi
 static void __CFSocketValidateSignature(const CFSocketSignature *providedSignature, CFSocketSignature *signature, uint16_t defaultPortNumber) {
     struct sockaddr_in sain, *sainp;
     memset(&sain, 0, sizeof(sain));
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     sain.sin_len = sizeof(sain);
 #endif
     sain.sin_family = AF_INET;
@@ -3173,7 +3179,7 @@ static void __CFSocketValidateSignature(const CFSocketSignature *providedSignatu
         } else {
             sainp = (struct sockaddr_in *)CFDataGetBytePtr(providedSignature->address);
             if ((int)sizeof(struct sockaddr_in) <= CFDataGetLength(providedSignature->address) && (AF_INET == sainp->sin_family || 0 == sainp->sin_family)) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
                 sain.sin_len = sizeof(sain);
 #endif
                 sain.sin_family = AF_INET;

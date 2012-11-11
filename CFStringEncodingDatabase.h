@@ -26,7 +26,7 @@
  *  CoreFoundation
  *
  *  Created by Aki Inoue on 07/12/05.
- *  Copyright (c) 2007-2011, Apple Inc. All rights reserved.
+ *  Copyright (c) 2007-2012, Apple Inc. All rights reserved.
  *
  */
 

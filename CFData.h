@@ -22,7 +22,7 @@
  */
 
 /*	CFData.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFDATA__)
@@ -30,6 +30,7 @@
 
 #include <CoreFoundation/CFBase.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
     
 typedef const struct __CFData * CFDataRef;
@@ -81,18 +82,16 @@ void CFDataReplaceBytes(CFMutableDataRef theData, CFRange range, const UInt8 *ne
 CF_EXPORT
 void CFDataDeleteBytes(CFMutableDataRef theData, CFRange range);
 
-#if MAC_OS_X_VERSION_10_6 <= MAC_OS_X_VERSION_MAX_ALLOWED || __IPHONE_4_0 <=  __IPHONE_OS_VERSION_MAX_ALLOWED
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFDataSearchFlags) {
     kCFDataSearchBackwards = 1UL << 0,
     kCFDataSearchAnchored = 1UL << 1
-};
-#endif
-typedef CFOptionFlags CFDataSearchFlags;
+} CF_ENUM_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 CFRange CFDataFind(CFDataRef theData, CFDataRef dataToFind, CFRange searchRange, CFDataSearchFlags compareOptions) CF_AVAILABLE(10_6, 4_0);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFDATA__ */
 

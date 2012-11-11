@@ -22,7 +22,7 @@
  */
 
 /*	CFURLAccess.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -88,18 +88,17 @@ CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CF
 
 
 /* Common error codes (returned only by the older APIs that predate CFError) */
-enum {
-    kCFURLUnknownError = -10,
-    kCFURLUnknownSchemeError = -11,
-    kCFURLResourceNotFoundError = -12,
-    kCFURLResourceAccessViolationError = -13,
-    kCFURLRemoteHostUnavailableError = -14,
-    kCFURLImproperArgumentsError = -15,
-    kCFURLUnknownPropertyKeyError = -16,
-    kCFURLPropertyKeyUnavailableError = -17,
-    kCFURLTimeoutError = -18
+typedef CF_ENUM(CFIndex, CFURLError) {
+    kCFURLUnknownError = -10L,
+    kCFURLUnknownSchemeError = -11L,
+    kCFURLResourceNotFoundError = -12L,
+    kCFURLResourceAccessViolationError = -13L,
+    kCFURLRemoteHostUnavailableError = -14L,
+    kCFURLImproperArgumentsError = -15L,
+    kCFURLUnknownPropertyKeyError = -16L,
+    kCFURLPropertyKeyUnavailableError = -17L,
+    kCFURLTimeoutError = -18L
 };
-typedef CFIndex CFURLError;
 
 /* Older property keys */
 

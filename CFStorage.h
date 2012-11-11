@@ -22,7 +22,7 @@
  */
 
 /*	CFStorage.h
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 */
 /*!
         @header CFStorage
@@ -52,10 +52,9 @@ storage was a single block.
 
 #include <CoreFoundation/CFBase.h>
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFStorageEnumerationOptionFlags) {
         kCFStorageEnumerationConcurrent = (1UL << 0) /* Allow enumeration to proceed concurrently */
 };
-typedef CFOptionFlags CFStorageEnumerationOptionFlags;
 
 CF_EXTERN_C_BEGIN
 

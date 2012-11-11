@@ -22,7 +22,7 @@
  */
 
 /*	CFMessagePort.c
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -41,6 +41,7 @@
 #include <mach/mach_time.h>
 #include <dlfcn.h>
 #include <dispatch/dispatch.h>
+#include <dispatch/private.h>
 
 extern pid_t getpid(void);
 
@@ -58,12 +59,6 @@ extern pid_t getpid(void);
 #endif
 
 #define __CFMessagePortMaxDataSize 0x60000000L
-
-//#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-DISPATCH_HELPER_FUNCTIONS(mport, CFMessagePort)
-//#pragma GCC diagnostic pop
-
 
 static CFSpinLock_t __CFAllMessagePortsLock = CFSpinLockInit;
 static CFMutableDictionaryRef __CFAllLocalMessagePorts = NULL;
@@ -321,7 +316,7 @@ static CFStringRef __CFMessagePortSanitizeStringName(CFStringRef name, uint8_t *
     utfname = CFAllocatorAllocate(kCFAllocatorSystemDefault, __kCFMessagePortMaxNameLength + 1, 0);
     CFStringGetBytes(name, CFRangeMake(0, CFStringGetLength(name)), kCFStringEncodingUTF8, 0, false, utfname, __kCFMessagePortMaxNameLength, &utflen);
     utfname[utflen] = '\0';
-    if (strlen(utfname) != utflen) {
+    if (strlen((const char *)utfname) != utflen) {
 	/* PCA 9194709: refuse to sanitize a string with an embedded nul character */
 	CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
 	utfname = NULL;
@@ -576,6 +571,7 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
 	}
 	CFDictionaryAddValue(__CFAllRemoteMessagePorts, name, memory);
     }
+    CFRetain(native);
     __CFSpinUnlock(&__CFAllMessagePortsLock);
     CFMachPortSetInvalidationCallBack(native, __CFMessagePortInvalidationCallBack);
     // that set-invalidation-callback might have called back into us
@@ -584,8 +580,10 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
     // went invalid; so check for validity manually and react
     if (!CFMachPortIsValid(native)) {
         CFRelease(memory); // does the invalidate
+        CFRelease(native);
         return NULL;
     }
+    CFRelease(native);
     return (CFMessagePortRef)memory;
 }
 
@@ -740,7 +738,7 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 	__CFMessagePortUnlock(ms);
 
 	__CFSpinLock(&__CFAllMessagePortsLock);
-	if (0 == ms->_perPID && NULL != (__CFMessagePortIsRemote(ms) ? __CFAllRemoteMessagePorts : __CFAllLocalMessagePorts)) {
+	if (0 == ms->_perPID && NULL != name && NULL != (__CFMessagePortIsRemote(ms) ? __CFAllRemoteMessagePorts : __CFAllLocalMessagePorts)) {
 	    CFDictionaryRemoveValue(__CFMessagePortIsRemote(ms) ? __CFAllRemoteMessagePorts : __CFAllLocalMessagePorts, name);
 	}
 	__CFSpinUnlock(&__CFAllMessagePortsLock);
@@ -787,14 +785,18 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 Boolean CFMessagePortIsValid(CFMessagePortRef ms) {
     __CFGenericValidateType(ms, __kCFMessagePortTypeID);
     if (!__CFMessagePortIsValid(ms)) return false;
+    CFRetain(ms);
     if (NULL != ms->_port && !CFMachPortIsValid(ms->_port)) {
 	CFMessagePortInvalidate(ms);
+        CFRelease(ms);
 	return false;
     }
     if (NULL != ms->_replyPort && !CFMachPortIsValid(ms->_replyPort)) {
 	CFMessagePortInvalidate(ms);
+        CFRelease(ms);
 	return false;
     }
+    CFRelease(ms);
     return true;
 }
 
@@ -927,7 +929,9 @@ SInt32 CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef
 	if (sendTimeout < 1.0) sendTimeout = 0.0;
 	sendTimeOut = floor(sendTimeout);
     }
+    __CFMessagePortUnlock(remote);
     ret = mach_msg((mach_msg_header_t *)sendmsg, MACH_SEND_MSG|sendOpts, sendmsg->header.msgh_size, 0, MACH_PORT_NULL, sendTimeOut, MACH_PORT_NULL);
+    __CFMessagePortLock(remote);
     if (KERN_SUCCESS != ret) {
 	// need to deallocate the send-once right that might have been created
 	if (replyMode != NULL) mach_port_deallocate(mach_task_self(), ((mach_msg_header_t *)sendmsg)->msgh_local_port);
@@ -1155,44 +1159,49 @@ void CFMessagePortSetDispatchQueue(CFMessagePortRef ms, dispatch_queue_t queue) 
     if (queue) {
         mach_port_t port = __CFMessagePortGetPort(ms);
         if (MACH_PORT_NULL != port) {
-	        dispatch_source_t theSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, port, 0, __mportQueue());
-	        dispatch_source_set_cancel_handler(theSource, ^{
-	            dispatch_release(queue);
-	            dispatch_release(theSource);
-	        });
-	        dispatch_source_set_event_handler(theSource, ^{
-	            CFRetain(ms);
-	            mach_msg_header_t *msg = (mach_msg_header_t *)CFAllocatorAllocate(kCFAllocatorSystemDefault, 2048, 0);
-	            msg->msgh_size = 2048;
+            static dispatch_queue_t mportQueue = NULL;
+            static dispatch_once_t once;
+            dispatch_once(&once, ^{
+                mportQueue = dispatch_queue_create("CFMessagePort Queue", NULL);
+            });
+            dispatch_source_t theSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, port, 0, mportQueue);
+            dispatch_source_set_cancel_handler(theSource, ^{
+                dispatch_release(queue);
+                dispatch_release(theSource);
+            });
+            dispatch_source_set_event_handler(theSource, ^{
+                CFRetain(ms);
+                mach_msg_header_t *msg = (mach_msg_header_t *)CFAllocatorAllocate(kCFAllocatorSystemDefault, 2048, 0);
+                msg->msgh_size = 2048;
 
-	            for (;;) {
-	                msg->msgh_bits = 0;
-	                msg->msgh_local_port = port;
-	                msg->msgh_remote_port = MACH_PORT_NULL;
-	                msg->msgh_id = 0;
+                for (;;) {
+                    msg->msgh_bits = 0;
+                    msg->msgh_local_port = port;
+                    msg->msgh_remote_port = MACH_PORT_NULL;
+                    msg->msgh_id = 0;
 
-	                kern_return_t ret = mach_msg(msg, MACH_RCV_MSG|MACH_RCV_LARGE|MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AV), 0, msg->msgh_size, port, 0, MACH_PORT_NULL);
-	                if (MACH_MSG_SUCCESS == ret) break;
-	                if (MACH_RCV_TOO_LARGE != ret) HALT;
+                    kern_return_t ret = mach_msg(msg, MACH_RCV_MSG|MACH_RCV_LARGE|MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AV), 0, msg->msgh_size, port, 0, MACH_PORT_NULL);
+                    if (MACH_MSG_SUCCESS == ret) break;
+                    if (MACH_RCV_TOO_LARGE != ret) HALT;
 
-	                uint32_t newSize = round_msg(msg->msgh_size + MAX_TRAILER_SIZE);
-	                msg = CFAllocatorReallocate(kCFAllocatorSystemDefault, msg, newSize, 0);
-	                msg->msgh_size = newSize;
-	            }
+                    uint32_t newSize = round_msg(msg->msgh_size + MAX_TRAILER_SIZE);
+                    msg = CFAllocatorReallocate(kCFAllocatorSystemDefault, msg, newSize, 0);
+                    msg->msgh_size = newSize;
+                }
 
-	            dispatch_async(queue, ^{
-	                mach_msg_header_t *reply = __CFMessagePortPerform(msg, msg->msgh_size, kCFAllocatorSystemDefault, ms);
-	                if (NULL != reply) {
-	                    kern_return_t ret = mach_msg(reply, MACH_SEND_MSG, reply->msgh_size, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
-	                    if (KERN_SUCCESS != ret) mach_msg_destroy(reply);
-	                    CFAllocatorDeallocate(kCFAllocatorSystemDefault, reply);
-	                }
-	                CFAllocatorDeallocate(kCFAllocatorSystemDefault, msg);
-	                CFRelease(ms);
-	            });
-	        });
-		ms->_dispatchSource = theSource;
-	    }
+                dispatch_async(queue, ^{
+                    mach_msg_header_t *reply = __CFMessagePortPerform(msg, msg->msgh_size, kCFAllocatorSystemDefault, ms);
+                    if (NULL != reply) {
+                        kern_return_t ret = mach_msg(reply, MACH_SEND_MSG, reply->msgh_size, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
+                        if (KERN_SUCCESS != ret) mach_msg_destroy(reply);
+                        CFAllocatorDeallocate(kCFAllocatorSystemDefault, reply);
+                    }
+                    CFAllocatorDeallocate(kCFAllocatorSystemDefault, msg);
+                    CFRelease(ms);
+                });
+            });
+            ms->_dispatchSource = theSource;
+        }
         if (ms->_dispatchSource) {
             dispatch_retain(queue);
             ms->_dispatchQ = queue;

@@ -22,7 +22,7 @@
  */
 
 /*	CFPlugIn_Factory.h
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFPLUGIN_FACTORY__)
@@ -32,45 +32,30 @@
 
 CF_EXTERN_C_BEGIN
 
-typedef struct __CFPFactory {
-    CFAllocatorRef _allocator;
+typedef struct __CFPFactory *_CFPFactoryRef;
 
-    CFUUIDRef _uuid;
-    Boolean _enabled;
-    char _padding[3];
-    SInt32 _instanceCount;
+extern _CFPFactoryRef _CFPFactoryCreate(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInFactoryFunction func);
+extern _CFPFactoryRef _CFPFactoryCreateByName(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInRef plugIn, CFStringRef funcName);
 
-    CFPlugInFactoryFunction _func;
-    
-    CFPlugInRef _plugIn;
-    CFStringRef _funcName;
+extern _CFPFactoryRef _CFPFactoryFind(CFUUIDRef factoryID, Boolean enabled);
 
-    CFMutableArrayRef _types;
-} _CFPFactory;
+extern CFUUIDRef _CFPFactoryCopyFactoryID(_CFPFactoryRef factory);
+extern CFPlugInRef _CFPFactoryCopyPlugIn(_CFPFactoryRef factory);
 
-extern _CFPFactory *_CFPFactoryCreate(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInFactoryFunction func);
-extern _CFPFactory *_CFPFactoryCreateByName(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInRef plugIn, CFStringRef funcName);
+extern void *_CFPFactoryCreateInstance(CFAllocatorRef allocator, _CFPFactoryRef factory, CFUUIDRef typeID);
+extern void _CFPFactoryDisable(_CFPFactoryRef factory);
 
-extern _CFPFactory *_CFPFactoryFind(CFUUIDRef factoryID, Boolean enabled);
+extern void _CFPFactoryFlushFunctionCache(_CFPFactoryRef factory);
 
-extern CFUUIDRef _CFPFactoryGetFactoryID(_CFPFactory *factory);
-extern CFPlugInRef _CFPFactoryGetPlugIn(_CFPFactory *factory);
+extern void _CFPFactoryAddType(_CFPFactoryRef factory, CFUUIDRef typeID);
+extern void _CFPFactoryRemoveType(_CFPFactoryRef factory, CFUUIDRef typeID);
 
-extern void *_CFPFactoryCreateInstance(CFAllocatorRef allocator, _CFPFactory *factory, CFUUIDRef typeID);
-extern void _CFPFactoryDisable(_CFPFactory *factory);
-extern Boolean _CFPFactoryIsEnabled(_CFPFactory *factory);
-
-extern void _CFPFactoryFlushFunctionCache(_CFPFactory *factory);
-
-extern void _CFPFactoryAddType(_CFPFactory *factory, CFUUIDRef typeID);
-extern void _CFPFactoryRemoveType(_CFPFactory *factory, CFUUIDRef typeID);
-
-extern Boolean _CFPFactorySupportsType(_CFPFactory *factory, CFUUIDRef typeID);
-extern CFArrayRef _CFPFactoryFindForType(CFUUIDRef typeID);
+extern Boolean _CFPFactorySupportsType(_CFPFactoryRef factory, CFUUIDRef typeID);
+extern CFArrayRef _CFPFactoryFindCopyForType(CFUUIDRef typeID);
 
 /* These methods are called by CFPlugInInstance when an instance is created or destroyed.  If a factory's instance count goes to 0 and the factory has been disabled, the factory is destroyed. */
-extern void _CFPFactoryAddInstance(_CFPFactory *factory);
-extern void _CFPFactoryRemoveInstance(_CFPFactory *factory);
+extern void _CFPFactoryAddInstance(_CFPFactoryRef factory);
+extern void _CFPFactoryRemoveInstance(_CFPFactoryRef factory);
 
 CF_EXTERN_C_END
 

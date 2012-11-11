@@ -22,53 +22,111 @@
  */
 
 /*	CFPlugIn_Factory.c
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
-        Responsibility: David Smith
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Responsibility: Tony Parker
 */
 
 #include "CFBundle_Internal.h"
 #include "CFInternal.h"
 
-static CFSpinLock_t CFPlugInGlobalDataLock = CFSpinLockInit;
-static CFMutableDictionaryRef _factoriesByFactoryID = NULL; /* Value is _CFPFactory */
-static CFMutableDictionaryRef _factoriesByTypeID = NULL; /* Value is array of _CFPFactory */
+static CFTypeID __kCFPFactoryTypeID = _kCFRuntimeNotATypeID;
 
-static void _CFPFactoryAddToTable(_CFPFactory *factory) {
-    __CFSpinLock(&CFPlugInGlobalDataLock);
+struct __CFPFactory {
+    CFRuntimeBase _base;
+        
+    CFUUIDRef _uuid;
+    Boolean _enabled;
+    char _padding[3];
+    
+    CFPlugInFactoryFunction _func;
+    
+    CFPlugInRef _plugIn;
+    CFStringRef _funcName;
+    
+    CFMutableArrayRef _types;
+    CFSpinLock_t _lock;
+};
+
+static void _CFPFactoryDeallocate(CFTypeRef factory);
+
+static const CFRuntimeClass __CFPFactoryClass = {
+    0,
+    "_CFPFactory",
+    NULL,	// init
+    NULL,	// copy
+    _CFPFactoryDeallocate,
+    NULL,	// equal
+    NULL,	// hash
+    NULL,       // formatting desc
+    NULL,       // debug desc
+};
+
+__private_extern__ void __CFPFactoryInitialize(void) {
+    __kCFPFactoryTypeID = _CFRuntimeRegisterClass(&__CFPFactoryClass);
+}
+
+static CFTypeID _CFPFactoryGetTypeID(void) {
+    return __kCFPFactoryTypeID;
+}
+
+static CFSpinLock_t CFPlugInGlobalDataLock = CFSpinLockInit;
+static CFMutableDictionaryRef _factoriesByFactoryID = NULL; /* Value is _CFPFactoryRef */
+static CFMutableDictionaryRef _factoriesByTypeID = NULL; /* Value is array of _CFPFactoryRef */
+
+static void _CFPFactoryAddToTable(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);
+    CFUUIDRef uuid = (CFUUIDRef)CFRetain(factory->_uuid);
+    CFRetain(factory);
+    __CFSpinUnlock(&factory->_lock);
+    
+    __CFSpinLock(&CFPlugInGlobalDataLock);    
     if (!_factoriesByFactoryID) {
         CFDictionaryValueCallBacks _factoryDictValueCallbacks = {0, NULL, NULL, NULL, NULL};
         _factoriesByFactoryID = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeDictionaryKeyCallBacks, &_factoryDictValueCallbacks);
     }
-    CFDictionarySetValue(_factoriesByFactoryID, factory->_uuid, factory);
+    CFDictionarySetValue(_factoriesByFactoryID, uuid, factory);
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
+    
+    if (uuid) CFRelease(uuid);
+    CFRelease(factory);
 }
 
-static void _CFPFactoryRemoveFromTable(_CFPFactory *factory) {
+static void _CFPFactoryRemoveFromTable(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);
+    CFUUIDRef uuid = factory->_uuid;
+    if (uuid) CFRetain(uuid);
+    __CFSpinUnlock(&factory->_lock);
+    
     __CFSpinLock(&CFPlugInGlobalDataLock);
-    if (_factoriesByFactoryID) CFDictionaryRemoveValue(_factoriesByFactoryID, factory->_uuid);
+    if (uuid && _factoriesByTypeID) CFDictionaryRemoveValue(_factoriesByFactoryID, uuid);
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
+    
+    if (uuid) CFRelease(uuid);
 }
 
-__private_extern__ _CFPFactory *_CFPFactoryFind(CFUUIDRef factoryID, Boolean enabled) {
-    _CFPFactory *result = NULL;
+__private_extern__ _CFPFactoryRef _CFPFactoryFind(CFUUIDRef factoryID, Boolean enabled) {
+    _CFPFactoryRef result = NULL;
     
     __CFSpinLock(&CFPlugInGlobalDataLock);
     if (_factoriesByFactoryID) {
-        result = (_CFPFactory *)CFDictionaryGetValue(_factoriesByFactoryID, factoryID);
+        result = (_CFPFactoryRef )CFDictionaryGetValue(_factoriesByFactoryID, factoryID);
         if (result && result->_enabled != enabled) result = NULL;
     }
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
     return result;
 }
 
-static void _CFPFactoryDeallocate(_CFPFactory *factory) {
-    CFAllocatorRef allocator = factory->_allocator;
+static void _CFPFactoryDeallocate(CFTypeRef ty) {
     SInt32 c;
+    _CFPFactoryRef factory = (_CFPFactoryRef)ty;
     
     _CFPFactoryRemoveFromTable(factory);
 
-    if (factory->_plugIn) _CFPlugInRemoveFactory(factory->_plugIn, factory);
-
+    if (factory->_plugIn) {
+        _CFPlugInRemoveFactory(factory->_plugIn, factory);
+        CFRelease(factory->_plugIn);
+    }
+    
     /* Remove all types for this factory. */
     c = CFArrayGetCount(factory->_types);
     while (c-- > 0) _CFPFactoryRemoveType(factory, (CFUUIDRef)CFArrayGetValueAtIndex(factory->_types, c));
@@ -76,65 +134,70 @@ static void _CFPFactoryDeallocate(_CFPFactory *factory) {
 
     if (factory->_funcName) CFRelease(factory->_funcName);
     if (factory->_uuid) CFRelease(factory->_uuid);
-
-    CFAllocatorDeallocate(allocator, factory);
-    CFRelease(allocator);
 }
 
-static _CFPFactory *_CFPFactoryCommonCreate(CFAllocatorRef allocator, CFUUIDRef factoryID) {
-    _CFPFactory *factory;
-    UInt32 size;
-    size = sizeof(_CFPFactory);
-    allocator = (allocator ? (CFAllocatorRef)CFRetain(allocator) : (CFAllocatorRef)CFRetain(__CFGetDefaultAllocator()));
-    factory = (_CFPFactory *)CFAllocatorAllocate(allocator, size, 0);
-    if (!factory) {
-        CFRelease(allocator);
-        return NULL;
-    }
+static _CFPFactoryRef _CFPFactoryCommonCreate(CFAllocatorRef allocator, CFUUIDRef factoryID) {
+    _CFPFactoryRef factory;
+    uint32_t size;
+    size = sizeof(struct __CFPFactory) - sizeof(CFRuntimeBase);
+    factory = (_CFPFactoryRef)_CFRuntimeCreateInstance(allocator, _CFPFactoryGetTypeID(), size, NULL);
+    if (!factory) return NULL;
 
-    factory->_allocator = allocator;
     factory->_uuid = (CFUUIDRef)CFRetain(factoryID);
     factory->_enabled = true;
-    factory->_instanceCount = 0;
-
-    _CFPFactoryAddToTable(factory);
-
     factory->_types = CFArrayCreateMutable(allocator, 0, &kCFTypeArrayCallBacks);
+    factory->_lock = CFSpinLockInit; // WARNING: grab global lock before this lock
+        
+    _CFPFactoryAddToTable(factory);
 
     return factory;
 }
 
-__private_extern__ _CFPFactory *_CFPFactoryCreate(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInFactoryFunction func) {
-    _CFPFactory *factory = _CFPFactoryCommonCreate(allocator, factoryID);
+__private_extern__ _CFPFactoryRef _CFPFactoryCreate(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInFactoryFunction func) {
+    _CFPFactoryRef factory = _CFPFactoryCommonCreate(allocator, factoryID);
 
+    __CFSpinLock(&factory->_lock);    
     factory->_func = func;
     factory->_plugIn = NULL;
     factory->_funcName = NULL;
+    __CFSpinUnlock(&factory->_lock);
 
     return factory;
 }
 
-__private_extern__ _CFPFactory *_CFPFactoryCreateByName(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInRef plugIn, CFStringRef funcName) {
-    _CFPFactory *factory = _CFPFactoryCommonCreate(allocator, factoryID);
+__private_extern__ _CFPFactoryRef _CFPFactoryCreateByName(CFAllocatorRef allocator, CFUUIDRef factoryID, CFPlugInRef plugIn, CFStringRef funcName) {
+    _CFPFactoryRef factory = _CFPFactoryCommonCreate(allocator, factoryID);
 
+    __CFSpinLock(&factory->_lock);    
     factory->_func = NULL;
-    factory->_plugIn = plugIn;
+    factory->_plugIn = (CFPlugInRef)CFRetain(plugIn);
     if (plugIn) _CFPlugInAddFactory(plugIn, factory);
     factory->_funcName = (funcName ? (CFStringRef)CFStringCreateCopy(allocator, funcName) : NULL);
+    __CFSpinUnlock(&factory->_lock);
 
     return factory;
 }
 
-__private_extern__ CFUUIDRef _CFPFactoryGetFactoryID(_CFPFactory *factory) {
-    return factory->_uuid;
+__private_extern__ CFUUIDRef _CFPFactoryCopyFactoryID(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);
+    CFUUIDRef uuid = factory->_uuid;
+    if (uuid) CFRetain(uuid);
+    __CFSpinUnlock(&factory->_lock);
+    return uuid;
 }
 
-__private_extern__ CFPlugInRef _CFPFactoryGetPlugIn(_CFPFactory *factory) {
-    return factory->_plugIn;
+__private_extern__ CFPlugInRef _CFPFactoryCopyPlugIn(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);
+    CFPlugInRef result = factory->_plugIn;
+    if (result) CFRetain(result);
+    __CFSpinUnlock(&factory->_lock);
+    return result;
 }
 
-__private_extern__ void *_CFPFactoryCreateInstance(CFAllocatorRef allocator, _CFPFactory *factory, CFUUIDRef typeID) {
+__private_extern__ void *_CFPFactoryCreateInstance(CFAllocatorRef allocator, _CFPFactoryRef factory, CFUUIDRef typeID) {
     void *result = NULL;
+
+    __CFSpinLock(&factory->_lock);
     if (factory->_enabled) {
         if (!factory->_func) {
             factory->_func = (CFPlugInFactoryFunction)CFBundleGetFunctionPointerForName(factory->_plugIn, factory->_funcName);
@@ -142,40 +205,45 @@ __private_extern__ void *_CFPFactoryCreateInstance(CFAllocatorRef allocator, _CF
         }
         if (factory->_func) {
             // UPPGOOP
-            FAULT_CALLBACK((void **)&(factory->_func));
-            result = (void *)INVOKE_CALLBACK2(factory->_func, allocator, typeID);
+            CFPlugInFactoryFunction f = factory->_func;
+            __CFSpinUnlock(&factory->_lock);
+            FAULT_CALLBACK((void **)&(f));
+            result = (void *)INVOKE_CALLBACK2(f, allocator, typeID);
+            __CFSpinLock(&factory->_lock);
         }
     } else {
         CFLog(__kCFLogPlugIn, CFSTR("Factory %@ is disabled"), factory->_uuid);
-    }
+    }    
+    __CFSpinUnlock(&factory->_lock);
+
     return result;
 }
 
-__private_extern__ void _CFPFactoryDisable(_CFPFactory *factory) {
+__private_extern__ void _CFPFactoryDisable(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);    
     factory->_enabled = false;
-    if (factory->_instanceCount == 0) _CFPFactoryDeallocate(factory);
+    __CFSpinUnlock(&factory->_lock);
+    CFRelease(factory);
 }
 
-__private_extern__ Boolean _CFPFactoryIsEnabled(_CFPFactory *factory) {
-    return factory->_enabled;
-}
-
-__private_extern__ void _CFPFactoryFlushFunctionCache(_CFPFactory *factory) {
+__private_extern__ void _CFPFactoryFlushFunctionCache(_CFPFactoryRef factory) {
     /* MF:!!! Assert that this factory belongs to a plugIn. */
     /* This is called by the factory's plugIn when the plugIn unloads its code. */
+    __CFSpinLock(&factory->_lock);
     factory->_func = NULL;
+    __CFSpinUnlock(&factory->_lock);
 }
 
-__private_extern__ void _CFPFactoryAddType(_CFPFactory *factory, CFUUIDRef typeID) {
-    CFMutableArrayRef array;
-    
+__private_extern__ void _CFPFactoryAddType(_CFPFactoryRef factory, CFUUIDRef typeID) {
+    /* Add the factory to the type's array of factories */
+    __CFSpinLock(&factory->_lock);
     /* Add the type to the factory's type list */
     CFArrayAppendValue(factory->_types, typeID);
+    __CFSpinUnlock(&factory->_lock);
 
-    /* Add the factory to the type's array of factories */
     __CFSpinLock(&CFPlugInGlobalDataLock);
     if (!_factoriesByTypeID) _factoriesByTypeID = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    array = (CFMutableArrayRef)CFDictionaryGetValue(_factoriesByTypeID, typeID);
+    CFMutableArrayRef array = (CFMutableArrayRef)CFDictionaryGetValue(_factoriesByTypeID, typeID);
     if (!array) {
         CFArrayCallBacks _factoryArrayCallbacks = {0, NULL, NULL, NULL, NULL};
         // Create this from default allocator
@@ -187,12 +255,14 @@ __private_extern__ void _CFPFactoryAddType(_CFPFactory *factory, CFUUIDRef typeI
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
 }
 
-__private_extern__ void _CFPFactoryRemoveType(_CFPFactory *factory, CFUUIDRef typeID) {
+__private_extern__ void _CFPFactoryRemoveType(_CFPFactoryRef factory, CFUUIDRef typeID) {
     /* Remove it from the factory's type list */
     SInt32 idx;
 
+    __CFSpinLock(&factory->_lock);
     idx = CFArrayGetFirstIndexOfValue(factory->_types, CFRangeMake(0, CFArrayGetCount(factory->_types)), typeID);
     if (idx >= 0) CFArrayRemoveValueAtIndex(factory->_types, idx);
+    __CFSpinUnlock(&factory->_lock);
 
     /* Remove the factory from the type's list of factories */
     __CFSpinLock(&CFPlugInGlobalDataLock);
@@ -209,33 +279,50 @@ __private_extern__ void _CFPFactoryRemoveType(_CFPFactory *factory, CFUUIDRef ty
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
 }
 
-__private_extern__ Boolean _CFPFactorySupportsType(_CFPFactory *factory, CFUUIDRef typeID) {
+__private_extern__ Boolean _CFPFactorySupportsType(_CFPFactoryRef factory, CFUUIDRef typeID) {
     SInt32 idx;
 
+    __CFSpinLock(&factory->_lock);
     idx = CFArrayGetFirstIndexOfValue(factory->_types, CFRangeMake(0, CFArrayGetCount(factory->_types)), typeID);
+    __CFSpinUnlock(&factory->_lock);
+    
     return (idx >= 0 ? true : false);
 }
 
-__private_extern__ CFArrayRef _CFPFactoryFindForType(CFUUIDRef typeID) {
+__private_extern__ CFArrayRef _CFPFactoryFindCopyForType(CFUUIDRef typeID) {
     CFArrayRef result = NULL;
-
     __CFSpinLock(&CFPlugInGlobalDataLock);
-    if (_factoriesByTypeID) result = (CFArrayRef)CFDictionaryGetValue(_factoriesByTypeID, typeID);
+    if (_factoriesByTypeID) {
+        result = (CFArrayRef)CFDictionaryGetValue(_factoriesByTypeID, typeID);
+        if (result) CFRetain(result);
+    }
     __CFSpinUnlock(&CFPlugInGlobalDataLock);
 
     return result;
 }
 
 /* These methods are called by CFPlugInInstance when an instance is created or destroyed.  If a factory's instance count goes to 0 and the factory has been disabled, the factory is destroyed. */
-__private_extern__ void _CFPFactoryAddInstance(_CFPFactory *factory) {
+__private_extern__ void _CFPFactoryAddInstance(_CFPFactoryRef factory) {
     /* MF:!!! Assert that factory is enabled. */
-    factory->_instanceCount++;
-    if (factory->_plugIn) _CFPlugInAddPlugInInstance(factory->_plugIn);
+    CFRetain(factory);
+    __CFSpinLock(&factory->_lock);
+    CFPlugInRef plugin = factory->_plugIn;
+    if (plugin) CFRetain(plugin);
+    __CFSpinUnlock(&factory->_lock);
+    if (plugin) {
+        _CFPlugInAddPlugInInstance(plugin);
+        CFRelease(plugin);
+    }    
 }
 
-__private_extern__ void _CFPFactoryRemoveInstance(_CFPFactory *factory) {
-    /* MF:!!! Assert that _instanceCount > 0. */
-    factory->_instanceCount--;
-    if (factory->_plugIn) _CFPlugInRemovePlugInInstance(factory->_plugIn);
-    if (factory->_instanceCount == 0 && !factory->_enabled) _CFPFactoryDeallocate(factory);
+__private_extern__ void _CFPFactoryRemoveInstance(_CFPFactoryRef factory) {
+    __CFSpinLock(&factory->_lock);
+    CFPlugInRef plugin = factory->_plugIn;
+    if (plugin) CFRetain(plugin);
+    __CFSpinUnlock(&factory->_lock);
+    if (plugin) {
+        _CFPlugInRemovePlugInInstance(factory->_plugIn);
+        CFRelease(plugin);
+    }
+    CFRelease(factory);
 }

@@ -22,7 +22,7 @@
  */
 
 /*	CFStream.h
-	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTREAM__)
@@ -36,9 +36,10 @@
 #include <CoreFoundation/CFSocket.h>
 #include <CoreFoundation/CFError.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
-enum {
+typedef CF_ENUM(CFIndex, CFStreamStatus) {
     kCFStreamStatusNotOpen = 0,
     kCFStreamStatusOpening,  /* open is in-progress */
     kCFStreamStatusOpen,
@@ -48,9 +49,8 @@ enum {
     kCFStreamStatusClosed,
     kCFStreamStatusError
 };
-typedef CFIndex CFStreamStatus;
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFStreamEventType) {
     kCFStreamEventNone = 0,
     kCFStreamEventOpenCompleted = 1,
     kCFStreamEventHasBytesAvailable = 2,
@@ -58,7 +58,6 @@ enum {
     kCFStreamEventErrorOccurred = 8,
     kCFStreamEventEndEncountered = 16
 };
-typedef CFOptionFlags CFStreamEventType;
 
 typedef struct {
     CFIndex version;
@@ -102,8 +101,10 @@ CF_EXPORT
 CFReadStreamRef CFReadStreamCreateWithFile(CFAllocatorRef alloc, CFURLRef fileURL);
 CF_EXPORT
 CFWriteStreamRef CFWriteStreamCreateWithFile(CFAllocatorRef alloc, CFURLRef fileURL);
+CF_IMPLICIT_BRIDGING_DISABLED
 CF_EXPORT
 void CFStreamCreateBoundPair(CFAllocatorRef alloc, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream, CFIndex transferBufferSize);
+CF_IMPLICIT_BRIDGING_ENABLED
 
 /* Property for file write streams; value should be a CFBoolean.  Set to TRUE to append to a file, rather than to replace its contents */
 CF_EXPORT
@@ -127,6 +128,7 @@ const CFStringRef kCFStreamPropertySocketRemoteHostName;
 CF_EXPORT
 const CFStringRef kCFStreamPropertySocketRemotePortNumber;
 
+CF_IMPLICIT_BRIDGING_DISABLED
 /* Socket streams; the returned streams are paired such that they use the same socket; pass NULL if you want only the read stream or the write stream */
 CF_EXPORT
 void CFStreamCreatePairWithSocket(CFAllocatorRef alloc, CFSocketNativeHandle sock, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
@@ -134,6 +136,7 @@ CF_EXPORT
 void CFStreamCreatePairWithSocketToHost(CFAllocatorRef alloc, CFStringRef host, UInt32 port, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
 CF_EXPORT
 void CFStreamCreatePairWithPeerSocketSignature(CFAllocatorRef alloc, const CFSocketSignature *signature, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
+CF_IMPLICIT_BRIDGING_ENABLED
 
 
 /* Returns the current state of the stream */
@@ -260,12 +263,11 @@ void CFWriteStreamUnscheduleFromRunLoop(CFWriteStreamRef stream, CFRunLoopRef ru
 
 
 /* The following API is deprecated starting in 10.5; please use CFRead/WriteStreamCopyError(), above, instead */
-enum {
-    kCFStreamErrorDomainCustom = -1,      /* custom to the kind of stream in question */
+typedef CF_ENUM(CFIndex, CFStreamErrorDomain) {
+    kCFStreamErrorDomainCustom = -1L,      /* custom to the kind of stream in question */
     kCFStreamErrorDomainPOSIX = 1,        /* POSIX errno; interpret using <sys/errno.h> */
     kCFStreamErrorDomainMacOSStatus      /* OSStatus type from Carbon APIs; interpret using <MacTypes.h> */
 };
-typedef CFIndex CFStreamErrorDomain;
 
 typedef struct {
     CFIndex domain; 
@@ -278,5 +280,6 @@ CFStreamError CFWriteStreamGetError(CFWriteStreamRef stream);
 
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFSTREAM__ */

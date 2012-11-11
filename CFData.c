@@ -22,7 +22,7 @@
  */
 
 /*	CFData.c
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 	Responsibility: Kevin Perry
 */
 
@@ -30,11 +30,8 @@
 #include <CoreFoundation/CFPriv.h>
 #include "CFInternal.h"
 #include <string.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#include <mach/mach_init.h>
-#elif DEPLOYMENT_TARGET_WINDOWS
-#include <windows.h> // For GetSystemInfo()
-#endif
+
+
 
 #if __LP64__
 #define CFDATA_MAX_SIZE	    ((1ULL << 42) - 1)
@@ -42,7 +39,8 @@
 #define CFDATA_MAX_SIZE	    ((1ULL << 31) - 1)
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+#import <mach/mach.h>
 CF_INLINE unsigned long __CFPageSize() { return vm_page_size; }
 #elif DEPLOYMENT_TARGET_WINDOWS
 CF_INLINE unsigned long __CFPageSize() {
@@ -176,14 +174,14 @@ CF_INLINE CFIndex __CFDataRoundUpCapacity(CFIndex capacity) {
 	return 16;
     } else if (capacity < LOW_THRESHOLD) {
 	/* Up to 4x */
-	int idx = flsl(capacity);
-	return (1 << (idx + ((idx % 2 == 0) ? 0 : 1)));
+	long idx = flsl(capacity);
+	return (1L << (long)(idx + ((idx % 2 == 0) ? 0 : 1)));
     } else if (capacity < HIGH_THRESHOLD) {
 	/* Up to 2x */
-	return (1 << flsl(capacity));
+	return (1L << (long)flsl(capacity));
     } else {
 	/* Round up to next multiple of CHUNK_SIZE */
-	unsigned long newCapacity = CHUNK_SIZE * (1+(capacity >> (flsl(CHUNK_SIZE)-1)));
+	unsigned long newCapacity = CHUNK_SIZE * (1+(capacity >> ((long)flsl(CHUNK_SIZE)-1)));
 	return __CFMin(newCapacity, CFDATA_MAX_SIZE);
     }
 }
@@ -491,27 +489,27 @@ CFMutableDataRef CFDataCreateMutableCopy(CFAllocatorRef allocator, CFIndex capac
 }
 
 CFIndex CFDataGetLength(CFDataRef data) {
-    CF_OBJC_FUNCDISPATCH0(__kCFDataTypeID, CFIndex, data, "length");
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, CFIndex, (NSData *)data, length);
     __CFGenericValidateType(data, __kCFDataTypeID);
     return __CFDataLength(data);
 }
 
 const uint8_t *CFDataGetBytePtr(CFDataRef data) {
-    CF_OBJC_FUNCDISPATCH0(__kCFDataTypeID, const uint8_t *, data, "bytes");
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, const uint8_t *, (NSData *)data, bytes);
     __CFGenericValidateType(data, __kCFDataTypeID);
     // compaction: if inline, always do the computation.
     return __CFDataBytesInline(data) ? (uint8_t *)__CFDataInlineBytesPtr(data) : data->_bytes;
 }
 
 uint8_t *CFDataGetMutableBytePtr(CFMutableDataRef data) {
-    CF_OBJC_FUNCDISPATCH0(__kCFDataTypeID, uint8_t *, data, "mutableBytes");
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, uint8_t *, (NSMutableData *)data, mutableBytes);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     // compaction: if inline, always do the computation.
     return __CFDataBytesInline(data) ? (uint8_t *)__CFDataInlineBytesPtr(data) : data->_bytes;
 }
 
 void CFDataGetBytes(CFDataRef data, CFRange range, uint8_t *buffer) {
-    CF_OBJC_FUNCDISPATCH2(__kCFDataTypeID, void, data, "getBytes:range:", buffer, range);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSData *)data, getBytes:(void *)buffer range:NSMakeRange(range.location, range.length));
     __CFDataValidateRange(data, range, __PRETTY_FUNCTION__);
     memmove(buffer, CFDataGetBytePtr(data) + range.location, range.length);
 }
@@ -556,7 +554,7 @@ static void __CFDataGrow(CFMutableDataRef data, CFIndex numNewValues, Boolean cl
 void CFDataSetLength(CFMutableDataRef data, CFIndex newLength) {
     CFIndex oldLength, capacity;
     Boolean isGrowable;
-    CF_OBJC_FUNCDISPATCH1(__kCFDataTypeID, void, data, "setLength:", newLength);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSMutableData *)data, setLength:(NSUInteger)newLength);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     oldLength = __CFDataLength(data);
     capacity = __CFDataCapacity(data);
@@ -585,26 +583,26 @@ void CFDataSetLength(CFMutableDataRef data, CFIndex newLength) {
 }
 
 void CFDataIncreaseLength(CFMutableDataRef data, CFIndex extraLength) {
-    CF_OBJC_FUNCDISPATCH1(__kCFDataTypeID, void, data, "increaseLengthBy:", extraLength);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSMutableData *)data, increaseLengthBy:(NSUInteger)extraLength);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     if (extraLength < 0) HALT; // Avoid integer overflow.
     CFDataSetLength(data, __CFDataLength(data) + extraLength);
 }
 
 void CFDataAppendBytes(CFMutableDataRef data, const uint8_t *bytes, CFIndex length) {
-    CF_OBJC_FUNCDISPATCH2(__kCFDataTypeID, void, data, "appendBytes:length:", bytes, length);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSMutableData *)data, appendBytes:(const void *)bytes length:(NSUInteger)length);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     CFDataReplaceBytes(data, CFRangeMake(__CFDataLength(data), 0), bytes, length); 
 }
 
 void CFDataDeleteBytes(CFMutableDataRef data, CFRange range) {
-    CF_OBJC_FUNCDISPATCH3(__kCFDataTypeID, void, data, "replaceBytesInRange:withBytes:length:", range, NULL, 0);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSMutableData *)data, replaceBytesInRange:NSMakeRange(range.location, range.length) withBytes:NULL length:0);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);
     CFDataReplaceBytes(data, range, NULL, 0); 
 }
 
 void CFDataReplaceBytes(CFMutableDataRef data, CFRange range, const uint8_t *newBytes, CFIndex newLength) {
-    CF_OBJC_FUNCDISPATCH3(__kCFDataTypeID, void, data, "replaceBytesInRange:withBytes:length:", range, newBytes, newLength);
+    CF_OBJC_FUNCDISPATCHV(__kCFDataTypeID, void, (NSMutableData *)data, replaceBytesInRange:NSMakeRange(range.location, range.length) withBytes:(const void *)newBytes length:(NSUInteger)newLength);
     __CFGenericValidateType(data, __kCFDataTypeID);
     __CFDataValidateRange(data, range, __PRETTY_FUNCTION__);
     CFAssert1(__CFDataIsMutable(data), __kCFLogAssertion, "%s(): data is immutable", __PRETTY_FUNCTION__);

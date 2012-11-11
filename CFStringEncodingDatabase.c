@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingDatabase.c
-	Copyright (c) 2005-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 

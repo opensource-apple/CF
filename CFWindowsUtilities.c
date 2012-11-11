@@ -23,7 +23,7 @@
 
 /*	
     CFWindowsUtilities.c
-    Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+    Copyright (c) 2008-2012, Apple Inc. All rights reserved.
     Responsibility: Tony Parker
 */
 

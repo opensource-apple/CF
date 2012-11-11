@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingExt.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRINGENCODINGEXT__)
@@ -32,7 +32,7 @@
 
 CF_EXTERN_C_BEGIN
 
-enum {
+typedef CF_ENUM(CFIndex, CFStringEncodings) {
 /*  kCFStringEncodingMacRoman = 0L, defined in CoreFoundation/CFString.h */
     kCFStringEncodingMacJapanese = 1,
     kCFStringEncodingMacChineseTrad = 2,
@@ -144,9 +144,7 @@ enum {
     kCFStringEncodingJIS_X0208_90 = 0x0622,
     kCFStringEncodingJIS_X0212_90 = 0x0623,
     kCFStringEncodingJIS_C6226_78 = 0x0624,
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
-    kCFStringEncodingShiftJIS_X0213 = 0x0628, /* Shift-JIS format encoding of JIS X0213 planes 1 and 2*/
-#endif
+    kCFStringEncodingShiftJIS_X0213 CF_ENUM_AVAILABLE(10_5, 2_0) = 0x0628, /* Shift-JIS format encoding of JIS X0213 planes 1 and 2*/
     kCFStringEncodingShiftJIS_X0213_MenKuTen = 0x0629,	/* JIS X0213 in plane-row-column notation */
     kCFStringEncodingGB_2312_80 = 0x0630,
     kCFStringEncodingGBK_95 = 0x0631,		/* annex to GB 13000-93; for Windows 95 */
@@ -191,15 +189,12 @@ enum {
     kCFStringEncodingEBCDIC_US = 0x0C01,	/* basic EBCDIC-US */
     kCFStringEncodingEBCDIC_CP037 = 0x0C02,	/* code page 037, extended EBCDIC (Latin-1 set) for US,Canada... */
 
-#if MAC_OS_X_VERSION_10_6 <= MAC_OS_X_VERSION_MAX_ALLOWED
-    kCFStringEncodingUTF7 = 0x04000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF7Format RFC2152 */
-    kCFStringEncodingUTF7_IMAP = 0x0A10, /* UTF-7 (IMAP folder variant) RFC3501 */
-#endif /* MAC_OS_X_VERSION_10_6 <= MAC_OS_X_VERSION_MAX_ALLOWED */
+    kCFStringEncodingUTF7 CF_ENUM_AVAILABLE(10_6, 4_0) = 0x04000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF7Format RFC2152 */
+    kCFStringEncodingUTF7_IMAP CF_ENUM_AVAILABLE(10_6, 4_0) = 0x0A10, /* UTF-7 (IMAP folder variant) RFC3501 */
 
     /* Deprecated constants */
     kCFStringEncodingShiftJIS_X0213_00 = 0x0628 /* Shift-JIS format encoding of JIS X0213 planes 1 and 2 (DEPRECATED) */
 };
-typedef CFIndex CFStringEncodings;
 
 CF_EXTERN_C_END
 

@@ -4,7 +4,7 @@ include MakefileVersion
 MIN_MACOSX_VERSION=10.7
 MAX_MACOSX_VERSION=MAC_OS_X_VERSION_10_7
 
-OBJECTS = CFCharacterSet.o CFPreferences.o CFApplicationPreferences.o CFXMLPreferencesDomain.o CFStringEncodingConverter.o CFUniChar.o CFArray.o CFPropertyList.o CFStringEncodingDatabase.o CFUnicodeDecomposition.o CFBag.o CFData.o  CFStringEncodings.o CFUnicodePrecomposition.o CFBase.o CFDate.o CFNumber.o CFRuntime.o CFStringScanner.o CFBinaryHeap.o CFDateFormatter.o CFNumberFormatter.o CFSet.o CFStringUtilities.o CFUtilities.o CFBinaryPList.o CFDictionary.o CFPlatform.o CFSystemDirectories.o CFVersion.o CFBitVector.o CFError.o CFPlatformConverters.o CFTimeZone.o  CFBuiltinConverters.o CFFileUtilities.o  CFSortFunctions.o CFTree.o CFICUConverters.o CFURL.o CFLocale.o  CFURLAccess.o CFCalendar.o CFLocaleIdentifier.o CFString.o CFUUID.o CFStorage.o CFLocaleKeys.o
+OBJECTS = CFCharacterSet.o CFPreferences.o CFApplicationPreferences.o CFXMLPreferencesDomain.o CFStringEncodingConverter.o CFUniChar.o CFArray.o CFOldStylePList.o CFPropertyList.o CFStringEncodingDatabase.o CFUnicodeDecomposition.o CFBag.o CFData.o  CFStringEncodings.o CFUnicodePrecomposition.o CFBase.o CFDate.o CFNumber.o CFRuntime.o CFStringScanner.o CFBinaryHeap.o CFDateFormatter.o CFNumberFormatter.o CFSet.o CFStringUtilities.o CFUtilities.o CFBinaryPList.o CFDictionary.o CFPlatform.o CFSystemDirectories.o CFVersion.o CFBitVector.o CFError.o CFPlatformConverters.o CFTimeZone.o  CFBuiltinConverters.o CFFileUtilities.o  CFSortFunctions.o CFTree.o CFICUConverters.o CFURL.o CFLocale.o  CFURLAccess.o CFCalendar.o CFLocaleIdentifier.o CFString.o CFUUID.o CFStorage.o CFLocaleKeys.o
 OBJECTS += CFBasicHash.o
 HFILES = $(wildcard *.h)
 INTERMEDIATE_HFILES = $(addprefix $(OBJBASE)/CoreFoundation/,$(HFILES))

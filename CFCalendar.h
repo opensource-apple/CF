@@ -22,7 +22,7 @@
  */
 
 /*	CFCalendar.h
-	Copyright (c) 2004-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFCALENDAR__)
@@ -33,6 +33,7 @@
 #include <CoreFoundation/CFDate.h>
 #include <CoreFoundation/CFTimeZone.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 typedef struct __CFCalendar * CFCalendarRef;
@@ -77,7 +78,7 @@ CF_EXPORT
 void CFCalendarSetMinimumDaysInFirstWeek(CFCalendarRef calendar, CFIndex mwd);
 
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFCalendarUnit) {
 	kCFCalendarUnitEra = (1UL << 1),
 	kCFCalendarUnitYear = (1UL << 2),
 	kCFCalendarUnitMonth = (1UL << 3),
@@ -88,16 +89,11 @@ enum {
 	kCFCalendarUnitWeek = (1UL << 8) /* CF_DEPRECATED(10_4, 10_7, 2_0, 5_0) */,
 	kCFCalendarUnitWeekday = (1UL << 9),
 	kCFCalendarUnitWeekdayOrdinal = (1UL << 10),
-#if MAC_OS_X_VERSION_10_6 <= MAC_OS_X_VERSION_MAX_ALLOWED || __IPHONE_4_0 <= __IPHONE_OS_VERSION_MAX_ALLOWED
-	kCFCalendarUnitQuarter = (1UL << 11),
-#endif
-#if MAC_OS_X_VERSION_10_7 <= MAC_OS_X_VERSION_MAX_ALLOWED || __IPHONE_5_0 <= __IPHONE_OS_VERSION_MAX_ALLOWED
-	kCFCalendarUnitWeekOfMonth = (1UL << 12),
-	kCFCalendarUnitWeekOfYear = (1UL << 13),
-	kCFCalendarUnitYearForWeekOfYear = (1UL << 14),
-#endif
+	kCFCalendarUnitQuarter CF_ENUM_AVAILABLE(10_6, 4_0) = (1UL << 11),
+	kCFCalendarUnitWeekOfMonth CF_ENUM_AVAILABLE(10_7, 5_0) = (1UL << 12),
+	kCFCalendarUnitWeekOfYear CF_ENUM_AVAILABLE(10_7, 5_0) = (1UL << 13),
+	kCFCalendarUnitYearForWeekOfYear CF_ENUM_AVAILABLE(10_7, 5_0) = (1UL << 14),
 };
-typedef CFOptionFlags CFCalendarUnit;
 
 CF_EXPORT
 CFRange CFCalendarGetMinimumRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit unit);
@@ -133,6 +129,7 @@ Boolean CFCalendarGetComponentDifference(CFCalendarRef calendar, CFAbsoluteTime 
 
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFCALENDAR__ */
 

@@ -22,7 +22,7 @@
  */
 
 /*	CFURL.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURL__)
@@ -32,16 +32,15 @@
 #include <CoreFoundation/CFData.h>
 #include <CoreFoundation/CFError.h>
 #include <CoreFoundation/CFString.h>
-#include <CoreFoundation/CFNumber.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
-enum {
+typedef CF_ENUM(CFIndex, CFURLPathStyle) {
     kCFURLPOSIXPathStyle = 0,
-    kCFURLHFSPathStyle,
+    kCFURLHFSPathStyle, /* The use of kCFURLHFSPathStyle is deprecated. The Carbon File Manager, which uses HFS style paths, is deprecated. HFS style paths are unreliable because they can arbitrarily refer to multiple volumes if those volumes have identical volume names. You should instead use kCFURLPOSIXPathStyle wherever possible. */
     kCFURLWindowsPathStyle
 };
-typedef CFIndex CFURLPathStyle;
     
 typedef const struct __CFURL * CFURLRef;
 
@@ -297,7 +296,7 @@ CFURLRef CFURLCreateCopyDeletingPathExtension(CFAllocatorRef allocator, CFURLRef
 CF_EXPORT
 CFIndex CFURLGetBytes(CFURLRef url, UInt8 *buffer, CFIndex bufferLength);
 
-enum {
+typedef CF_ENUM(CFIndex, CFURLComponentType) {
 	kCFURLComponentScheme = 1,
 	kCFURLComponentNetLocation = 2,
 	kCFURLComponentPath = 3,
@@ -312,7 +311,6 @@ enum {
 	kCFURLComponentQuery = 11,
 	kCFURLComponentFragment = 12
 };
-typedef CFIndex CFURLComponentType;
  
 /* 
 Gets the  range of the requested component in the bytes of url, as
@@ -412,130 +410,264 @@ CFStringRef CFURLCreateStringByAddingPercentEscapes(CFAllocatorRef allocator, CF
 
 
 #if (TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || CF_BUILDING_CF || NSBUILDINGFOUNDATION
+CF_IMPLICIT_BRIDGING_DISABLED
 
-/* Returns a file reference URL, a path-idependent form of file URL. */
-/* Converts a file path URL if necessary. For non-file URLs, returns NULL. */
-/* Also returns NULL when the conversion fails because the target resource doesn't exist. */
-/* Optional output error: The error is set to a valid CFErrorRef when the function */
-/* result is NULL. A valid output error must be released by the caller. */
+/*
+    CFURLCreateFileReferenceURL
+    
+    Returns a new file reference URL that refers to the same resource as a specified URL.
+
+    Parameters
+        allocator
+            The memory allocator for creating the new URL.
+        url
+            The file URL specifying the resource.
+        error
+            On output when the result is NULL, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        The new file reference URL, or NULL if an error occurs.
+
+    Discussion
+        File reference URLs use a URL path syntax that identifies a file system object by reference, not by path. This form of file URL remains valid when the file system path of the URL’s underlying resource changes. An error will occur if the url parameter is not a file URL. File reference URLs cannot be created to file system objects which do not exist or are not reachable. In some areas of the file system hierarchy, file reference URLs cannot be generated to the leaf node of the URL path. A file reference URL's path should never be persistently stored because is not valid across system restarts, and across remounts of volumes -- if you want to create a persistent reference to a file system object, use a bookmark (see CFURLCreateBookmarkData). If this function returns NULL, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 CFURLRef CFURLCreateFileReferenceURL(CFAllocatorRef allocator, CFURLRef url, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Returns a file path URL, converting a file reference URL if necessary. */
-/* For non-file URLs, returns NULL. Also returns NULL when the conversion fails */
-/* because the target resource doesn't exist. */
-/* Optional output error: The error is set to a valid CFErrorRef when the function */
-/* result is NULL. A valid output error must be released by the caller. */
+/*
+    CFURLCreateFilePathURL
+    
+    Returns a new file path URL that refers to the same resource as a specified URL.
+
+    Parameters
+        allocator
+            The memory allocator for creating the new URL.
+        url
+            The file URL specifying the resource.
+        error
+            On output when the result is NULL, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        The new file path URL, or NULL if an error occurs.
+
+    Discussion
+        File path URLs use a file system style path. An error will occur if the url parameter is not a file URL. A file reference URL's resource must exist and be reachable to be converted to a file path URL. If this function returns NULL, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 CFURLRef CFURLCreateFilePathURL(CFAllocatorRef allocator, CFURLRef url, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
+CF_IMPLICIT_BRIDGING_ENABLED
 #endif
 
 
 
 #if (TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || CF_BUILDING_CF || NSBUILDINGFOUNDATION
+CF_IMPLICIT_BRIDGING_DISABLED
 
-/* The following APIs provide efficient access to resource properties. Properties 
-are identified by keys, and values are represented as Core Foundation objects. The 
-type of each value is fixed for each property, e.g. the modification date is a CFDateRef, 
-the file size is a CFNumberRef.
+/* Resource access
 
-Values are fetched on-demand, synchronously, from the resource's backing store. They
-are cached and reused when fetched again through the same URL instance, until the 
-client clears the value. The client has complete control over the cache lifetime.
+    The behavior of resource value caching is slightly different between the NSURL and CFURL API.
 
-Some resource property values can be changed, given sufficient access permission to the resource. 
-When a resource property value is set, the change is written to backing store synchronously.
-*/
+    When the NSURL methods which get, set, or use cached resource values are used from the main thread, resource values cached by the URL (except those added as temporary properties) are invalidated the next time the main thread's run loop runs.
 
-/* Assigns the requested resource property value to the typeRefValuePtr output */
-/* argument. Returns true if the output value was set. Note that NULL is a valid output value. */
-/* The value is fetched synchronously from the resource backing store only if a value is not */
-/* already cached. The type of the output value type varies by property (see property key */
-/* definitions). Returns false if an error occurs. Optional output error: the error is set to */
-/* a valid CFErrorRef when the function returns false. A valid output error must be */
-/* released by the caller. */
+    The CFURL functions do not automatically clear any resource values cached by the URL. The client has complete control over the cache lifetime. If you are using CFURL API, you must use CFURLClearResourcePropertyCacheForKey or CFURLClearResourcePropertyCache to clear cached resource values.
+ */
+
+
+/*
+    CFURLCopyResourcePropertyForKey
+    
+    Returns the resource value identified by a given resource key.
+
+    Parameters
+        url
+            The URL specifying the resource.
+        key
+            The resource key that identifies the resource property.
+        propertyValueTypeRefPtr
+            On output when the result is true, the resource value or NULL.
+        error
+            On output when the result is false, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        true if propertyValueTypeRefPtr is successfully populated; false if an error occurs.
+
+    Discussion
+        CFURLCopyResourcePropertyForKey first checks if the URL object already caches the resource value. If so, it returns the cached resource value to the caller. If not, then CFURLCopyResourcePropertyForKey synchronously obtains the resource value from the backing store, adds the resource value to the URL object's cache, and returns the resource value to the caller. The type of the resource value varies by resource property (see resource key definitions). If this function returns true and propertyValueTypeRefPtr is populated with NULL, it means the resource property is not available for the specified resource and no errors occurred when determining the resource property was not available. If this function returns false, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 Boolean CFURLCopyResourcePropertyForKey(CFURLRef url, CFStringRef key, void *propertyValueTypeRefPtr, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Returns any number of resource property values as a dictionary of keyed values. */
-/* The requested values are specified as an array of keys to appear in */
-/* the result dictionary. Values are fetched synchronously from the resource backing store unless */
-/* already cached. The type of each value type varies (see key definitions, below). */
-/* Returns an empty dictionary if no values are found. Returns NULL when an error occurs. */
-/* Optional output error: the error is set to a valid CFErrorRef when the */
-/* function returns NULL. A valid output error must be released by the caller. */
+/*
+    CFURLCopyResourcePropertiesForKeys
+    
+    Returns the resource values identified by specified array of resource keys.
+
+    Parameters
+        url
+            The URL specifying the resource.
+        keys
+            An array of resource keys that identify the resource properties.
+        error
+            On output when the result is NULL, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        A dictionary of resource values indexed by resource key; NULL if an error occurs.
+
+    Discussion
+        CFURLCopyResourcePropertiesForKeys first checks if the URL object already caches the resource values. If so, it returns the cached resource values to the caller. If not, then CFURLCopyResourcePropertyForKey synchronously obtains the resource values from the backing store, adds the resource values to the URL object's cache, and returns the resource values to the caller. The type of the resource values vary by property (see resource key definitions). If the result dictionary does not contain a resource value for one or more of the requested resource keys, it means those resource properties are not available for the specified resource and no errors occurred when determining those resource properties were not available. If this function returns NULL, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 CFDictionaryRef CFURLCopyResourcePropertiesForKeys(CFURLRef url, CFArrayRef keys, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Changes a resource property value. Synchronously writes the value to the resource backing */
-/* store. The input value type must be a valid CFTypeRef, of the type required for the specified */
-/* key (see key definitions). Returns true upon success, false when an error occurs. */
-/* Optional output error: the error is set to a valid CFErrorRef when the function */
-/* returns false. A valid output error must be released by the caller. */
-/* Note that some values are read-only. Attempting to set a read-only property */
-/* results in an error. */
+/*
+    CFURLSetResourcePropertyForKey
+    
+    Sets the resource value identified by a given resource key.
+
+    Parameters
+        url
+            The URL specifying the resource.
+        key
+            The resource key that identifies the resource property.
+        propertyValue
+            The resource value.
+        error
+            On output when the result is false, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        true if the attempt to set the resource value completed with no errors; otherwise, false.
+
+    Discussion
+        CFURLSetResourcePropertyForKey writes the new resource value out to the backing store. Attempts to set a read-only resource property or to set a resource property not supported by the resource are ignored and are not considered errors. If this function returns false, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 Boolean CFURLSetResourcePropertyForKey(CFURLRef url, CFStringRef key, CFTypeRef propertyValue, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Changes any number of resource property values, specified as a dictionary of keyed values. */
-/* Synchronously writes values to the resource backing store. The input dictionary's value types must conform */
-/* to the type required for its key (see key definitions). Returns true when all values are set successfully, */
-/* and false if an error occurs. Optional output error: the error is set to a valid CFErrorRef when the function returns */
-/* false. A valid output error must be released by the caller. When an error occurs after some properties have been */
-/* successfully changed, the userInfo dictionary in the error contains an array of keys that */
-/* were not set with the dictionary key kCFURLKeysOfUnsetValuesKey. */
-/* Note that some values are read-only. Attempting to set a read-only value results in an error. */
+/*
+    CFURLSetResourcePropertiesForKeys
+    
+    Sets any number of resource values of a URL's resource.
+
+    Parameters
+        url
+            The URL specifying the resource.
+        keyedPropertyValues
+            A dictionary of resource values indexed by resource keys.
+        error
+            On output when the result is false, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        true if the attempt to set the resource values completed with no errors; otherwise, false.
+
+    Discussion
+        CFURLSetResourcePropertiesForKeys writes the new resource values out to the backing store. Attempts to set read-only resource properties or to set resource properties not supported by the resource are ignored and are not considered errors. If an error occurs after some resource properties have been successfully changed, the userInfo dictionary in the returned error contains an array of resource keys that were not set with the key kCFURLKeysOfUnsetValuesKey. The order in which the resource values are set is not defined. If you need to guarantee the order resource values are set, you should make multiple requests to CFURLSetResourcePropertiesForKeys or CFURLSetResourcePropertyForKey to guarantee the order. If this function returns false, the optional error is populated. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 Boolean CFURLSetResourcePropertiesForKeys(CFURLRef url, CFDictionaryRef keyedPropertyValues, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
 
 
 CF_EXPORT
 const CFStringRef kCFURLKeysOfUnsetValuesKey CF_AVAILABLE(10_7, 5_0);
-    /* If CFURLSetResourcePropertiesForKeys returns an error, this is key in the error's userInfo dictionary to the array of keys of unset values. */
+    /* Key for the resource properties that have not been set after the CFURLSetResourcePropertiesForKeys function returns an error, returned as an array of of CFString objects. */
 
 
-/* Discards a cached property value for a specific key */
+/*
+    CFURLClearResourcePropertyCacheForKey
+    
+    Discards a cached resource value of a URL.
+
+    Parameters
+        url
+            The URL specifying the resource.
+        key
+            The resource key that identifies the resource property.
+
+    Discussion
+        Discarding a cached resource value may discard other cached resource values, because some resource values are cached as a set of values and because some resource values depend on other resource values (temporary properties have no dependencies). This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 void CFURLClearResourcePropertyCacheForKey(CFURLRef url, CFStringRef key) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Discards all cached property values */
+/*
+    CFURLClearResourcePropertyCache
+    
+    Discards all cached resource values of a URL.
+
+    Parameters
+        url
+            The URL specifying the resource.
+
+    Discussion
+        All temporary properties are also cleared from the URL object's cache. This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 void CFURLClearResourcePropertyCache(CFURLRef url) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Sets a temporary property value. Temporary properties exist only in memory and are never */
-/* written to resource backing store. Once set, a temporary property value can be fetched */
-/* with CFURLCopyResourcePropertyForKey and CFURLCopyResourcePropertiesForKeys. Temporary property */
-/* values are for client use. Values must be valid Core Foundation types, and will be retained. */
-/* To remove a temporary property value, use CFURLClearResourcePropertyCacheForKey. */
+/*
+    CFURLSetTemporaryResourcePropertyForKey
+    
+    Sets a temporary resource value on the URL object.
+
+    Parameters
+        url
+            The URL object.
+        key
+            The resource key that identifies the temporary resource property.
+        propertyValue
+            The resource value.
+
+    Discussion
+        Temporary properties are for client use. Temporary properties exist only in memory and are never written to the resource's backing store. Once set, a temporary value can be copied from the URL object with CFURLCopyResourcePropertyForKey and CFURLCopyResourcePropertiesForKeys. To remove a temporary value from the URL object, use CFURLClearResourcePropertyCacheForKey. Temporary values must be valid Core Foundation types, and will be retained by CFURLSetTemporaryResourcePropertyForKey. Care should be taken to ensure the key that identifies a temporary resource property is unique and does not conflict with system defined keys (using reverse domain name notation in your temporary resource property keys is recommended). This function is currently applicable only to URLs for file system resources.
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 void CFURLSetTemporaryResourcePropertyForKey(CFURLRef url, CFStringRef key, CFTypeRef propertyValue) CF_AVAILABLE(10_6, 4_0);
 
 
-/* Synchronously checks if the resource's backing store is reachable and the resource exists, */
-/* returning true if so. The optional output error can be used to determine the type of reachability */
-/* failure (e.g., file not found, network error, etc.). The error is set to a valid CFErrorRef if */
-/* and only if the function returns false. A valid output error must be released by */
-/* the caller. Checking for resource existence and reachability is appropriate when making decisions */
-/* that do not require other immediate operations on the resource. An example would be */
-/* periodic maintenance of UI state that depends on the existence of a particular document. */
-/* When performing an operation such as opening a file, it is more efficient to */
-/* simply try the operation and handle failures than to check first for reachability. */
+/*
+    CFURLResourceIsReachable
+    
+    Returns whether the URL's resource exists and is reachable.
+
+    Parameters
+        url
+            The URL object.
+        error
+            On output when the result is false, the error that occurred. This parameter is optional; if you do not wish the error returned, pass NULL here. The caller is responsible for releasing a valid output error.
+
+    Return Value
+        true if the resource is reachable; otherwise, false.
+
+    Discussion
+        CFURLResourceIsReachable synchronously checks if the resource's backing store is reachable. Checking reachability is appropriate when making decisions that do not require other immediate operations on the resource, e.g. periodic maintenance of UI state that depends on the existence of a specific document. When performing operations such as opening a file or copying resource properties, it is more efficient to simply try the operation and handle failures. This function is currently applicable only to URLs for file system resources. If this function returns false, the optional error is populated. For other URL types, false is returned. 
+        Symbol is present in iOS 4, but performs no operation.
+ */
 CF_EXPORT
 Boolean CFURLResourceIsReachable(CFURLRef url, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
+
+CF_IMPLICIT_BRIDGING_ENABLED
 
 
 /* Properties of File System Resources */
 
 CF_EXPORT 
 const CFStringRef kCFURLNameKey CF_AVAILABLE(10_6, 4_0);
-    /* The resource name provided by the file system (value type CFString) */
+    /* The resource name provided by the file system (Read-write, value type CFString) */
 
 CF_EXPORT
 const CFStringRef kCFURLLocalizedNameKey CF_AVAILABLE(10_6, 4_0);
@@ -559,27 +691,27 @@ const CFStringRef kCFURLIsVolumeKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLIsPackageKey CF_AVAILABLE(10_6, 4_0);
-    /* True for packaged directories (value type CFBoolean) */
+    /* True for packaged directories (Read-only 10_6 and 10_7, read-write 10_8, value type CFBoolean). Note: You can only set or clear this property on directories; if you try to set this property on non-directory objects, the property is ignored. If the directory is a package for some other reason (extension type, etc), setting this property to false will have no effect. */
 
 CF_EXPORT
 const CFStringRef kCFURLIsSystemImmutableKey CF_AVAILABLE(10_6, 4_0);
-    /* True for system-immutable resources (value type CFBoolean) */
+    /* True for system-immutable resources (Read-write, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLIsUserImmutableKey CF_AVAILABLE(10_6, 4_0);
-    /* True for user-immutable resources (value type CFBoolean) */
+    /* True for user-immutable resources (Read-write, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLIsHiddenKey CF_AVAILABLE(10_6, 4_0);
-    /* True for resources normally hidden from users (value type CFBoolean) */
+    /* True for resources normally not displayed to users (Read-write, value type CFBoolean). Note: If the resource is a hidden because its name starts with a period, setting this property to false will not change the property. */
 
 CF_EXPORT
 const CFStringRef kCFURLHasHiddenExtensionKey CF_AVAILABLE(10_6, 4_0);
-    /* True for resources whose filename extension is hidden (value type CFBoolean) */
+    /* True for resources whose filename extension is removed from the localized name property (Read-write, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLCreationDateKey CF_AVAILABLE(10_6, 4_0);
-    /* The date the resource was created (value type CFDate) */
+    /* The date the resource was created (Read-write, value type CFDate) */
 
 CF_EXPORT
 const CFStringRef kCFURLContentAccessDateKey CF_AVAILABLE(10_6, 4_0);
@@ -587,19 +719,19 @@ const CFStringRef kCFURLContentAccessDateKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLContentModificationDateKey CF_AVAILABLE(10_6, 4_0);
-    /* The time the resource content was last modified (value type CFDate) */
+    /* The time the resource content was last modified (Read-write, value type CFDate) */
 
 CF_EXPORT
 const CFStringRef kCFURLAttributeModificationDateKey CF_AVAILABLE(10_6, 4_0);
-    /* The time the resource's attributes were last modified (value type CFDate) */
+    /* The time the resource's attributes were last modified (Read-write, value type CFDate) */
 
 CF_EXPORT
 const CFStringRef kCFURLLinkCountKey CF_AVAILABLE(10_6, 4_0);
-    /* Number of hard links to the resource (Read-only, CFNumber) */
+    /* Number of hard links to the resource (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLParentDirectoryURLKey CF_AVAILABLE(10_6, 4_0);
-    /* URL of the parent directory, if any (Read-only, value type CFURL) */
+    /* The resource's parent directory, if any (Read-only, value type CFURL) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeURLKey CF_AVAILABLE(10_6, 4_0);
@@ -607,19 +739,19 @@ const CFStringRef kCFURLVolumeURLKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLTypeIdentifierKey CF_AVAILABLE(10_6, 4_0);
-    /* Uniform type identifier for the resource (Read-only, value type CFString) */
+    /* Uniform type identifier (UTI) for the resource (Read-only, value type CFString) */
 
 CF_EXPORT
 const CFStringRef kCFURLLocalizedTypeDescriptionKey CF_AVAILABLE(10_6, 4_0);
-    /* User-visible type or "kind" descriptiopn (Read-only, value type CFString) */
+    /* User-visible type or "kind" description (Read-only, value type CFString) */
 
 CF_EXPORT
 const CFStringRef kCFURLLabelNumberKey CF_AVAILABLE(10_6, 4_0);
-    /* The label number assigned to the resource (value type CFNumber) */
+    /* The label number assigned to the resource (Read-write, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLLabelColorKey CF_AVAILABLE(10_6, 4_0);
-    /* The color of the assigned label (Read-only, value type CGColorRef, must link with Application Services) */
+    /* The color of the assigned label (Currently not implemented, value type CGColorRef, must link with Application Services) */
 
 CF_EXPORT
 const CFStringRef kCFURLLocalizedLabelKey CF_AVAILABLE(10_6, 4_0);
@@ -631,7 +763,7 @@ const CFStringRef kCFURLEffectiveIconKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLCustomIconKey CF_AVAILABLE(10_6, 4_0);
-    /* The custom icon assigned to the resource, if any (value type CGImageRef, must link with Application Services) */
+    /* The custom icon assigned to the resource, if any (Currently not implemented, value type CGImageRef, must link with Application Services) */
 
 CF_EXPORT
 const CFStringRef kCFURLFileResourceIdentifierKey CF_AVAILABLE(10_7, 5_0);
@@ -659,7 +791,19 @@ const CFStringRef kCFURLIsExecutableKey CF_AVAILABLE(10_7, 5_0);
 
 CF_EXPORT
 const CFStringRef kCFURLFileSecurityKey CF_AVAILABLE(10_7, 5_0);
-    /* The file system object's security information encapsulated in a CFFileSecurity object. (Value type CFFileSecurity) */
+    /* The file system object's security information encapsulated in a CFFileSecurity object. (Read-write, value type CFFileSecurity) */
+
+CF_EXPORT
+const CFStringRef kCFURLIsExcludedFromBackupKey CF_AVAILABLE(10_8, 5_1);
+    /* true if resource should be excluded from backups, false otherwise (Read-write, value type CFBoolean). This property is only useful for excluding cache and other application support files which are not needed in a backup. Some operations commonly made to user documents will cause this property to be reset to false and so this property should not be used on user documents. */
+
+CF_EXPORT
+const CFStringRef kCFURLPathKey CF_AVAILABLE(10_8, 6_0);
+    /* the URL's path as a file system path (Read-only, value type CFString) */
+
+CF_EXPORT
+const CFStringRef kCFURLIsMountTriggerKey CF_AVAILABLE(10_7, 4_0);
+    /* true if this URL is a file system trigger directory. Traversing or opening a file system trigger will cause an attempt to mount a file system on the trigger directory. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLFileResourceTypeKey CF_AVAILABLE(10_7, 5_0);
@@ -687,32 +831,28 @@ const CFStringRef kCFURLFileResourceTypeUnknown CF_AVAILABLE(10_7, 5_0);
 
 CF_EXPORT
 const CFStringRef kCFURLFileSizeKey CF_AVAILABLE(10_6, 4_0);
-    /* Total file size, in bytes (Read-only, value type CFNumber) */
+    /* Total file size in bytes (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLFileAllocatedSizeKey CF_AVAILABLE(10_6, 4_0);
-    /* Total size of blocks allocated (Read-only, value type CFNumber) */
+    /* Total size allocated on disk for the file in bytes (number of blocks times block size) (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLTotalFileSizeKey CF_AVAILABLE(10_7, 5_0);
-    /* Total displayable size of the file, in bytes (this may include space used by metadata), or NULL if not available. (Read-only, value type CFNumber) */
+    /* Total displayable size of the file in bytes (this may include space used by metadata), or NULL if not available. (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLTotalFileAllocatedSizeKey CF_AVAILABLE(10_7, 5_0);
-    /* Total allocated size of the file, in bytes (this may include space used by metadata), or NULL if not available. This can be less than the value returned by kCFURLTotalFileSizeKey if the resource is compressed. (Read-only, value type CFNumber) */
+    /* Total allocated size of the file in bytes (this may include space used by metadata), or NULL if not available. This can be less than the value returned by kCFURLTotalFileSizeKey if the resource is compressed. (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLIsAliasFileKey CF_AVAILABLE(10_6, 4_0);
-    /*  true if the url is a Finder alias file, false otherwise ( Read-only, value type CFBooleanRef) */
-
-CF_EXPORT
-const CFStringRef kCFURLIsMountTriggerKey CF_AVAILABLE(10_7, 4_0);
-    /* true if this URL is a file system trigger directory. Traversing or opening a file system trigger will cause an attempt to mount a file system on the trigger directory. (Read-only, value type CFBoolean) */
+    /*  true if the resource is a Finder alias file or a symlink, false otherwise ( Read-only, value type CFBooleanRef) */
 
 
 /* Volume Properties */
 
-/* For convenience, volume properties may be requested from any resource on a volume. */
+/* As a convenience, volume properties can be requested from any file system URL. The value returned will reflect the property value for the volume on which the resource is located. */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeLocalizedFormatDescriptionKey CF_AVAILABLE(10_6, 4_0);
@@ -724,7 +864,7 @@ const CFStringRef kCFURLVolumeTotalCapacityKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeAvailableCapacityKey CF_AVAILABLE(10_6, 4_0);
-    /* Total free space, in bytes (Read-only, value type CFNumber) */
+    /* Total free space in bytes (Read-only, value type CFNumber) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeResourceCountKey CF_AVAILABLE(10_6, 4_0);
@@ -732,39 +872,39 @@ const CFStringRef kCFURLVolumeResourceCountKey CF_AVAILABLE(10_6, 4_0);
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsPersistentIDsKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format supports persistent object identifiers and can look up file system objects by their IDs (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsSymbolicLinksKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format supports symbolic links (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsHardLinksKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format supports hard links (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsJournalingKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format supports a journal used to speed recovery in case of unplanned restart (such as a power outage or crash). This does not necessarily mean the volume is actively using a journal. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeIsJournalingKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume is currently using a journal for speedy recovery after an unplanned restart. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsSparseFilesKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format supports sparse files, that is, files which can have 'holes' that have never been written to, and thus do not consume space on disk. A sparse file may have an allocated size on disk that is less than its logical length. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsZeroRunsKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* For security reasons, parts of a file (runs) that have never been written to must appear to contain zeroes. true if the volume keeps track of allocated but unwritten runs of a file so that it can substitute zeroes without actually writing zeroes to the media. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsCaseSensitiveNamesKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format treats upper and lower case characters in file and directory names as different. Otherwise an upper case character is equivalent to a lower case character, and you can't have two names that differ solely in the case of the characters. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsCasePreservedNamesKey CF_AVAILABLE(10_6, 4_0);
-    /* Read-only, value type CFBoolean */
+    /* true if the volume format preserves the case of file and directory names.  Otherwise the volume may change the case of some characters (typically making them all upper or all lower case). (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeSupportsRootDirectoryDatesKey CF_AVAILABLE(10_7, 5_0);
@@ -832,7 +972,7 @@ const CFStringRef kCFURLVolumeUUIDStringKey CF_AVAILABLE(10_7, 5_0);
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeNameKey CF_AVAILABLE(10_7, 5_0);
-    /* The name of the volume (settable if kCFURLVolumeSupportsRenamingKey is true, value type CFString) */
+    /* The name of the volume (Read-write, settable if kCFURLVolumeSupportsRenamingKey is true and permissions allow, value type CFString) */
 
 CF_EXPORT
 const CFStringRef kCFURLVolumeLocalizedNameKey CF_AVAILABLE(10_7, 5_0);
@@ -865,40 +1005,35 @@ const CFStringRef kCFURLUbiquitousItemIsUploadingKey CF_AVAILABLE(10_7, 5_0);
     /* true if data is being uploaded for this item. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
-const CFStringRef kCFURLUbiquitousItemPercentDownloadedKey CF_AVAILABLE(10_7, 5_0);
-    /* [0-100] percent of data downloaded. (Read-only, value type double CFNumber) */
+const CFStringRef kCFURLUbiquitousItemPercentDownloadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0);
+    /* Use NSMetadataQuery and NSMetadataUbiquitousItemPercentDownloadedKey on NSMetadataItem instead */
 
 CF_EXPORT
-const CFStringRef kCFURLUbiquitousItemPercentUploadedKey CF_AVAILABLE(10_7, 5_0);
-    /* [0-100] percent of data downloaded. (Read-only, value type double CFNumber) */
+const CFStringRef kCFURLUbiquitousItemPercentUploadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0);
+    /* Use NSMetadataQuery and NSMetadataUbiquitousItemPercentUploadedKey on NSMetadataItem instead */
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFURLBookmarkCreationOptions) {
     kCFURLBookmarkCreationPreferFileIDResolutionMask = ( 1UL << 8 ),  // At resolution time, this alias will prefer resolving by the embedded fileID to the path
     kCFURLBookmarkCreationMinimalBookmarkMask = ( 1UL << 9 ), // Creates a bookmark with "less" information, which may be smaller but still be able to resolve in certain ways
     kCFURLBookmarkCreationSuitableForBookmarkFile = ( 1UL << 10 ), // includes in the created bookmark those properties which are needed for a bookmark/alias file
+    kCFURLBookmarkCreationWithSecurityScope CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
+    kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 12 ), // Mac OS X 10.7.3 and later, if used with kCFURLBookmarkCreationWithSecurityScope, at resolution time only read access to the resource will be granted
 };
-
-#if MAC_OS_X_VERSION_10_7 <= MAC_OS_X_VERSION_MAX_ALLOWED
-enum {
-    kCFURLBookmarkCreationWithSecurityScope = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
-    kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess = ( 1UL << 12 ), // Mac OS X 10.7.3 and later, if used with kCFURLBookmarkCreationWithSecurityScope, at resolution time only read access to the resource will be granted
-};
-#endif
-typedef CFOptionFlags CFURLBookmarkCreationOptions;
 
 enum  {
     kCFBookmarkResolutionWithoutUIMask = ( 1UL << 8 ),		// don't perform any UI during bookmark resolution
     kCFBookmarkResolutionWithoutMountingMask = ( 1UL << 9 ),	// don't mount a volume during bookmark resolution
 };
 
-#if MAC_OS_X_VERSION_10_7 <= MAC_OS_X_VERSION_MAX_ALLOWED
 enum {
-    kCFURLBookmarkResolutionWithSecurityScope = ( 1UL << 10 ), // Mac OS X 10.7.3 and later, extract the security scope included at creation time to provide the ability to access the resource.
+    kCFURLBookmarkResolutionWithSecurityScope CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 10 ), // Mac OS X 10.7.3 and later, extract the security scope included at creation time to provide the ability to access the resource.
 };
-#endif
+
 typedef CFOptionFlags CFURLBookmarkResolutionOptions;
 
 typedef CFOptionFlags CFURLBookmarkFileCreationOptions;
+
+CF_IMPLICIT_BRIDGING_DISABLED
 
 /*	@function CFURLCreateBookmarkData
 	@discussion	Create a CFDataRef containing an externalizable representation from a CFURLRef, modified with the given options, including ( at the minimum ) any
@@ -997,6 +1132,8 @@ Boolean CFURLWriteBookmarkDataToFile( CFDataRef bookmarkRef, CFURLRef fileURL, C
 CF_EXPORT
 CFDataRef CFURLCreateBookmarkDataFromAliasRecord ( CFAllocatorRef allocatorRef, CFDataRef aliasRecordDataRef ) CF_AVAILABLE_MAC(10_6);
 
+CF_IMPLICIT_BRIDGING_ENABLED
+
 /*!     @function	CFURLStartAccessingSecurityScopedResource
         @discussion	Given a CFURLRef created by resolving a bookmark data created with security scope, make the resource referenced by the
                         url accessible to the process.  When access to this resource is no longer needed the client should call
@@ -1006,17 +1143,20 @@ CFDataRef CFURLCreateBookmarkDataFromAliasRecord ( CFAllocatorRef allocatorRef, 
         @result        returns TRUE if access was granted and FALSE if the url does not reference a security scoped resource, or if some error occurred
                         which didn't allow access to be granted
  */
+CF_EXPORT
 Boolean CFURLStartAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA); // Available in MacOS X 10.7.3 and later
 
 /*!     @function	CFURLStopAccessingSecurityScopedResource
         @discussion    Revokes the access granted to the url by a prior successful call to CFURLStartAccessingSecurityScopedResource().
         @param	url     the CFURLRef for the resource to stop accessing.
  */
+CF_EXPORT
 void CFURLStopAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA);
 
 #endif /* TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE */
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFURL__ */
 

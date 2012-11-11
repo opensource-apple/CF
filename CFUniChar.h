@@ -22,7 +22,7 @@
  */
 
 /*	CFUniChar.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFUNICHAR__)
@@ -125,7 +125,8 @@ enum {
     kCFUniCharCaseMapFinalSigma = (1UL << 0),
     kCFUniCharCaseMapAfter_i = (1UL << 1),
     kCFUniCharCaseMapMoreAbove = (1UL << 2),
-    kCFUniCharCaseMapDutchDigraph = (1UL << 3)
+    kCFUniCharCaseMapDutchDigraph = (1UL << 3),
+    kCFUniCharCaseMapGreekTonos = (1UL << 4)
 };
 
 CF_EXPORT CFIndex CFUniCharMapCaseTo(UTF32Char theChar, UTF16Char *convertedChar, CFIndex maxLength, uint32_t ctype, uint32_t flags, const uint8_t *langCode);

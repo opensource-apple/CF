@@ -22,7 +22,7 @@
  */
 
 /*	CFSystemDirectories.c
-	Copyright (c) 1997-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1997-2012, Apple Inc. All rights reserved.
 	Responsibility: Kevin Perry
 */
 

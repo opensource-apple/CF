@@ -22,13 +22,10 @@
  */
 
 /*	CFXMLNode.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
-/*  CFXMLParser (and thus CFXMLNode) are deprecated. Clients should be aware of the fact that CFXMLParser has 
-    some serious deficiencies in terms of both performance and standards compliance and should migrate their 
-    XML parsing to NSXMLParser, NSXMLDocument, or other XML parsing technologies.
- */
+/*  CFXMLParser (and thus CFXMLNode) are deprecated as of Mac OS X 10.8 and iOS 6.0. The suggested replacements are the Foundation classes NSXMLParser and NSXMLDocument, or the libxml2 library. */
 
 #if !defined(__COREFOUNDATION_CFXMLNODE__)
 #define __COREFOUNDATION_CFXMLNODE__ 1
@@ -69,7 +66,7 @@ typedef CFTreeRef CFXMLTreeRef;
     */
 
 /* Type codes for the different possible XML nodes; this list may grow.*/
-enum {
+typedef CF_ENUM(CFIndex, CFXMLNodeTypeCode) {
     kCFXMLNodeTypeDocument = 1,
     kCFXMLNodeTypeElement = 2,
     kCFXMLNodeTypeAttribute = 3,
@@ -86,7 +83,6 @@ enum {
     kCFXMLNodeTypeElementTypeDeclaration = 14,
     kCFXMLNodeTypeAttributeListDeclaration = 15
 };
-typedef CFIndex CFXMLNodeTypeCode;
 
 typedef struct {
     CFDictionaryRef attributes;
@@ -134,14 +130,13 @@ typedef struct {
     CFXMLAttributeDeclarationInfo *attributes;
 } CFXMLAttributeListDeclarationInfo;
 
-enum {
+typedef CF_ENUM(CFIndex, CFXMLEntityTypeCode) {
     kCFXMLEntityTypeParameter,       /* Implies parsed, internal */
     kCFXMLEntityTypeParsedInternal,
     kCFXMLEntityTypeParsedExternal,
     kCFXMLEntityTypeUnparsed,
     kCFXMLEntityTypeCharacter
 };
-typedef CFIndex CFXMLEntityTypeCode;
 
 typedef struct {
     CFXMLEntityTypeCode entityType;
@@ -175,37 +170,37 @@ typedef struct {
 */
 
 CF_EXPORT
-CFTypeID CFXMLNodeGetTypeID(void);
+CFTypeID CFXMLNodeGetTypeID(void) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 /* Creates a new node based on xmlType, dataString, and additionalInfoPtr.  version (together with xmlType) determines the expected structure of additionalInfoPtr */
 CF_EXPORT
-CFXMLNodeRef CFXMLNodeCreate(CFAllocatorRef alloc, CFXMLNodeTypeCode xmlType, CFStringRef dataString, const void *additionalInfoPtr, CFIndex version);
+CFXMLNodeRef CFXMLNodeCreate(CFAllocatorRef alloc, CFXMLNodeTypeCode xmlType, CFStringRef dataString, const void *additionalInfoPtr, CFIndex version) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 /* Creates a copy of origNode (which may not be NULL). */
 CF_EXPORT
-CFXMLNodeRef CFXMLNodeCreateCopy(CFAllocatorRef alloc, CFXMLNodeRef origNode);
+CFXMLNodeRef CFXMLNodeCreateCopy(CFAllocatorRef alloc, CFXMLNodeRef origNode) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
-CFXMLNodeTypeCode CFXMLNodeGetTypeCode(CFXMLNodeRef node);
+CFXMLNodeTypeCode CFXMLNodeGetTypeCode(CFXMLNodeRef node) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
-CFStringRef CFXMLNodeGetString(CFXMLNodeRef node);
+CFStringRef CFXMLNodeGetString(CFXMLNodeRef node) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
-const void *CFXMLNodeGetInfoPtr(CFXMLNodeRef node);
+const void *CFXMLNodeGetInfoPtr(CFXMLNodeRef node) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
-CFIndex CFXMLNodeGetVersion(CFXMLNodeRef node);
+CFIndex CFXMLNodeGetVersion(CFXMLNodeRef node) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 /* CFXMLTreeRef */
 
 /* Creates a childless, parentless tree from node */
 CF_EXPORT
-CFXMLTreeRef CFXMLTreeCreateWithNode(CFAllocatorRef allocator, CFXMLNodeRef node);
+CFXMLTreeRef CFXMLTreeCreateWithNode(CFAllocatorRef allocator, CFXMLNodeRef node) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 /* Extracts and returns the node stored in xmlTree */
 CF_EXPORT
-CFXMLNodeRef CFXMLTreeGetNode(CFXMLTreeRef xmlTree);
+CFXMLNodeRef CFXMLTreeGetNode(CFXMLTreeRef xmlTree) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXTERN_C_END
 

@@ -22,15 +22,12 @@
  */
 
 /*	CFUUID.c
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
 	Responsibility: David Smith
 */
 
 #include <CoreFoundation/CFUUID.h>
 #include "CFInternal.h"
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#include <uuid/uuid.h>
-#endif
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <dispatch/dispatch.h>
@@ -266,6 +263,8 @@ static CFUUIDRef __CFUUIDCreateWithBytesPrimitive(CFAllocatorRef allocator, CFUU
 
 #if DEPLOYMENT_TARGET_WINDOWS
 #include <Rpc.h>
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#include <uuid/uuid.h>
 #endif
 
 CFUUIDRef CFUUIDCreate(CFAllocatorRef alloc) {

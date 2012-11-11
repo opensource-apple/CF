@@ -23,7 +23,7 @@
 
 /*	
  CFLocaleInternal.h
- Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+ Copyright (c) 2008-2012, Apple Inc. All rights reserved.
  */
 
 /*
@@ -65,6 +65,7 @@ CF_EXPORT CFStringRef const kCFDateFormatterIsLenientKey;
 CF_EXPORT CFStringRef const kCFDateFormatterLongEraSymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterMonthSymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterPMSymbolKey;
+CF_EXPORT CFStringRef const kCFDateFormatterAmbiguousYearStrategyKey;
 CF_EXPORT CFStringRef const kCFDateFormatterQuarterSymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterShortMonthSymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterShortQuarterSymbolsKey;

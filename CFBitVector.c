@@ -22,7 +22,7 @@
  */
 
 /*	CFBitVector.c
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -35,8 +35,10 @@
    to right (bit 0 is the most significant) */
 typedef uint8_t __CFBitVectorBucket;
 
+#define __CFBITVECTORBUCKET_SIZE 8
+#define __CF_BITS_PER_BYTE 8
+
 enum {
-    __CF_BITS_PER_BYTE = 8,
     __CF_BITS_PER_BYTE_MASK = 0x07
 };
 
@@ -388,7 +390,11 @@ static __CFBitVectorBucket __CFBitVectorGetBits(__CFBitVectorBucket bucketValue,
 	context->curByte++;
 	context->totalBits -= context->initBits;
 	nBits -= __CF_BITS_PER_BYTE;
+#if __CFBITVECTORBUCKET_SIZE > __CF_BITS_PER_BYTE
 	val <<= __CF_BITS_PER_BYTE;
+#else
+        val = 0;
+#endif
     }
     /* ... then remaining bits go in *curByte */
     if (0 < nBits) {

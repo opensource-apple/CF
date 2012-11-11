@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodings.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -46,13 +46,8 @@
 #include <CoreFoundation/CFStringDefaultEncoding.h>
 #endif
 
-static UInt32 __CFWantsToUseASCIICompatibleConversion = (UInt32)-1;
-CF_INLINE UInt32 __CFGetASCIICompatibleFlag(void) {
-    if (__CFWantsToUseASCIICompatibleConversion == (UInt32)-1) {
-        __CFWantsToUseASCIICompatibleConversion = false;
-    }
-    return (__CFWantsToUseASCIICompatibleConversion ? kCFStringEncodingASCIICompatibleConversion : 0);
-}
+static bool __CFWantsToUseASCIICompatibleConversion = false;
+CF_INLINE UInt32 __CFGetASCIICompatibleFlag(void) { return __CFWantsToUseASCIICompatibleConversion; }
 
 void _CFStringEncodingSetForceASCIICompatibility(Boolean flag) {
     __CFWantsToUseASCIICompatibleConversion = (flag ? (UInt32)true : (UInt32)false);
@@ -232,7 +227,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
         bool swap = false;
         static bool strictUTF32 = (bool)-1;
 
-        if ((bool)-1 == strictUTF32) strictUTF32 = (_CFExecutableLinkedOnOrAfter(CFSystemVersionLeopard) != 0);
+        if ((bool)-1 == strictUTF32) strictUTF32 = (1 != 0);
 
         if (kCFStringEncodingUTF32 == encoding) {
             UTF32Char bom = ((*src == 0xFFFE0000) || (*src == 0x0000FEFF) ? *(src++) : 0);

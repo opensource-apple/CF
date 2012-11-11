@@ -22,7 +22,7 @@
  */
 
 /*	CFString.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRING__)
@@ -36,6 +36,7 @@
 #include <CoreFoundation/CFLocale.h>
 #include <stdarg.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 /*
@@ -118,7 +119,7 @@ typedef UInt32 CFStringEncoding;
    Call CFStringGetSystemEncoding() to get the default system encoding.
 */
 #define kCFStringEncodingInvalidId (0xffffffffU)
-enum {
+typedef CF_ENUM(CFStringEncoding, CFStringBuiltInEncodings) {
     kCFStringEncodingMacRoman = 0,
     kCFStringEncodingWindowsLatin1 = 0x0500, /* ANSI codepage 1252 */
     kCFStringEncodingISOLatin1 = 0x0201, /* ISO 8859-1 */
@@ -136,7 +137,6 @@ enum {
     kCFStringEncodingUTF32BE = 0x18000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF32BEFormat */
     kCFStringEncodingUTF32LE = 0x1c000100 /* kTextEncodingUnicodeDefault + kUnicodeUTF32LEFormat */
 };
-typedef CFStringEncoding CFStringBuiltInEncodings;
 
 
 /* CFString type ID */
@@ -385,21 +385,17 @@ CFStringRef CFStringCreateWithFileSystemRepresentation(CFAllocatorRef alloc, con
 
 /* Find and compare flags; these are OR'ed together and provided as CFStringCompareFlags in the various functions. 
 */
-enum {	
+typedef CF_OPTIONS(CFOptionFlags, CFStringCompareFlags) {
     kCFCompareCaseInsensitive = 1,	
     kCFCompareBackwards = 4,		/* Starting from the end of the string */
     kCFCompareAnchored = 8,		/* Only at the specified starting point */
     kCFCompareNonliteral = 16,		/* If specified, loose equivalence is performed (o-umlaut == o, umlaut) */
     kCFCompareLocalized = 32,		/* User's default locale is used for the comparisons */
-    kCFCompareNumerically = 64		/* Numeric comparison is used; that is, Foo2.txt < Foo7.txt < Foo25.txt */
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
-    ,
-    kCFCompareDiacriticInsensitive = 128, /* If specified, ignores diacritics (o-umlaut == o) */
-    kCFCompareWidthInsensitive = 256, /* If specified, ignores width differences ('a' == UFF41) */
-    kCFCompareForcedOrdering = 512 /* If specified, comparisons are forced to return either kCFCompareLessThan or kCFCompareGreaterThan if the strings are equivalent but not strictly equal, for stability when sorting (e.g. "aaa" > "AAA" with kCFCompareCaseInsensitive specified) */
-#endif /* MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED */
+    kCFCompareNumerically = 64,		/* Numeric comparison is used; that is, Foo2.txt < Foo7.txt < Foo25.txt */
+    kCFCompareDiacriticInsensitive CF_ENUM_AVAILABLE(10_5, 2_0) = 128, /* If specified, ignores diacritics (o-umlaut == o) */
+    kCFCompareWidthInsensitive CF_ENUM_AVAILABLE(10_5, 2_0) = 256, /* If specified, ignores width differences ('a' == UFF41) */
+    kCFCompareForcedOrdering CF_ENUM_AVAILABLE(10_5, 2_0) = 512 /* If specified, comparisons are forced to return either kCFCompareLessThan or kCFCompareGreaterThan if the strings are equivalent but not strictly equal, for stability when sorting (e.g. "aaa" > "AAA" with kCFCompareCaseInsensitive specified) */
 };
-typedef CFOptionFlags CFStringCompareFlags;
 
 /* The main comparison routine; compares specified range of the first string to (the full range of) the second string.
 locale == NULL indicates canonical locale (the return value from CFLocaleGetSystem()).
@@ -662,13 +658,12 @@ void CFStringCapitalize(CFMutableStringRef theString, CFLocaleRef locale);
 	Unicode Technical Report #15. To normalize for use with file
 	system calls, use CFStringGetFileSystemRepresentation().
 */
-enum {
+typedef CF_ENUM(CFIndex, CFStringNormalizationForm) {
 	kCFStringNormalizationFormD = 0, // Canonical Decomposition
 	kCFStringNormalizationFormKD, // Compatibility Decomposition
 	kCFStringNormalizationFormC, // Canonical Decomposition followed by Canonical Composition
 	kCFStringNormalizationFormKC // Compatibility Decomposition followed by Canonical Composition
 };
-typedef CFIndex CFStringNormalizationForm;
 
 /*!
 	@function CFStringNormalize
@@ -889,5 +884,6 @@ CF_EXPORT
 CFStringRef  __CFStringMakeConstantString(const char *cStr);	/* Private; do not use */
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFSTRING__ */

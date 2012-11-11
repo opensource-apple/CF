@@ -22,7 +22,7 @@
  */
 
 /*	CFSocket.h
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSOCKET__)
@@ -113,12 +113,11 @@ filled in properly when passing in an address.
 */
 
 /* Values for CFSocketError */
-enum {
+typedef CF_ENUM(CFIndex, CFSocketError) {
     kCFSocketSuccess = 0,
-    kCFSocketError = -1,
-    kCFSocketTimeout = -2
+    kCFSocketError = -1L,
+    kCFSocketTimeout = -2L
 };
-typedef CFIndex CFSocketError;
 
 typedef struct {
     SInt32	protocolFamily;
@@ -128,7 +127,7 @@ typedef struct {
 } CFSocketSignature;
 
 /* Values for CFSocketCallBackType */
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFSocketCallBackType) {
     kCFSocketNoCallBack = 0,
     kCFSocketReadCallBack = 1,
     kCFSocketAcceptCallBack = 2,
@@ -136,7 +135,6 @@ enum {
     kCFSocketConnectCallBack = 4,
     kCFSocketWriteCallBack = 8
 };
-typedef CFOptionFlags CFSocketCallBackType;
 
 /* Socket flags */
 enum {
@@ -144,9 +142,7 @@ enum {
     kCFSocketAutomaticallyReenableAcceptCallBack = 2,
     kCFSocketAutomaticallyReenableDataCallBack = 3,
     kCFSocketAutomaticallyReenableWriteCallBack = 8,
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
-    kCFSocketLeaveErrors = 64,
-#endif
+    kCFSocketLeaveErrors CF_ENUM_AVAILABLE(10_5, 2_0) = 64,
     kCFSocketCloseOnInvalidate = 128
 };
 
@@ -172,8 +168,9 @@ CF_EXPORT CFTypeID	CFSocketGetTypeID(void);
 CF_EXPORT CFSocketRef	CFSocketCreate(CFAllocatorRef allocator, SInt32 protocolFamily, SInt32 socketType, SInt32 protocol, CFOptionFlags callBackTypes, CFSocketCallBack callout, const CFSocketContext *context);
 CF_EXPORT CFSocketRef	CFSocketCreateWithNative(CFAllocatorRef allocator, CFSocketNativeHandle sock, CFOptionFlags callBackTypes, CFSocketCallBack callout, const CFSocketContext *context);
 CF_EXPORT CFSocketRef	CFSocketCreateWithSocketSignature(CFAllocatorRef allocator, const CFSocketSignature *signature, CFOptionFlags callBackTypes, CFSocketCallBack callout, const CFSocketContext *context);
+/* CFSocketCreateWithSocketSignature() creates a socket of the requested type and binds its address (using CFSocketSetAddress()) to the requested address.  If this fails, it returns NULL. */
 CF_EXPORT CFSocketRef	CFSocketCreateConnectedToSocketSignature(CFAllocatorRef allocator, const CFSocketSignature *signature, CFOptionFlags callBackTypes, CFSocketCallBack callout, const CFSocketContext *context, CFTimeInterval timeout);
-/* CFSocketCreateWithSignature creates a socket of the requested type and binds its address (using CFSocketSetAddress) to the requested address.  If this fails, it returns NULL.  CFSocketCreateConnectedToSignature creates a socket suitable for connecting to the requested type and address, and connects it (using CFSocketConnectToAddress).  If this fails, it returns NULL. */
+/* CFSocketCreateConnectedToSocketSignature() creates a socket suitable for connecting to the requested type and address, and connects it (using CFSocketConnectToAddress()).  If this fails, it returns NULL. */
 
 CF_EXPORT CFSocketError	CFSocketSetAddress(CFSocketRef s, CFDataRef address);
 CF_EXPORT CFSocketError	CFSocketConnectToAddress(CFSocketRef s, CFDataRef address, CFTimeInterval timeout);

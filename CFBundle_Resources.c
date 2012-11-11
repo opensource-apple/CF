@@ -22,19 +22,9 @@
  */
 
 /*      CFBundle_Resources.c
-        Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
-        Responsibility: David Smith
+        Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Responsibility: Tony Parker
 */
-
-#if DEPLOYMENT_TARGET_MACOSX
-#define READ_DIRECTORIES 1
-#elif DEPLOYMENT_TARGET_EMBEDDED
-#define READ_DIRECTORIES 1
-#elif DEPLOYMENT_TARGET_WINDOWS
-#define READ_DIRECTORIES 0
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 #define READ_DIRECTORIES_CACHE_CAPACITY 128
 
@@ -54,24 +44,39 @@
 #include <ctype.h>
 #include <errno.h>
 #include <sys/types.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
+#include <unistd.h>
 #include <sys/sysctl.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #endif
 
 #if DEPLOYMENT_TARGET_MACOSX
-#include <unistd.h>
-#elif DEPLOYMENT_TARGET_EMBEDDED
-#include <unistd.h>
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
+
 #endif
 
-#if READ_DIRECTORIES
-#include <dirent.h>
-#endif /* READ_DIRECTORIES */
+#if DEPLOYMENT_TARGET_WINDOWS
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
+
+#define close _close
+#define write _write
+#define read _read
+#define open _NS_open
+#define stat _NS_stat
+#define fstat _fstat
+#define mkdir(a,b) _NS_mkdir(a)
+#define rmdir _NS_rmdir
+#define unlink _NS_unlink
+
+#endif
 
 CF_EXPORT bool CFDictionaryGetKeyIfPresent(CFDictionaryRef dict, const void *key, const void **actualkey);
+
+extern void _CFStrSetDesiredCapacity(CFMutableStringRef str, CFIndex len);
 
 
 static inline Boolean _CFBundleSortedArrayContains(CFArrayRef arr, CFStringRef target) {
@@ -80,13 +85,13 @@ static inline Boolean _CFBundleSortedArrayContains(CFArrayRef arr, CFStringRef t
     return itemIdx < arrRange.length && CFEqual(CFArrayGetValueAtIndex(arr, itemIdx), target);
 }
 
-// The following strings are initialized 'later' (i.e., not at static initialization time) because static init time is too early for CFSTR to work, on Windows
-// This is here to make sure it gets updated when _CFGetPlatformName does
+// The following strings are initialized 'later' (i.e., not at static initialization time) because static init time is too early for CFSTR to work, on platforms without constant CF strings
+#if !__CONSTANT_STRINGS__
+
 #define _CFBundleNumberOfPlatforms 7
 static CFStringRef _CFBundleSupportedPlatforms[_CFBundleNumberOfPlatforms] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 static const char *_CFBundleSupportedPlatformStrings[_CFBundleNumberOfPlatforms] = { "iphoneos", "macos", "windows", "linux", "freebsd", "solaris", "hpux" };
 
-// This is here to make sure it gets updated when _CFGetProductName does
 #define _CFBundleNumberOfProducts 3
 static CFStringRef _CFBundleSupportedProducts[_CFBundleNumberOfProducts] = { NULL, NULL, NULL };
 static const char *_CFBundleSupportedProductStrings[_CFBundleNumberOfProducts] = { "iphone", "ipod", "ipad" };
@@ -95,13 +100,34 @@ static const char *_CFBundleSupportedProductStrings[_CFBundleNumberOfProducts] =
 static CFStringRef _CFBundleSupportediPhoneOSPlatformProducts[_CFBundleNumberOfiPhoneOSPlatformProducts] = { NULL, NULL, NULL };
 static const char *_CFBundleSupportediPhoneOSPlatformProductStrings[_CFBundleNumberOfiPhoneOSPlatformProducts] = { "iphone", "ipod", "ipad" };
 
-void _CFBundleResourcesInitialize() {
+__private_extern__ void _CFBundleResourcesInitialize() {
     for (unsigned int i = 0; i < _CFBundleNumberOfPlatforms; i++) _CFBundleSupportedPlatforms[i] = CFStringCreateWithCString(kCFAllocatorSystemDefault, _CFBundleSupportedPlatformStrings[i], kCFStringEncodingUTF8);
     
     for (unsigned int i = 0; i < _CFBundleNumberOfProducts; i++) _CFBundleSupportedProducts[i] = CFStringCreateWithCString(kCFAllocatorSystemDefault, _CFBundleSupportedProductStrings[i], kCFStringEncodingUTF8);
     
     for (unsigned int i = 0; i < _CFBundleNumberOfiPhoneOSPlatformProducts; i++) _CFBundleSupportediPhoneOSPlatformProducts[i] = CFStringCreateWithCString(kCFAllocatorSystemDefault, _CFBundleSupportediPhoneOSPlatformProductStrings[i], kCFStringEncodingUTF8);
 }
+
+#else
+
+#if DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+// On iOS, we only support one platform
+#define _CFBundleNumberOfPlatforms 1
+static CFStringRef _CFBundleSupportedPlatforms[_CFBundleNumberOfPlatforms] = { CFSTR("iphoneos") };
+#else
+// On other platforms, we support the following platforms
+#define _CFBundleNumberOfPlatforms 7
+static CFStringRef _CFBundleSupportedPlatforms[_CFBundleNumberOfPlatforms] = { CFSTR("iphoneos"), CFSTR("macos"), CFSTR("windows"), CFSTR("linux"), CFSTR("freebsd"), CFSTR("solaris"), CFSTR("hpux") };
+#endif
+
+#define _CFBundleNumberOfProducts 3
+static CFStringRef _CFBundleSupportedProducts[_CFBundleNumberOfProducts] = { CFSTR("iphone"), CFSTR("ipod"), CFSTR("ipad") };
+
+#define _CFBundleNumberOfiPhoneOSPlatformProducts 3
+static CFStringRef _CFBundleSupportediPhoneOSPlatformProducts[_CFBundleNumberOfiPhoneOSPlatformProducts] = { CFSTR("iphone"), CFSTR("ipod"), CFSTR("ipad") };
+
+__private_extern__ void _CFBundleResourcesInitialize() { }
+#endif
 
 static CFStringRef platform = NULL;
 
@@ -115,8 +141,8 @@ void _CFSetProductName(CFStringRef str) {
     // shouldn't be screwing around with this value casually.
 }
 
-CFStringRef _CFGetProductName(void) {
-#if DEPLOYMENT_TARGET_EMBEDDED
+CF_EXPORT CFStringRef _CFGetProductName(void) {
+#if DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
    if (!platform) {
       char buffer[256];
       memset(buffer, 0, sizeof(buffer));
@@ -152,10 +178,10 @@ CFStringRef _CFGetProductName(void) {
 }
 
 // All new-style bundles will have these extensions.
-__private_extern__ CFStringRef _CFGetPlatformName(void) {
+CF_EXPORT CFStringRef _CFGetPlatformName(void) {
 #if DEPLOYMENT_TARGET_MACOSX 
     return _CFBundleMacOSXPlatformName;
-#elif DEPLOYMENT_TARGET_EMBEDDED
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return _CFBundleiPhoneOSPlatformName;
 #elif DEPLOYMENT_TARGET_WINDOWS
     return _CFBundleWindowsPlatformName;
@@ -172,10 +198,10 @@ __private_extern__ CFStringRef _CFGetPlatformName(void) {
 #endif
 }
 
-__private_extern__ CFStringRef _CFGetAlternatePlatformName(void) {
+CF_EXPORT CFStringRef _CFGetAlternatePlatformName(void) {
 #if DEPLOYMENT_TARGET_MACOSX
     return _CFBundleAlternateMacOSXPlatformName;
-#elif DEPLOYMENT_TARGET_EMBEDDED
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return _CFBundleMacOSXPlatformName;
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("");
@@ -184,7 +210,6 @@ __private_extern__ CFStringRef _CFGetAlternatePlatformName(void) {
 #endif
 }
 
-static CFSpinLock_t CFBundleResourceGlobalDataLock = CFSpinLockInit;
 static UniChar *_AppSupportUniChars1 = NULL;
 static CFIndex _AppSupportLen1 = 0;
 static UniChar *_AppSupportUniChars2 = NULL;
@@ -197,13 +222,17 @@ static UniChar *_AlternatePlatformUniChars = NULL;
 static CFIndex _AlternatePlatformLen = 0;
 static UniChar *_LprojUniChars = NULL;
 static CFIndex _LprojLen = 0;
+static UniChar *_BaseUniChars = NULL;
+static CFIndex _BaseLen;
 static UniChar *_GlobalResourcesUniChars = NULL;
 static CFIndex _GlobalResourcesLen = 0;
 static UniChar *_InfoExtensionUniChars = NULL;
 static CFIndex _InfoExtensionLen = 0;
 
+#if 0
 static UniChar _ResourceSuffix3[32];
 static CFIndex _ResourceSuffix3Len = 0;
+#endif
 static UniChar _ResourceSuffix2[16];
 static CFIndex _ResourceSuffix2Len = 0;
 static UniChar _ResourceSuffix1[16];
@@ -218,6 +247,7 @@ static void _CFBundleInitStaticUniCharBuffers(void) {
     CFStringRef lprojStr = _CFBundleLprojExtension;
     CFStringRef globalResourcesStr = _CFBundleNonLocalizedResourcesDirectoryName;
     CFStringRef infoExtensionStr = _CFBundleInfoExtension;
+    CFStringRef baseStr = _CFBundleBaseDirectory;
 
     _AppSupportLen1 = CFStringGetLength(appSupportStr1);
     _AppSupportLen2 = CFStringGetLength(appSupportStr2);
@@ -227,8 +257,9 @@ static void _CFBundleInitStaticUniCharBuffers(void) {
     _LprojLen = CFStringGetLength(lprojStr);
     _GlobalResourcesLen = CFStringGetLength(globalResourcesStr);
     _InfoExtensionLen = CFStringGetLength(infoExtensionStr);
+    _BaseLen = CFStringGetLength(baseStr);
 
-    _AppSupportUniChars1 = (UniChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * (_AppSupportLen1 + _AppSupportLen2 + _ResourcesLen + _PlatformLen + _AlternatePlatformLen + _LprojLen + _GlobalResourcesLen + _InfoExtensionLen), 0);
+    _AppSupportUniChars1 = (UniChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * (_AppSupportLen1 + _AppSupportLen2 + _ResourcesLen + _PlatformLen + _AlternatePlatformLen + _LprojLen + _GlobalResourcesLen + _InfoExtensionLen + _BaseLen), 0);
     _AppSupportUniChars2 = _AppSupportUniChars1 + _AppSupportLen1;
     _ResourcesUniChars = _AppSupportUniChars2 + _AppSupportLen2;
     _PlatformUniChars = _ResourcesUniChars + _ResourcesLen;
@@ -236,7 +267,8 @@ static void _CFBundleInitStaticUniCharBuffers(void) {
     _LprojUniChars = _AlternatePlatformUniChars + _AlternatePlatformLen;
     _GlobalResourcesUniChars = _LprojUniChars + _LprojLen;
     _InfoExtensionUniChars = _GlobalResourcesUniChars + _GlobalResourcesLen;
-
+    _BaseUniChars = _InfoExtensionUniChars + _InfoExtensionLen;
+    
     if (_AppSupportLen1 > 0) CFStringGetCharacters(appSupportStr1, CFRangeMake(0, _AppSupportLen1), _AppSupportUniChars1);
     if (_AppSupportLen2 > 0) CFStringGetCharacters(appSupportStr2, CFRangeMake(0, _AppSupportLen2), _AppSupportUniChars2);
     if (_ResourcesLen > 0) CFStringGetCharacters(resourcesStr, CFRangeMake(0, _ResourcesLen), _ResourcesUniChars);
@@ -245,6 +277,7 @@ static void _CFBundleInitStaticUniCharBuffers(void) {
     if (_LprojLen > 0) CFStringGetCharacters(lprojStr, CFRangeMake(0, _LprojLen), _LprojUniChars);
     if (_GlobalResourcesLen > 0) CFStringGetCharacters(globalResourcesStr, CFRangeMake(0, _GlobalResourcesLen), _GlobalResourcesUniChars);
     if (_InfoExtensionLen > 0) CFStringGetCharacters(infoExtensionStr, CFRangeMake(0, _InfoExtensionLen), _InfoExtensionUniChars);
+    if (_BaseLen > 0) CFStringGetCharacters(baseStr, CFRangeMake(0, _BaseLen), _BaseUniChars);
 
     _ResourceSuffix1Len = CFStringGetLength(platformStr);
     if (_ResourceSuffix1Len > 0) _ResourceSuffix1[0] = '-';
@@ -258,24 +291,26 @@ static void _CFBundleInitStaticUniCharBuffers(void) {
     if (_ResourceSuffix2Len > 0) _ResourceSuffix2[0] = '~';
     if (_ResourceSuffix2Len > 0) CFStringGetCharacters(productStr, CFRangeMake(0, _ResourceSuffix2Len), _ResourceSuffix2 + 1);
     if (_ResourceSuffix2Len > 0) _ResourceSuffix2Len++;
+#if 0
     if (_ResourceSuffix1Len > 1 && _ResourceSuffix2Len > 1) {
         _ResourceSuffix3Len = _ResourceSuffix1Len + _ResourceSuffix2Len;
         memmove(_ResourceSuffix3, _ResourceSuffix1, sizeof(UniChar) * _ResourceSuffix1Len);
         memmove(_ResourceSuffix3 + _ResourceSuffix1Len, _ResourceSuffix2, sizeof(UniChar) * _ResourceSuffix2Len);
     }
+#endif
 }
 
 CF_INLINE void _CFEnsureStaticBuffersInited(void) {
-    __CFSpinLock(&CFBundleResourceGlobalDataLock);
-    if (!_AppSupportUniChars1) _CFBundleInitStaticUniCharBuffers();
-    __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+    static dispatch_once_t once = 0;
+    dispatch_once(&once, ^{
+        _CFBundleInitStaticUniCharBuffers();
+    });
 }
 
-#if READ_DIRECTORIES
-
-static CFMutableDictionaryRef contentsCache = NULL;
-static CFMutableDictionaryRef directoryContentsCache = NULL;
-static CFMutableDictionaryRef unknownContentsCache = NULL;
+static CFSpinLock_t _cacheLock = CFSpinLockInit;
+static CFMutableDictionaryRef _contentsCache = NULL;
+static CFMutableDictionaryRef _directoryContentsCache = NULL;
+static CFMutableDictionaryRef _unknownContentsCache = NULL;
 
 typedef enum {
     _CFBundleAllContents = 0,
@@ -288,23 +323,21 @@ extern void _CFArraySortValues(CFMutableArrayRef array, CFComparatorFunction com
 static CFArrayRef _CFBundleCopySortedDirectoryContentsAtPath(CFStringRef path, _CFBundleDirectoryContentsType contentsType) {
     CFArrayRef result = NULL;
     
-    __CFSpinLock(&CFBundleResourceGlobalDataLock);
+    __CFSpinLock(&_cacheLock);
     if (contentsType == _CFBundleUnknownContents) {
-        if (unknownContentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(unknownContentsCache, path);
+        if (_unknownContentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(_unknownContentsCache, path);
     } else if (contentsType == _CFBundleDirectoryContents) {
-        if (directoryContentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(directoryContentsCache, path);
+        if (_directoryContentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(_directoryContentsCache, path);
     } else {
-        if (contentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(contentsCache, path);
+        if (_contentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(_contentsCache, path);
     }
     if (result) CFRetain(result);
-    __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+    __CFSpinUnlock(&_cacheLock);
 
     if (!result) {
         Boolean tryToOpen = false, allDots = true;
         char cpathBuff[CFMaxPathSize];
         CFIndex cpathLen = 0, idx, lastSlashIdx = 0;
-        DIR *dirp = NULL;
-        struct dirent *dent;
         CFMutableArrayRef contents = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks), directoryContents = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks), unknownContents = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
         CFStringRef dirName, name;
         
@@ -315,7 +348,7 @@ static CFArrayRef _CFBundleCopySortedDirectoryContentsAtPath(CFStringRef path, _
             
             // First see whether we already know that the directory doesn't exist
             for (idx = cpathLen; lastSlashIdx == 0 && idx-- > 0;) {
-                if (cpathBuff[idx] == '/') lastSlashIdx = idx;
+                if (cpathBuff[idx] == PATH_SEP) lastSlashIdx = idx;
                 else if (cpathBuff[idx] != '.') allDots = false;
             }
             if (lastSlashIdx > 0 && lastSlashIdx + 1 < cpathLen && !allDots) {
@@ -324,25 +357,70 @@ static CFArrayRef _CFBundleCopySortedDirectoryContentsAtPath(CFStringRef path, _
                 if (dirName) {
                     name = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, cpathBuff + lastSlashIdx + 1);
                     if (name) {
-                        // ??? we might like to use directoryContentsCache rather than contentsCache here, but we cannot unless we resolve DT_LNKs below
+                        // ??? we might like to use _directoryContentsCache rather than _contentsCache here, but we cannot unless we resolve DT_LNKs below
                         CFArrayRef dirDirContents = NULL;
                         
-                        __CFSpinLock(&CFBundleResourceGlobalDataLock);
-                        if (contentsCache) dirDirContents = (CFArrayRef)CFDictionaryGetValue(contentsCache, dirName);
+                        __CFSpinLock(&_cacheLock);
+                        if (_contentsCache) dirDirContents = (CFArrayRef)CFDictionaryGetValue(_contentsCache, dirName);
                         if (dirDirContents) {
                             Boolean foundIt = false;
                             CFIndex dirDirIdx, dirDirLength = CFArrayGetCount(dirDirContents);
-                            for (dirDirIdx = 0; !foundIt && dirDirIdx < dirDirLength; dirDirIdx++) if (kCFCompareEqualTo == CFStringCompare(name, CFArrayGetValueAtIndex(dirDirContents, dirDirIdx), kCFCompareCaseInsensitive)) foundIt = true;
+                            for (dirDirIdx = 0; !foundIt && dirDirIdx < dirDirLength; dirDirIdx++) if (kCFCompareEqualTo == CFStringCompare(name, (CFStringRef)CFArrayGetValueAtIndex(dirDirContents, dirDirIdx), kCFCompareCaseInsensitive)) foundIt = true;
                             if (!foundIt) tryToOpen = false;
                         }
-                        __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+                        __CFSpinUnlock(&_cacheLock);
                         CFRelease(name);
                     }
                     CFRelease(dirName);
                 }
-                cpathBuff[lastSlashIdx] = '/';
+                cpathBuff[lastSlashIdx] = PATH_SEP;
             }
         }
+#if DEPLOYMENT_TARGET_WINDOWS
+        // Make sure there is room for the additional space we need in the win32 api
+        if (tryToOpen && cpathLen + 2 < CFMaxPathSize) {
+            WIN32_FIND_DATAW file;
+            HANDLE handle;
+            
+            cpathBuff[cpathLen++] = '\\';
+            cpathBuff[cpathLen++] = '*';
+            cpathBuff[cpathLen] = '\0';
+            
+            // Convert UTF8 buffer to windows appropriate UTF-16LE
+            // Get the real length of the string in UTF16 characters
+            CFStringRef cfStr = CFStringCreateWithCString(kCFAllocatorSystemDefault, cpathBuff, kCFStringEncodingUTF8);
+            cpathLen = CFStringGetLength(cfStr);
+            // Allocate a wide buffer to hold the converted string, including space for a NULL terminator
+            wchar_t *wideBuf = (wchar_t *)malloc((cpathLen + 1) * sizeof(wchar_t));
+            // Copy the string into the buffer and terminate
+            CFStringGetCharacters(cfStr, CFRangeMake(0, cpathLen), (UniChar *)wideBuf);
+            wideBuf[cpathLen] = 0;
+            CFRelease(cfStr);
+            
+            handle = FindFirstFileW(wideBuf, (LPWIN32_FIND_DATAW)&file);
+            if (handle != INVALID_HANDLE_VALUE) {
+                do {
+                    CFIndex nameLen = wcslen(file.cFileName);
+                    if (0 == nameLen || ('.' == file.cFileName[0] && (1 == nameLen || (2 == nameLen && '.' == file.cFileName[1]) || '_' == file.cFileName[1]))) continue;
+                    name = CFStringCreateWithBytes(kCFAllocatorSystemDefault, (const uint8_t *)file.cFileName, nameLen * sizeof(wchar_t), kCFStringEncodingUTF16, NO);
+                    if (name) {
+                        CFArrayAppendValue(contents, name);
+                        if (file.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY) {
+                            CFArrayAppendValue(directoryContents, name);
+                        } /* else if (file.dwFileAttributes == DT_UNKNOWN) {
+                            CFArrayAppendValue(unknownContents, name);
+                        } */
+                        CFRelease(name);
+                    }
+                } while (FindNextFileW(handle, &file));
+                
+                FindClose(handle);
+            }
+            free(wideBuf);
+        }
+#else
+        DIR *dirp = NULL;
+        struct dirent *dent;
         if (tryToOpen && (dirp = opendir(cpathBuff))) {
             while ((dent = readdir(dirp))) {
                 CFIndex nameLen = dent->d_namlen;
@@ -363,46 +441,47 @@ static CFArrayRef _CFBundleCopySortedDirectoryContentsAtPath(CFStringRef path, _
             }
             (void)closedir(dirp);
         }
+#endif
         
         _CFArraySortValues(contents, (CFComparatorFunction)CFStringCompare, NULL);
         _CFArraySortValues(directoryContents, (CFComparatorFunction)CFStringCompare, NULL);
         _CFArraySortValues(unknownContents, (CFComparatorFunction)CFStringCompare, NULL);
         
-        __CFSpinLock(&CFBundleResourceGlobalDataLock);
-        if (!contentsCache) contentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(contentsCache)) CFDictionaryRemoveAllValues(contentsCache);
-        CFDictionaryAddValue(contentsCache, path, contents);
+        __CFSpinLock(&_cacheLock);
+        if (!_contentsCache) _contentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(_contentsCache)) CFDictionaryRemoveAllValues(_contentsCache);
+        CFDictionaryAddValue(_contentsCache, path, contents);
 
-        if (!directoryContentsCache) directoryContentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(directoryContentsCache)) CFDictionaryRemoveAllValues(directoryContentsCache);
-        CFDictionaryAddValue(directoryContentsCache, path, directoryContents);
+        if (!_directoryContentsCache) _directoryContentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(_directoryContentsCache)) CFDictionaryRemoveAllValues(_directoryContentsCache);
+        CFDictionaryAddValue(_directoryContentsCache, path, directoryContents);
 
-        if (!unknownContentsCache) unknownContentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(unknownContentsCache)) CFDictionaryRemoveAllValues(unknownContentsCache);
-        CFDictionaryAddValue(unknownContentsCache, path, unknownContents);
+        if (!_unknownContentsCache) _unknownContentsCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, READ_DIRECTORIES_CACHE_CAPACITY, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        if (READ_DIRECTORIES_CACHE_CAPACITY <= CFDictionaryGetCount(_unknownContentsCache)) CFDictionaryRemoveAllValues(_unknownContentsCache);
+        CFDictionaryAddValue(_unknownContentsCache, path, unknownContents);
 
         if (contentsType == _CFBundleUnknownContents) {
-            result = CFRetain(unknownContents);
+            result = (CFArrayRef)CFRetain(unknownContents);
         } else if (contentsType == _CFBundleDirectoryContents) {
-            result = CFRetain(directoryContents);
+            result = (CFArrayRef)CFRetain(directoryContents);
         } else {
-            result = CFRetain(contents);
+            result = (CFArrayRef)CFRetain(contents);
         }
         
         CFRelease(contents);
         CFRelease(directoryContents);
         CFRelease(unknownContents);
-        __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+        __CFSpinUnlock(&_cacheLock);
     }
     return result;
 }
 
 static void _CFBundleFlushContentsCaches(void) {
-    __CFSpinLock(&CFBundleResourceGlobalDataLock);
-    if (contentsCache) CFDictionaryRemoveAllValues(contentsCache);
-    if (directoryContentsCache) CFDictionaryRemoveAllValues(directoryContentsCache);
-    if (unknownContentsCache) CFDictionaryRemoveAllValues(unknownContentsCache);
-    __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+    __CFSpinLock(&_cacheLock);
+    if (_contentsCache) CFDictionaryRemoveAllValues(_contentsCache);
+    if (_directoryContentsCache) CFDictionaryRemoveAllValues(_directoryContentsCache);
+    if (_unknownContentsCache) CFDictionaryRemoveAllValues(_unknownContentsCache);
+    __CFSpinUnlock(&_cacheLock);
 }
 
 static void _CFBundleFlushContentsCacheForPath(CFMutableDictionaryRef cache, CFStringRef path) {
@@ -417,29 +496,23 @@ static void _CFBundleFlushContentsCacheForPath(CFMutableDictionaryRef cache, CFS
 }
 
 static void _CFBundleFlushContentsCachesForPath(CFStringRef path) {
-    __CFSpinLock(&CFBundleResourceGlobalDataLock);
-    if (contentsCache) _CFBundleFlushContentsCacheForPath(contentsCache, path);
-    if (directoryContentsCache) _CFBundleFlushContentsCacheForPath(directoryContentsCache, path);
-    if (unknownContentsCache) _CFBundleFlushContentsCacheForPath(unknownContentsCache, path);
-    __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
+    __CFSpinLock(&_cacheLock);
+    if (_contentsCache) _CFBundleFlushContentsCacheForPath(_contentsCache, path);
+    if (_directoryContentsCache) _CFBundleFlushContentsCacheForPath(_directoryContentsCache, path);
+    if (_unknownContentsCache) _CFBundleFlushContentsCacheForPath(_unknownContentsCache, path);
+    __CFSpinUnlock(&_cacheLock);
 }
 
-#endif /* READ_DIRECTORIES */
-
 CF_EXPORT void _CFBundleFlushCachesForURL(CFURLRef url) {
-#if READ_DIRECTORIES
     CFURLRef absoluteURL = CFURLCopyAbsoluteURL(url);
     CFStringRef path = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
     _CFBundleFlushContentsCachesForPath(path);
     CFRelease(path);
     CFRelease(absoluteURL);
-#endif /* READ_DIRECTORIES */
 }
 
 CF_EXPORT void _CFBundleFlushCaches(void) {
-#if READ_DIRECTORIES
     _CFBundleFlushContentsCaches();
-#endif /* READ_DIRECTORIES */
 }
 
 static inline Boolean _CFIsResourceCommon(char *path, Boolean *isDir) {
@@ -466,7 +539,15 @@ __private_extern__ Boolean _CFIsResourceAtPath(CFStringRef path, Boolean *isDir)
     return _CFIsResourceCommon(pathBuf, isDir);
 }
 
-#if READ_DIRECTORIES
+__private_extern__ void _CFBundleSetResourceDir(UniChar *buffer, CFIndex *currLen, CFIndex maxLen, uint8_t version){
+    if (1 == version) {
+        _CFAppendPathComponent(buffer, currLen, maxLen, _AppSupportUniChars1, _AppSupportLen1);
+    } else if (2 == version) {
+        _CFAppendPathComponent(buffer, currLen, maxLen, _AppSupportUniChars2, _AppSupportLen2);
+    }
+    if (0 == version || 1 == version || 2 == version) _CFAppendPathComponent(buffer, currLen, maxLen, _ResourcesUniChars, _ResourcesLen);
+}
+
 static CFArrayRef _CFCopyTypesForSearchBundleDirectory(CFAllocatorRef alloc, UniChar *pathUniChars, CFIndex pathLen, UniChar *nameUniChars, CFIndex nameLen, CFArrayRef resTypes, CFMutableStringRef cheapStr, CFMutableStringRef tmpString, uint8_t version) {
     CFMutableArrayRef result = CFArrayCreateMutable(alloc, 0, &kCFTypeArrayCallBacks);
     CFArrayRef contents;
@@ -482,11 +563,11 @@ static CFArrayRef _CFCopyTypesForSearchBundleDirectory(CFAllocatorRef alloc, Uni
     CFStringSetExternalCharactersNoCopy(tmpString, nameUniChars, nameLen, nameLen);
     CFStringReplaceAll(cheapStr, tmpString);
     for (i = 0; i < contentsRange.length; i++) {
-        CFStringRef content = CFArrayGetValueAtIndex(contents, i);
+        CFStringRef content = (CFStringRef)CFArrayGetValueAtIndex(contents, i);
         if (CFStringHasPrefix(content, cheapStr)) {
             //fprintf(stderr, "found ");CFShow(content);
             for (j = 0; j < numResTypes; j++) {
-                CFStringRef resType = CFArrayGetValueAtIndex(resTypes, j);
+                CFStringRef resType = (CFStringRef)CFArrayGetValueAtIndex(resTypes, j);
                 if (!CFArrayContainsValue(result, resultRange, resType) && CFStringHasSuffix(content, resType)) {
                     CFArrayAppendValue(result, resType);
                     resultRange.length = CFArrayGetCount(result);
@@ -498,9 +579,8 @@ static CFArrayRef _CFCopyTypesForSearchBundleDirectory(CFAllocatorRef alloc, Uni
     CFRelease(contents);
     return result;
 }
-#endif /* READ_DIRECTORIES */
 
-#if DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 static void _CFSearchBundleDirectory2(CFAllocatorRef alloc, CFMutableArrayRef result, UniChar *pathUniChars, CFIndex pathLen, UniChar *nameUniChars, CFIndex nameLen, UniChar *typeUniChars, CFIndex typeLen, CFMutableStringRef cheapStr, CFMutableStringRef tmpString, uint8_t version) {
     // pathUniChars is the full path to the directory we are searching.
     // nameUniChars is what we are looking for.
@@ -603,7 +683,7 @@ static void _CFSearchBundleDirectory2(CFAllocatorRef alloc, CFMutableArrayRef re
 
 static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef result, UniChar *pathUniChars, CFIndex pathLen, UniChar *nameUniChars, CFIndex nameLen, UniChar *typeUniChars, CFIndex typeLen, CFMutableStringRef cheapStr, CFMutableStringRef tmpString, uint8_t version) {
 
-#if DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     _CFSearchBundleDirectory2(alloc, result, pathUniChars, pathLen, nameUniChars, nameLen, typeUniChars, typeLen, cheapStr, tmpString, version);
 #else
     // pathUniChars is the full path to the directory we are searching.
@@ -614,12 +694,9 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
     // URLs for found resources get added to result.
     CFIndex savedPathLen;
     Boolean appendSucceeded = true, platformGenericFound = false, platformSpecificFound = false, platformGenericIsDir = false, platformSpecificIsDir = false;
-#if READ_DIRECTORIES
     Boolean platformGenericIsUnknown = false, platformSpecificIsUnknown = false; 
-#endif
     CFStringRef platformGenericStr = NULL;
 
-#if READ_DIRECTORIES
     CFIndex dirPathLen = pathLen;
     CFArrayRef contents, directoryContents, unknownContents;
     CFRange contentsRange, directoryContentsRange, unknownContentsRange;
@@ -633,13 +710,11 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
     directoryContentsRange = CFRangeMake(0, CFArrayGetCount(directoryContents));
     unknownContents = _CFBundleCopySortedDirectoryContentsAtPath(cheapStr, _CFBundleUnknownContents);
     unknownContentsRange = CFRangeMake(0, CFArrayGetCount(unknownContents));
-#endif /* READ_DIRECTORIES */
     
     if (nameLen > 0) appendSucceeded = _CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, nameUniChars, nameLen);
     savedPathLen = pathLen;
     if (appendSucceeded && typeLen > 0) appendSucceeded = _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, typeUniChars, typeLen);
     if (appendSucceeded) {
-#if READ_DIRECTORIES
         CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + dirPathLen + 1, pathLen - dirPathLen - 1, pathLen - dirPathLen - 1);
         CFStringReplaceAll(cheapStr, tmpString);
         platformGenericFound = _CFBundleSortedArrayContains(contents, cheapStr);
@@ -652,11 +727,6 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
             (void)_CFIsResourceAtPath(cheapStr, &platformGenericIsDir);
             //if (platformGenericIsDir) fprintf(stderr, "a directory after all\n"); else fprintf(stderr, "not a directory after all\n"); 
         }
-#else /* READ_DIRECTORIES */
-        CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-        CFStringReplaceAll(cheapStr, tmpString);
-        platformGenericFound = _CFIsResourceAtPath(cheapStr, &platformGenericIsDir);
-#endif /* READ_DIRECTORIES */
     }
     
     // Check for platform specific.
@@ -669,7 +739,6 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
             pathLen += _PlatformLen;
             if (appendSucceeded && typeLen > 0) appendSucceeded = _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, typeUniChars, typeLen);
             if (appendSucceeded) {
-#if READ_DIRECTORIES
                 CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + dirPathLen + 1, pathLen - dirPathLen - 1, pathLen - dirPathLen - 1);
                 CFStringReplaceAll(cheapStr, tmpString);
                 platformSpecificFound = _CFBundleSortedArrayContains(contents, cheapStr);
@@ -682,11 +751,6 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
                     (void)_CFIsResourceAtPath(cheapStr, &platformSpecificIsDir);
                     //if (platformSpecificIsDir) fprintf(stderr, "a directory after all\n"); else fprintf(stderr, "not a directory after all\n"); 
                 }
-#else /* READ_DIRECTORIES */
-                CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-                CFStringReplaceAll(cheapStr, tmpString);
-                platformSpecificFound = _CFIsResourceAtPath(cheapStr, &platformSpecificIsDir);
-#endif /* READ_DIRECTORIES */
             }
         }
     }
@@ -700,15 +764,12 @@ static void _CFSearchBundleDirectory(CFAllocatorRef alloc, CFMutableArrayRef res
         CFRelease(url);
     }
     if (platformGenericStr) CFRelease(platformGenericStr);
-#if READ_DIRECTORIES
     CFRelease(contents);
     CFRelease(directoryContents);
     CFRelease(unknownContents);
-#endif /* READ_DIRECTORIES */
 #endif
 }
 
-#if READ_DIRECTORIES
 static void _CFSearchBundleDirectoryWithPredicate(CFAllocatorRef alloc, CFMutableArrayRef result, UniChar *pathUniChars, CFIndex dirPathLen, Boolean (^predicate)(CFStringRef filename, Boolean *stop), CFMutableStringRef cheapStr, CFMutableStringRef tmpString, Boolean *stopLooking, uint8_t version) {
 
     // pathUniChars is the full path to the directory we are searching.
@@ -736,7 +797,7 @@ static void _CFSearchBundleDirectoryWithPredicate(CFAllocatorRef alloc, CFMutabl
         
     // scan directory contents for matches against predicate
     for (int i = 0; i < contentsRange.length; i++) {
-        CFStringRef candidateFilename = CFArrayGetValueAtIndex(contents, i);
+        CFStringRef candidateFilename = (CFStringRef)CFArrayGetValueAtIndex(contents, i);
         if (predicate(candidateFilename, stopLooking)) {
             // we want this resource, though possibly a platform specific version of it
             // unpack candidateFilename string into pathUniChars after verifying that we have enough space in the buffer
@@ -794,17 +855,12 @@ static void _CFSearchBundleDirectoryWithPredicate(CFAllocatorRef alloc, CFMutabl
     CFRelease(directoryContents);
     CFRelease(unknownContents);
 }
-#endif
+
 
 static void _CFFindBundleResourcesInRawDir(CFAllocatorRef alloc, UniChar *workingUniChars, CFIndex workingLen, UniChar *nameUniChars, CFIndex nameLen, CFArrayRef resTypes, CFIndex limit, Boolean *stopLooking, Boolean (^predicate)(CFStringRef filename, Boolean *stop), uint8_t version, CFMutableStringRef cheapStr, CFMutableStringRef tmpString, CFMutableArrayRef result) {
     if (predicate) {
-#if READ_DIRECTORIES
         _CFSearchBundleDirectoryWithPredicate(alloc, result, workingUniChars, workingLen, predicate, cheapStr, tmpString, stopLooking, version);
         return;
-#else
-        CFLog(kCFLogLevelCritical, CFSTR("_CFFindBundleResourcesInRawDir: predicate blocks are not supported on this platform"));
-        HALT;
-#endif
     }
     if (nameLen > 0) {
         // If we have a resName, just call the search API.  We may have to loop over the resTypes.
@@ -814,7 +870,6 @@ static void _CFFindBundleResourcesInRawDir(CFAllocatorRef alloc, UniChar *workin
             CFArrayRef subResTypes = resTypes;
             Boolean releaseSubResTypes = false;
             CFIndex i, c = CFArrayGetCount(resTypes);
-#if READ_DIRECTORIES
             if (c > 2) {
                 // this is an optimization we employ when searching for large numbers of types, if the directory contents are available
                 // we scan the directory contents and restrict the list of resTypes to the types that might actually occur with the specified name
@@ -822,7 +877,6 @@ static void _CFFindBundleResourcesInRawDir(CFAllocatorRef alloc, UniChar *workin
                 c = CFArrayGetCount(subResTypes);
                 releaseSubResTypes = true;
             }
-#endif /* READ_DIRECTORIES */
             for (i = 0; i < c; i++) {
                 CFStringRef curType = (CFStringRef)CFArrayGetValueAtIndex(subResTypes, i);
                 CFIndex typeLen = CFStringGetLength(curType);
@@ -869,6 +923,7 @@ static void _CFFindBundleResourcesInRawDir(CFAllocatorRef alloc, UniChar *workin
     }
 }
 
+
 static void _CFFindBundleResourcesInResourcesDir(CFAllocatorRef alloc, UniChar *workingUniChars, CFIndex workingLen, UniChar *subDirUniChars, CFIndex subDirLen, CFArrayRef searchLanguages, UniChar *nameUniChars, CFIndex nameLen, CFArrayRef resTypes, CFIndex limit, Boolean (^predicate)(CFStringRef filename, Boolean *stop), uint8_t version, CFMutableStringRef cheapStr, CFMutableStringRef tmpString, CFMutableArrayRef result) {
     CFIndex savedWorkingLen = workingLen;
     Boolean stopLooking = false; // for predicate based-queries, we set stopLooking instead of using a limit
@@ -881,24 +936,68 @@ static void _CFFindBundleResourcesInResourcesDir(CFAllocatorRef alloc, UniChar *
         // Strip the non-localized resource directory.
         workingLen = savedWorkingLen;
     }
+    
     if (CFArrayGetCount(result) < limit && !stopLooking) {
         Boolean appendSucceeded = true;
         if (subDirLen > 0) appendSucceeded = _CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, subDirUniChars, subDirLen);
         if (appendSucceeded) _CFFindBundleResourcesInRawDir(alloc, workingUniChars, workingLen, nameUniChars, nameLen, resTypes, limit, &stopLooking, predicate, version, cheapStr, tmpString, result);
     }
     
-    // Now search the local resources.
+    // Now search the first localized resources (user language).
+    CFIndex langCount = (searchLanguages ? CFArrayGetCount(searchLanguages) : 0);
+    UniChar curLangUniChars[255];
+    
     workingLen = savedWorkingLen;
-    if (CFArrayGetCount(result) < limit && !stopLooking) {
-        CFIndex langCount = (searchLanguages ? CFArrayGetCount(searchLanguages) : 0);
-        // MF:??? OK to hard-wire this length?
-        UniChar curLangUniChars[255];
+    if (CFArrayGetCount(result) < limit && !stopLooking && langCount >= 1) {
         CFIndex numResults = CFArrayGetCount(result);
+        CFStringRef curLangStr = (CFStringRef)CFArrayGetValueAtIndex(searchLanguages, 0);
+        CFIndex curLangLen = MIN(CFStringGetLength(curLangStr), 255);
+        CFStringGetCharacters(curLangStr, CFRangeMake(0, curLangLen), curLangUniChars);
+         
+        savedWorkingLen = workingLen;
+        if (_CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, curLangUniChars, curLangLen) &&
+            _CFAppendPathExtension(workingUniChars, &workingLen, CFMaxPathSize, _LprojUniChars, _LprojLen) &&
+            (subDirLen == 0 || (subDirLen > 0 && _CFAppendPathExtension(workingUniChars, &workingLen, CFMaxPathSize, subDirUniChars, subDirLen)))) {
+            
+            _CFFindBundleResourcesInRawDir(alloc, workingUniChars, workingLen, nameUniChars, nameLen, resTypes, limit, &stopLooking, predicate, version, cheapStr, tmpString, result);
+            
+            if (CFArrayGetCount(result) != numResults) {
+                // We found resources in a language we already searched.  Don't look any farther.
+                // We also don't need to check the limit, since if the count changed at all, we are bailing.
+                return;
+            }
+        }
+    }
+    
+    workingLen = savedWorkingLen;
+    // Now search the Base.lproj directory
+    if (CFArrayGetCount(result) < limit && !stopLooking) {
+        CFIndex numResults = CFArrayGetCount(result);
+        savedWorkingLen = workingLen;
+        if (_CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, _BaseUniChars, _BaseLen) &&
+            _CFAppendPathExtension(workingUniChars, &workingLen, CFMaxPathSize, _LprojUniChars, _LprojLen) &&
+            (subDirLen == 0 || (subDirLen > 0 && _CFAppendPathExtension(workingUniChars, &workingLen, CFMaxPathSize, subDirUniChars, subDirLen)))) {
+            
+            _CFFindBundleResourcesInRawDir(alloc, workingUniChars, workingLen, nameUniChars, nameLen, resTypes, limit, &stopLooking, predicate, version, cheapStr, tmpString, result);
+            
+            if (CFArrayGetCount(result) != numResults) {
+                // We found resources in a language we already searched.  Don't look any farther.
+                // We also don't need to check the limit, since if the count changed at all, we are bailing.
+                return;
+            }
+        }
+    }
 
-        for (CFIndex langIndex = 0; langIndex < langCount; langIndex++) {
+    // Now search remaining localized resources (developer language)
+    workingLen = savedWorkingLen;
+    if (CFArrayGetCount(result) < limit && !stopLooking && langCount >= 2) {
+        // MF:??? OK to hard-wire this length?
+        CFIndex numResults = CFArrayGetCount(result);
+        
+        // start after 1st language
+        for (CFIndex langIndex = 1; langIndex < langCount; langIndex++) {
             CFStringRef curLangStr = (CFStringRef)CFArrayGetValueAtIndex(searchLanguages, langIndex);
-            CFIndex curLangLen = CFStringGetLength(curLangStr);
-            if (curLangLen > 255) curLangLen = 255;
+            CFIndex curLangLen = MIN(CFStringGetLength(curLangStr), 255);
             CFStringGetCharacters(curLangStr, CFRangeMake(0, curLangLen), curLangUniChars);
             savedWorkingLen = workingLen;
             if (!_CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, curLangUniChars, curLangLen)) {
@@ -927,8 +1026,6 @@ static void _CFFindBundleResourcesInResourcesDir(CFAllocatorRef alloc, UniChar *
         }
     }
 }
-
-extern void _CFStrSetDesiredCapacity(CFMutableStringRef str, CFIndex len);
 
 CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, Boolean (^predicate)(CFStringRef filename, Boolean *stop), uint8_t version) {
     CFMutableArrayRef result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
@@ -975,12 +1072,7 @@ CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStri
 
         if ((workingLen = CFStringGetLength(basePath)) > 0) CFStringGetCharacters(basePath, CFRangeMake(0, workingLen), workingUniChars);
         savedWorkingLen = workingLen;
-        if (1 == version) {
-            _CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, _AppSupportUniChars1, _AppSupportLen1);
-        } else if (2 == version) {
-            _CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, _AppSupportUniChars2, _AppSupportLen2);
-        }
-        if (0 == version || 1 == version || 2 == version) _CFAppendPathComponent(workingUniChars, &workingLen, CFMaxPathSize, _ResourcesUniChars, _ResourcesLen);
+        _CFBundleSetResourceDir(workingUniChars, &workingLen, CFMaxPathSize, version);
 
         // both of these used for temp string operations, for slightly different purposes, where each type is appropriate
         cheapStr = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
@@ -989,13 +1081,6 @@ CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStri
 
         _CFFindBundleResourcesInResourcesDir(kCFAllocatorSystemDefault, workingUniChars, workingLen, subDirUniChars, subDirLen, searchLanguages, nameUniChars, nameLen, resTypes, limit, predicate, version, cheapStr, tmpString, result);
         
-        // drd: This unfortunate hack is still necessary because of installer packages and Spotlight importers
-        if (CFArrayGetCount(result) == 0 && (0 == version || (2 == version && CFEqual(CFSTR("/Library/Spotlight"), basePath)))) {
-            // Try looking directly in the bundle path
-            workingLen = savedWorkingLen;
-            _CFFindBundleResourcesInResourcesDir(kCFAllocatorSystemDefault, workingUniChars, workingLen, subDirUniChars, subDirLen, searchLanguages, nameUniChars, nameLen, resTypes, limit, predicate, version, cheapStr, tmpString, result);
-        }
-
         CFRelease(cheapStr);
         CFRelease(tmpString);
         CFAllocatorDeallocate(kCFAllocatorSystemDefault, nameUniChars);
@@ -1005,9 +1090,16 @@ CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStri
     return result;
 }
 
+__private_extern__ CFArrayRef _CFFindBundleResourcesNoBlock(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, uint8_t version){
+    return _CFFindBundleResources(bundle, bundleURL, subDirName, searchLanguages, resName, resTypes, limit, NULL, version);
+}
+
 CF_EXPORT CFURLRef CFBundleCopyResourceURL(CFBundleRef bundle, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subDirName) {
-    if (!bundle)
-        return NULL;
+    if (!bundle) return NULL;
+#ifdef CFBUNDLE_NEWLOOKUP
+    CFURLRef result = (CFURLRef) _CFBundleCopyFindResources(bundle, NULL, NULL, resourceName, resourceType, subDirName, NULL, NO, NO, NULL);
+    return result;
+#else
     CFURLRef result = NULL;
     CFArrayRef languages = _CFBundleGetLanguageSearchList(bundle), types = NULL, array;
     if (resourceType) types = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&resourceType, 1, &kCFTypeArrayCallBacks);
@@ -1018,9 +1110,15 @@ CF_EXPORT CFURLRef CFBundleCopyResourceURL(CFBundleRef bundle, CFStringRef resou
         CFRelease(array);
     }
     return result;
+#endif
 }
 
 CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfType(CFBundleRef bundle, CFStringRef resourceType, CFStringRef subDirName) {
+#ifdef CFBUNDLE_NEWLOOKUP
+    if (!bundle) return CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+    CFArrayRef result = (CFArrayRef) _CFBundleCopyFindResources(bundle, NULL, NULL, NULL, resourceType, subDirName, NULL, YES, NO, NULL);
+    return result;
+#else
     CFArrayRef languages = _CFBundleGetLanguageSearchList(bundle), types = NULL, array;
     if (resourceType) types = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&resourceType, 1, &kCFTypeArrayCallBacks);
     // MF:!!! Better "limit" than 1,000,000?
@@ -1028,6 +1126,7 @@ CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfType(CFBundleRef bundle, CFString
     if (types) CFRelease(types);
     
     return array;
+#endif
 }
 
 CF_EXPORT CFURLRef _CFBundleCopyResourceURLForLanguage(CFBundleRef bundle, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subDirName, CFStringRef language) {
@@ -1035,6 +1134,11 @@ CF_EXPORT CFURLRef _CFBundleCopyResourceURLForLanguage(CFBundleRef bundle, CFStr
 }
 
 CF_EXPORT CFURLRef CFBundleCopyResourceURLForLocalization(CFBundleRef bundle, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subDirName, CFStringRef localizationName) {
+#ifdef CFBUNDLE_NEWLOOKUP
+    if (!bundle) return NULL;
+    CFURLRef result = (CFURLRef) _CFBundleCopyFindResources(bundle, NULL, NULL, resourceName, resourceType, subDirName, localizationName, NO, YES, NULL);
+    return result;
+#else
     CFURLRef result = NULL;
     CFArrayRef languages = NULL, types = NULL, array;
 
@@ -1048,6 +1152,7 @@ CF_EXPORT CFURLRef CFBundleCopyResourceURLForLocalization(CFBundleRef bundle, CF
     if (types) CFRelease(types);
     if (languages) CFRelease(languages);
     return result;
+#endif
 }
 
 CF_EXPORT CFArrayRef _CFBundleCopyResourceURLsOfTypeForLanguage(CFBundleRef bundle, CFStringRef resourceType, CFStringRef subDirName, CFStringRef language) {
@@ -1055,6 +1160,11 @@ CF_EXPORT CFArrayRef _CFBundleCopyResourceURLsOfTypeForLanguage(CFBundleRef bund
 }
 
 CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfTypeForLocalization(CFBundleRef bundle, CFStringRef resourceType, CFStringRef subDirName, CFStringRef localizationName) {
+#ifdef CFBUNDLE_NEWLOOKUP
+    if (!bundle) return CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+    CFArrayRef result = (CFArrayRef) _CFBundleCopyFindResources(bundle, NULL, NULL, NULL, resourceType, subDirName, localizationName, YES, YES, NULL);
+    return result;
+#else
     CFArrayRef languages = NULL, types = NULL, array;
 
     if (localizationName) languages = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&localizationName, 1, &kCFTypeArrayCallBacks);
@@ -1064,8 +1174,11 @@ CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfTypeForLocalization(CFBundleRef b
     if (types) CFRelease(types);
     if (languages) CFRelease(languages);
     return array;
+#endif
 }
 
+
+static Boolean CFBundleAllowMixedLocalizations(void);
 
 CF_EXPORT CFStringRef CFBundleCopyLocalizedString(CFBundleRef bundle, CFStringRef key, CFStringRef value, CFStringRef tableName) {
     CFStringRef result = NULL;
@@ -1074,6 +1187,9 @@ CF_EXPORT CFStringRef CFBundleCopyLocalizedString(CFBundleRef bundle, CFStringRe
 
     if (!key) return (value ? (CFStringRef)CFRetain(value) : (CFStringRef)CFRetain(CFSTR("")));
 
+    // Make sure to check the mixed localizations key early -- if the main bundle has not yet been cached, then we need to create the cache of the Info.plist before we start asking for resources (11172381)
+    (void)CFBundleAllowMixedLocalizations();
+    
     if (!tableName || CFEqual(tableName, CFSTR(""))) tableName = _CFBundleDefaultStringTableName;
 
     __CFSpinLock(&CFBundleLocalizedStringLock);
@@ -1121,7 +1237,6 @@ CF_EXPORT CFStringRef CFBundleCopyLocalizedString(CFBundleRef bundle, CFStringRe
 
     result = (CFStringRef)CFDictionaryGetValue(stringTable, key);
     if (!result) {
-        static int capitalize = -1;
         if (!value) {
             result = (CFStringRef)CFRetain(key);
         } else if (CFEqual(value, CFSTR(""))) {
@@ -1129,14 +1244,13 @@ CF_EXPORT CFStringRef CFBundleCopyLocalizedString(CFBundleRef bundle, CFStringRe
         } else {
             result = (CFStringRef)CFRetain(value);
         }
-        if (capitalize != 0) {
-            if (capitalize != 0) {
-                CFMutableStringRef capitalizedResult = CFStringCreateMutableCopy(kCFAllocatorSystemDefault, 0, result);
-                CFLog(__kCFLogBundle, CFSTR("Localizable string \"%@\" not found in strings table \"%@\" of bundle %@."), key, tableName, bundle);
-                CFStringUppercase(capitalizedResult, NULL);
-                CFRelease(result);
-                result = capitalizedResult;
-            }
+        __block Boolean capitalize = false;
+        if (capitalize) {
+            CFMutableStringRef capitalizedResult = CFStringCreateMutableCopy(kCFAllocatorSystemDefault, 0, result);
+            CFLog(__kCFLogBundle, CFSTR("Localizable string \"%@\" not found in strings table \"%@\" of bundle %@."), key, tableName, bundle);
+            CFStringUppercase(capitalizedResult, NULL);
+            CFRelease(result);
+            result = capitalizedResult;
         }
     } else {
         CFRetain(result);
@@ -1155,6 +1269,9 @@ CF_EXPORT CFURLRef CFBundleCopyResourceURLInDirectory(CFURLRef bundleURL, CFStri
     newURL = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, buff, strlen((char *)buff), true);
     if (!newURL) newURL = (CFURLRef)CFRetain(bundleURL);
     if (_CFBundleCouldBeBundle(newURL)) {
+#ifdef CFBUNDLE_NEWLOOKUP
+        result = (CFURLRef) _CFBundleCopyFindResources(NULL, bundleURL, NULL, resourceName, resourceType, subDirName, NULL, NO, NO, NULL);
+#else
         uint8_t version = 0;
         CFArrayRef languages = _CFBundleCopyLanguageSearchListInDirectory(kCFAllocatorSystemDefault, newURL, &version), types = NULL, array;
         if (resourceType) types = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&resourceType, 1, &kCFTypeArrayCallBacks);
@@ -1165,6 +1282,7 @@ CF_EXPORT CFURLRef CFBundleCopyResourceURLInDirectory(CFURLRef bundleURL, CFStri
             if (CFArrayGetCount(array) > 0) result = (CFURLRef)CFRetain(CFArrayGetValueAtIndex(array, 0));
             CFRelease(array);
         }
+#endif
     }
     if (newURL) CFRelease(newURL);
     return result;
@@ -1180,6 +1298,9 @@ CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfTypeInDirectory(CFURLRef bundleUR
     newURL = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, buff, strlen((char *)buff), true);
     if (!newURL) newURL = (CFURLRef)CFRetain(bundleURL);
     if (_CFBundleCouldBeBundle(newURL)) {
+#ifdef CFBUNDLE_NEWLOOKUP
+        array = (CFArrayRef) _CFBundleCopyFindResources(NULL, bundleURL, NULL, NULL, resourceType, subDirName, NULL, YES, NO, NULL);
+#else
         uint8_t version = 0;
         CFArrayRef languages = _CFBundleCopyLanguageSearchListInDirectory(kCFAllocatorSystemDefault, newURL, &version), types = NULL;
         if (resourceType) types = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&resourceType, 1, &kCFTypeArrayCallBacks);
@@ -1187,6 +1308,7 @@ CF_EXPORT CFArrayRef CFBundleCopyResourceURLsOfTypeInDirectory(CFURLRef bundleUR
         array = _CFFindBundleResources(NULL, newURL, subDirName, languages, NULL, types, 1000000, NULL, version);
         if (types) CFRelease(types);
         if (languages) CFRelease(languages);
+#endif
     }
     if (newURL) CFRelease(newURL);
     return array;
@@ -1518,63 +1640,12 @@ CFStringRef CFBundleCopyLocalizationForLocalizationInfo(SInt32 languageCode, SIn
 
 extern void *__CFAppleLanguages;
 
-#if DEPLOYMENT_TARGET_WINDOWS
-
-extern CFStringRef copyLocaleLanguageName(void);
-extern CFStringRef copyLocaleCountryName(void);
-
-static CFArrayRef copyWindowsLanguagePrefsArray() {
-    CFArrayRef result;
-    CFStringRef locales[4];
-    CFStringRef languageName = copyLocaleLanguageName(), countryName = copyLocaleCountryName();
-    if (!languageName) languageName = CFSTR("en");
-    if (!countryName) countryName = CFSTR("");
-    CFIndex i, localesCount = 0;
-    if (CFStringGetLength(countryName) > 0) locales[localesCount++] = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%@_%@"), languageName, countryName);
-    if (CFStringGetLength(languageName) != 0) {
-        // special-case for zh since we don't have a generic zh localization
-        if (CFStringCompare(languageName, CFSTR("zh"), kCFCompareCaseInsensitive) != 0) {
-            locales[localesCount++] = CFStringCreateCopy(kCFAllocatorSystemDefault, languageName);//languageName;
-        } else {
-            CFStringRef moreSpecificLanguageName;
-
-            // See http://intrigue-build.apple.com/changeset/14948 for the details on the change.  Copied below is the snippet of the code change.
-            // According to http://www.microsoft.com/globaldev/reference/win2k/setup/lcid.mspx, the locales that use 
-            // 126          // simplified chinese are CN (PRC) and SG (Singapore).  The rest use traditional chinese. 
-            // 127          languageName = (countryName == TEXT("CN") || countryName == TEXT("SG")) ? TEXT("zh_CN") : TEXT("zh_TW"); 
-
-            // Compare for CN or SG
-            if (CFStringCompare(countryName, CFSTR("CN"), kCFCompareCaseInsensitive) == 0 || CFStringCompare(countryName, CFSTR("SG"), kCFCompareCaseInsensitive) == 0) {
-                moreSpecificLanguageName = CFSTR("zh_CN");
-            } else {
-                moreSpecificLanguageName = CFSTR("zh_TW");
-            }
-            locales[localesCount++] = CFStringCreateCopy(kCFAllocatorSystemDefault, moreSpecificLanguageName);
-        }
-        // Don't need this now
-        if (languageName) CFRelease(languageName);
-        if (countryName) CFRelease(countryName);
-    }
-    if (localesCount == 0) locales[localesCount++] = CFStringCreateCopy(kCFAllocatorSystemDefault, CFSTR("en"));
-    result = CFArrayCreate(kCFAllocatorDefault, (const void **)locales, localesCount, &kCFTypeArrayCallBacks);
-    for (i = 0; i < localesCount; i++) CFRelease(locales[i]);
-    return result;
-}
-
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
-    
-static CFArrayRef _CFBundleUserLanguages = NULL;
 
 __private_extern__ CFArrayRef _CFBundleCopyUserLanguages(Boolean useBackstops) {
-    CFArrayRef result = NULL;
-    static Boolean didit = false;
-    CFArrayRef preferencesArray = NULL;
-    // This is a temporary solution, until the argument domain is moved down into CFPreferences
-    __CFSpinLock(&CFBundleResourceGlobalDataLock);
-    if (!didit) {
+    static CFArrayRef _CFBundleUserLanguages = NULL;
+    static dispatch_once_t once = 0;
+    dispatch_once(&once, ^{
+        CFArrayRef preferencesArray = NULL;
         if (__CFAppleLanguages) {
             CFDataRef data;
             CFIndex length = strlen((const char *)__CFAppleLanguages);
@@ -1597,12 +1668,15 @@ __private_extern__ CFArrayRef _CFBundleCopyUserLanguages(Boolean useBackstops) {
             CFRelease(_CFBundleUserLanguages);
             _CFBundleUserLanguages = NULL;
         }
-        didit = true;
+        if (preferencesArray) CFRelease(preferencesArray);
+    });
+    
+    if (_CFBundleUserLanguages) {
+        CFRetain(_CFBundleUserLanguages);
+        return _CFBundleUserLanguages;
+    } else {
+        return NULL;
     }
-    __CFSpinUnlock(&CFBundleResourceGlobalDataLock);
-    if (preferencesArray) CFRelease(preferencesArray);
-    if (!result && _CFBundleUserLanguages) result = (CFArrayRef)CFRetain(_CFBundleUserLanguages);
-    return result;
 }
 
 CF_EXPORT void _CFBundleGetLanguageAndRegionCodes(SInt32 *languageCode, SInt32 *regionCode) {
@@ -1651,12 +1725,8 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
     CFArrayRef predefinedLocalizations = NULL;
     CFRange predefinedLocalizationsRange;
     CFMutableStringRef cheapStr, tmpString;
-#if READ_DIRECTORIES
     CFArrayRef contents;
     CFRange contentsRange;
-#else /* READ_DIRECTORIES */
-    Boolean isDir = false;
-#endif /* READ_DIRECTORIES */
 
     // both of these used for temp string operations, for slightly
     // different purposes, where each type is appropriate
@@ -1664,12 +1734,10 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
     _CFStrSetDesiredCapacity(cheapStr, CFMaxPathSize);
     tmpString = CFStringCreateMutableWithExternalCharactersNoCopy(kCFAllocatorSystemDefault, NULL, 0, 0, kCFAllocatorNull);    
     
-#if READ_DIRECTORIES
     CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
     CFStringReplaceAll(cheapStr, tmpString);
     contents = _CFBundleCopySortedDirectoryContentsAtPath(cheapStr, _CFBundleAllContents);
     contentsRange = CFRangeMake(0, CFArrayGetCount(contents));
-#endif /* READ_DIRECTORIES */
     
     if (infoDict) {
         predefinedLocalizations = (CFArrayRef)CFDictionaryGetValue(infoDict, kCFBundleLocalizationsKey);
@@ -1684,23 +1752,15 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
     CFStringGetCharacters(curLangStr, CFRangeMake(0, curLangLen), curLangUniChars);
     savedPathLen = pathLen;
     if (_CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, curLangUniChars, curLangLen) && _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, _LprojUniChars, _LprojLen)) {
-#if READ_DIRECTORIES
         CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + savedPathLen + 1, pathLen - savedPathLen - 1, pathLen - savedPathLen - 1);
         CFStringReplaceAll(cheapStr, tmpString);
         if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, curLangStr)) || (version != 4 && _CFBundleSortedArrayContains(contents, cheapStr))) {
-#else /* READ_DIRECTORIES */
-        CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-        CFStringReplaceAll(cheapStr, tmpString);
-        if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, curLangStr)) || (version != 4 && _CFIsResourceAtPath(cheapStr, &isDir) && isDir)) {
-#endif /* READ_DIRECTORIES */
             if (!CFArrayContainsValue(lprojNames, CFRangeMake(0, CFArrayGetCount(lprojNames)), curLangStr)) CFArrayAppendValue(lprojNames, curLangStr);
             foundOne = true;
             if (CFStringGetLength(curLangStr) <= 2) {
                 CFRelease(cheapStr);
                 CFRelease(tmpString);
-#if READ_DIRECTORIES
                 CFRelease(contents);
-#endif /* READ_DIRECTORIES */
                 return foundOne;
             }
         }
@@ -1717,9 +1777,7 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
     if (foundOne && altLangStr) {
         CFRelease(cheapStr);
         CFRelease(tmpString);
-#if READ_DIRECTORIES
         CFRelease(contents);
-#endif /* READ_DIRECTORIES */
         return foundOne;
     }
     if (altLangStr) {
@@ -1728,32 +1786,23 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
         CFStringGetCharacters(altLangStr, CFRangeMake(0, curLangLen), curLangUniChars);
         pathLen = savedPathLen;
         if (_CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, curLangUniChars, curLangLen) && _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, _LprojUniChars, _LprojLen)) {
-#if READ_DIRECTORIES
             CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + savedPathLen + 1, pathLen - savedPathLen - 1, pathLen - savedPathLen - 1);
             CFStringReplaceAll(cheapStr, tmpString);
             if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, altLangStr)) || (version != 4 && _CFBundleSortedArrayContains(contents, cheapStr))) {
-#else /* READ_DIRECTORIES */
-            CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-            CFStringReplaceAll(cheapStr, tmpString);
-            if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, altLangStr)) || (version != 4 && _CFIsResourceAtPath(cheapStr, &isDir) && isDir)) {
-#endif /* READ_DIRECTORIES */
                 if (!CFArrayContainsValue(lprojNames, CFRangeMake(0, CFArrayGetCount(lprojNames)), altLangStr)) CFArrayAppendValue(lprojNames, altLangStr);
                 foundOne = true;
                 CFRelease(cheapStr);
                 CFRelease(tmpString);
-#if READ_DIRECTORIES
                 CFRelease(contents);
-#endif /* READ_DIRECTORIES */
                 return foundOne;
             }
         }
     }
-#if READ_DIRECTORIES
     if (!foundOne && (!predefinedLocalizations || CFArrayGetCount(predefinedLocalizations) == 0)) {
         Boolean hasLocalizations = false;
         CFIndex idx;
         for (idx = 0; !hasLocalizations && idx < contentsRange.length; idx++) {
-            CFStringRef name = CFArrayGetValueAtIndex(contents, idx);
+            CFStringRef name = (CFStringRef)CFArrayGetValueAtIndex(contents, idx);
             if (CFStringHasSuffix(name, _CFBundleLprojExtensionWithDot)) hasLocalizations = true;
         }
         if (!hasLocalizations) {
@@ -1763,22 +1812,15 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
             return foundOne;
         }
     }
-#endif /* READ_DIRECTORIES */
     if (!altLangStr && (modifiedLangStr = _CFBundleCopyModifiedLocalization(curLangStr))) {
         curLangLen = CFStringGetLength(modifiedLangStr);
         if (curLangLen > 255) curLangLen = 255;
         CFStringGetCharacters(modifiedLangStr, CFRangeMake(0, curLangLen), curLangUniChars);
         pathLen = savedPathLen;
         if (_CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, curLangUniChars, curLangLen) && _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, _LprojUniChars, _LprojLen)) {
-#if READ_DIRECTORIES
             CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + savedPathLen + 1, pathLen - savedPathLen - 1, pathLen - savedPathLen - 1);
             CFStringReplaceAll(cheapStr, tmpString);
             if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, modifiedLangStr)) || (version != 4 && _CFBundleSortedArrayContains(contents, cheapStr))) {
-#else /* READ_DIRECTORIES */
-            CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-            CFStringReplaceAll(cheapStr, tmpString);
-            if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, modifiedLangStr)) || (version != 4 && _CFIsResourceAtPath(cheapStr, &isDir) && isDir)) {
-#endif /* READ_DIRECTORIES */
                 if (!CFArrayContainsValue(lprojNames, CFRangeMake(0, CFArrayGetCount(lprojNames)), modifiedLangStr)) CFArrayAppendValue(lprojNames, modifiedLangStr);
                 foundOne = true;
             }
@@ -1790,15 +1832,9 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
         CFStringGetCharacters(languageAbbreviation, CFRangeMake(0, curLangLen), curLangUniChars);
         pathLen = savedPathLen;
         if (_CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, curLangUniChars, curLangLen) && _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, _LprojUniChars, _LprojLen)) {
-#if READ_DIRECTORIES
             CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + savedPathLen + 1, pathLen - savedPathLen - 1, pathLen - savedPathLen - 1);
             CFStringReplaceAll(cheapStr, tmpString);
             if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, languageAbbreviation)) || (version != 4 && _CFBundleSortedArrayContains(contents, cheapStr))) {
-#else /* READ_DIRECTORIES */
-            CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-            CFStringReplaceAll(cheapStr, tmpString);
-            if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, languageAbbreviation)) || (version != 4 && _CFIsResourceAtPath(cheapStr, &isDir) && isDir)) {
-#endif /* READ_DIRECTORIES */
                 if (!CFArrayContainsValue(lprojNames, CFRangeMake(0, CFArrayGetCount(lprojNames)), languageAbbreviation)) CFArrayAppendValue(lprojNames, languageAbbreviation);
                 foundOne = true;
             }
@@ -1810,15 +1846,9 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
         CFStringGetCharacters(languageName, CFRangeMake(0, curLangLen), curLangUniChars);
         pathLen = savedPathLen;
         if (_CFAppendPathComponent(pathUniChars, &pathLen, CFMaxPathSize, curLangUniChars, curLangLen) && _CFAppendPathExtension(pathUniChars, &pathLen, CFMaxPathSize, _LprojUniChars, _LprojLen)) {
-#if READ_DIRECTORIES
             CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars + savedPathLen + 1, pathLen - savedPathLen - 1, pathLen - savedPathLen - 1);
             CFStringReplaceAll(cheapStr, tmpString);
             if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, languageName)) || (version != 4 && _CFBundleSortedArrayContains(contents, cheapStr))) {
-#else /* READ_DIRECTORIES */
-            CFStringSetExternalCharactersNoCopy(tmpString, pathUniChars, pathLen, pathLen);
-            CFStringReplaceAll(cheapStr, tmpString);
-            if ((predefinedLocalizations && CFArrayContainsValue(predefinedLocalizations, predefinedLocalizationsRange, languageName)) || (version != 4 && _CFIsResourceAtPath(cheapStr, &isDir) && isDir)) {
-#endif /* READ_DIRECTORIES */
                 if (!CFArrayContainsValue(lprojNames, CFRangeMake(0, CFArrayGetCount(lprojNames)), languageName)) CFArrayAppendValue(lprojNames, languageName);
                 foundOne = true;
             }
@@ -1833,15 +1863,14 @@ static Boolean _CFBundleTryOnePreferredLprojNameInDirectory(CFAllocatorRef alloc
     if (canonicalLanguageAbbreviation) CFRelease(canonicalLanguageAbbreviation);
     CFRelease(cheapStr);
     CFRelease(tmpString);
-#if READ_DIRECTORIES
     CFRelease(contents);
-#endif /* READ_DIRECTORIES */
     return foundOne;
 }
 
 static Boolean CFBundleAllowMixedLocalizations(void) {
-    static Boolean allowMixed = false, examinedMain = false;
-    if (!examinedMain) {
+    static Boolean allowMixed = false;
+    static dispatch_once_t once = 0;
+    dispatch_once(&once, ^{
         CFBundleRef mainBundle = CFBundleGetMainBundle();
         CFDictionaryRef infoDict = mainBundle ? CFBundleGetInfoDictionary(mainBundle) : NULL;
         CFTypeRef allowMixedValue = infoDict ? CFDictionaryGetValue(infoDict, _kCFBundleAllowMixedLocalizationsKey) : NULL;
@@ -1855,9 +1884,8 @@ static Boolean CFBundleAllowMixedLocalizations(void) {
                 SInt32 val = 0;
                 if (CFNumberGetValue((CFNumberRef)allowMixedValue, kCFNumberSInt32Type, &val)) allowMixed = (val != 0);
             }
-        }
-        examinedMain = true;
-    }
+        }        
+    });
     return allowMixed;
 }
 
@@ -2121,11 +2149,15 @@ __private_extern__ Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, uint
     // version 3:  none of the above (see below)
     // version 4:  not a bundle (for main bundle only)
     uint8_t localVersion = 3;
-#if READ_DIRECTORIES
     CFURLRef absoluteURL = CFURLCopyAbsoluteURL(url);
     CFStringRef directoryPath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
     CFArrayRef contents = _CFBundleCopySortedDirectoryContentsAtPath(directoryPath, _CFBundleAllContents);
-    if (CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework/"))) {
+    Boolean hasFrameworkSuffix = CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework/"));
+#if DEPLOYMENT_TARGET_WINDOWS
+    hasFrameworkSuffix = hasFrameworkSuffix || CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework\\"));
+#endif
+    
+    if (hasFrameworkSuffix) {
         if (_CFBundleSortedArrayContains(contents, _CFBundleResourcesDirectoryName)) localVersion = 0;
         else if (_CFBundleSortedArrayContains(contents, _CFBundleSupportFilesDirectoryName2)) localVersion = 2;
         else if (_CFBundleSortedArrayContains(contents, _CFBundleSupportFilesDirectoryName1)) localVersion = 1;
@@ -2137,15 +2169,9 @@ __private_extern__ Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, uint
     CFRelease(contents);
     CFRelease(directoryPath);
     CFRelease(absoluteURL);
-#endif /* READ_DIRECTORIES */
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_WINDOWS
     if (localVersion == 3) {
-#if DEPLOYMENT_TARGET_EMBEDDED
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_WINDOWS
-#if DEPLOYMENT_TARGET_WINDOWS
-        if (CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework/")) || CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework\\"))) {
-#else
-        if (CFStringHasSuffix(CFURLGetString(url), CFSTR(".framework/"))) {
-#endif
+        if (hasFrameworkSuffix) {
             if (_CFBundleURLHasSubDir(url, _CFBundleResourcesURLFromBase0)) localVersion = 0;
             else if (_CFBundleURLHasSubDir(url, _CFBundleSupportFilesURLFromBase2)) localVersion = 2;
             else if (_CFBundleURLHasSubDir(url, _CFBundleSupportFilesURLFromBase1)) localVersion = 1;
@@ -2154,8 +2180,8 @@ __private_extern__ Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, uint
             else if (_CFBundleURLHasSubDir(url, _CFBundleResourcesURLFromBase0)) localVersion = 0;
             else if (_CFBundleURLHasSubDir(url, _CFBundleSupportFilesURLFromBase1)) localVersion = 1;
         }
-#endif
     }
+#endif
     if (version) *version = localVersion;
     return (localVersion != 3);
 }
@@ -2196,12 +2222,14 @@ static Boolean _isValidPlatformAndProductSuffixPair(CFStringRef platform, CFStri
 }
 
 static Boolean _isBlacklistedKey(CFStringRef keyName) {
+#if __CONSTANT_STRINGS__
 #define _CFBundleNumberOfBlacklistedInfoDictionaryKeys 2
     static const CFStringRef _CFBundleBlacklistedInfoDictionaryKeys[_CFBundleNumberOfBlacklistedInfoDictionaryKeys] = { CFSTR("CFBundleExecutable"), CFSTR("CFBundleIdentifier") };
     
     for (CFIndex idx = 0; idx < _CFBundleNumberOfBlacklistedInfoDictionaryKeys; idx++) {
         if (CFEqual(keyName, _CFBundleBlacklistedInfoDictionaryKeys[idx])) return true;
     }
+#endif
     return false;
 }
 
@@ -2410,31 +2438,23 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
         CFMutableStringRef cheapStr;
         CFStringRef infoURLFromBaseNoExtension = _CFBundleInfoURLFromBaseNoExtension0, infoURLFromBase = _CFBundleInfoURLFromBase0;
         Boolean tryPlatformSpecific = true, tryGlobal = true;
-#if READ_DIRECTORIES
         CFURLRef directoryURL = NULL, absoluteURL;
         CFStringRef directoryPath;
         CFArrayRef contents = NULL;
         CFRange contentsRange = CFRangeMake(0, 0);
-#endif /* READ_DIRECTORIES */    
 
         _CFEnsureStaticBuffersInited();
 
         if (0 == version) {
-#if READ_DIRECTORIES
             directoryURL = CFURLCreateWithString(kCFAllocatorSystemDefault, _CFBundleResourcesURLFromBase0, url);
-#endif /* READ_DIRECTORIES */    
             infoURLFromBaseNoExtension = _CFBundleInfoURLFromBaseNoExtension0;
             infoURLFromBase = _CFBundleInfoURLFromBase0;
         } else if (1 == version) {
-#if READ_DIRECTORIES
             directoryURL = CFURLCreateWithString(kCFAllocatorSystemDefault, _CFBundleSupportFilesURLFromBase1, url);
-#endif /* READ_DIRECTORIES */    
             infoURLFromBaseNoExtension = _CFBundleInfoURLFromBaseNoExtension1;
             infoURLFromBase = _CFBundleInfoURLFromBase1;
         } else if (2 == version) {
-#if READ_DIRECTORIES
             directoryURL = CFURLCreateWithString(kCFAllocatorSystemDefault, _CFBundleSupportFilesURLFromBase2, url);
-#endif /* READ_DIRECTORIES */    
             infoURLFromBaseNoExtension = _CFBundleInfoURLFromBaseNoExtension2;
             infoURLFromBase = _CFBundleInfoURLFromBase2;
         } else if (3 == version) {
@@ -2442,16 +2462,13 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
             // this test is necessary to exclude the case where a bundle is spuriously created from the innards of another bundle
             if (path) {
                 if (!(CFStringHasSuffix(path, _CFBundleSupportFilesDirectoryName1) || CFStringHasSuffix(path, _CFBundleSupportFilesDirectoryName2) || CFStringHasSuffix(path, _CFBundleResourcesDirectoryName))) {
-#if READ_DIRECTORIES
-                    directoryURL = CFRetain(url);
-#endif /* READ_DIRECTORIES */    
+                    directoryURL = (CFURLRef)CFRetain(url);
                     infoURLFromBaseNoExtension = _CFBundleInfoURLFromBaseNoExtension3;
                     infoURLFromBase = _CFBundleInfoURLFromBase3;
                 }
                 CFRelease(path);
             }
         }
-#if READ_DIRECTORIES
         if (directoryURL) {
             absoluteURL = CFURLCopyAbsoluteURL(directoryURL);
             directoryPath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
@@ -2461,7 +2478,6 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
             CFRelease(absoluteURL);
             CFRelease(directoryURL);
         }
-#endif /* READ_DIRECTORIES */    
 
         len = CFStringGetLength(infoURLFromBaseNoExtension);
         CFStringGetCharacters(infoURLFromBaseNoExtension, CFRangeMake(0, len), buff);
@@ -2472,18 +2488,16 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
         cheapStr = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
         CFStringAppendCharacters(cheapStr, buff, len);
         infoURL = CFURLCreateWithString(kCFAllocatorSystemDefault, cheapStr, url);
-#if READ_DIRECTORIES
         if (contents) {
             CFIndex resourcesLen, idx;
-            for (resourcesLen = len; resourcesLen > 0; resourcesLen--) if (buff[resourcesLen - 1] == '/') break;
+            for (resourcesLen = len; resourcesLen > 0; resourcesLen--) if (buff[resourcesLen - 1] == PATH_SEP) break;
             CFStringDelete(cheapStr, CFRangeMake(0, CFStringGetLength(cheapStr)));
             CFStringAppendCharacters(cheapStr, buff + resourcesLen, len - resourcesLen);
             for (tryPlatformSpecific = false, idx = 0; !tryPlatformSpecific && idx < contentsRange.length; idx++) {
                 // Need to do this case-insensitive to accommodate Palm
-                if (kCFCompareEqualTo == CFStringCompare(cheapStr, CFArrayGetValueAtIndex(contents, idx), kCFCompareCaseInsensitive)) tryPlatformSpecific = true;
+                if (kCFCompareEqualTo == CFStringCompare(cheapStr, (CFStringRef)CFArrayGetValueAtIndex(contents, idx), kCFCompareCaseInsensitive)) tryPlatformSpecific = true;
             }
         }
-#endif /* READ_DIRECTORIES */    
         if (tryPlatformSpecific) CFURLCreateDataAndPropertiesFromResource(kCFAllocatorSystemDefault, infoURL, &infoData, NULL, NULL, NULL);
         //fprintf(stderr, "looking for ");CFShow(infoURL);fprintf(stderr, infoData ? "found it\n" : (tryPlatformSpecific ? "missed it\n" : "skipped it\n"));
         CFRelease(cheapStr);
@@ -2491,15 +2505,13 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
             // Check for global Info.plist
             CFRelease(infoURL);
             infoURL = CFURLCreateWithString(kCFAllocatorSystemDefault, infoURLFromBase, url);
-#if READ_DIRECTORIES
             if (contents) {
                 CFIndex idx;
                 for (tryGlobal = false, idx = 0; !tryGlobal && idx < contentsRange.length; idx++) {
                     // Need to do this case-insensitive to accommodate Palm
-                    if (kCFCompareEqualTo == CFStringCompare(_CFBundleInfoFileName, CFArrayGetValueAtIndex(contents, idx), kCFCompareCaseInsensitive)) tryGlobal = true;
+                    if (kCFCompareEqualTo == CFStringCompare(_CFBundleInfoFileName, (CFStringRef)CFArrayGetValueAtIndex(contents, idx), kCFCompareCaseInsensitive)) tryGlobal = true;
                 }
             }
-#endif /* READ_DIRECTORIES */    
             if (tryGlobal) CFURLCreateDataAndPropertiesFromResource(kCFAllocatorSystemDefault, infoURL, &infoData, NULL, NULL, NULL);
             //fprintf(stderr, "looking for ");CFShow(infoURL);fprintf(stderr, infoData ? "found it\n" : (tryGlobal ? "missed it\n" : "skipped it\n"));
         }
@@ -2523,9 +2535,7 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
         }
 
         CFRelease(infoURL);
-#if READ_DIRECTORIES
         if (contents) CFRelease(contents);
-#endif /* READ_DIRECTORIES */    
     }
     _processInfoDictionary((CFMutableDictionaryRef)result, _CFGetPlatformName(), _CFGetProductName());
     return result;
@@ -2602,19 +2612,19 @@ static Boolean _CFBundleGetPackageInfoInDirectoryWithInfoDictionary(CFAllocatorR
                 CFStringGetCharacters(urlStr, CFRangeMake(0, strLen), buff);
                 CFRelease(urlStr);
                 startOfExtension = _CFStartOfPathExtension(buff, strLen);
-                if ((strLen - startOfExtension == 4 || strLen - startOfExtension == 5) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'a' && buff[startOfExtension+2] == (UniChar)'p' && buff[startOfExtension+3] == (UniChar)'p' && (strLen - startOfExtension == 4 || buff[startOfExtension+4] == (UniChar)'/')) {
+                if ((strLen - startOfExtension == 4 || strLen - startOfExtension == 5) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'a' && buff[startOfExtension+2] == (UniChar)'p' && buff[startOfExtension+3] == (UniChar)'p' && (strLen - startOfExtension == 4 || buff[startOfExtension+4] == (UniChar)PATH_SEP)) {
                     // This is an app
                     *packageType = 0x4150504c;  // 'APPL'
-                } else if ((strLen - startOfExtension == 6 || strLen - startOfExtension == 7) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'d' && buff[startOfExtension+2] == (UniChar)'e' && buff[startOfExtension+3] == (UniChar)'b' && buff[startOfExtension+4] == (UniChar)'u' && buff[startOfExtension+5] == (UniChar)'g' && (strLen - startOfExtension == 6 || buff[startOfExtension+6] == (UniChar)'/')) {
+                } else if ((strLen - startOfExtension == 6 || strLen - startOfExtension == 7) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'d' && buff[startOfExtension+2] == (UniChar)'e' && buff[startOfExtension+3] == (UniChar)'b' && buff[startOfExtension+4] == (UniChar)'u' && buff[startOfExtension+5] == (UniChar)'g' && (strLen - startOfExtension == 6 || buff[startOfExtension+6] == (UniChar)PATH_SEP)) {
                     // This is an app (debug version)
                     *packageType = 0x4150504c;  // 'APPL'
-                } else if ((strLen - startOfExtension == 8 || strLen - startOfExtension == 9) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'p' && buff[startOfExtension+2] == (UniChar)'r' && buff[startOfExtension+3] == (UniChar)'o' && buff[startOfExtension+4] == (UniChar)'f' && buff[startOfExtension+5] == (UniChar)'i' && buff[startOfExtension+6] == (UniChar)'l' && buff[startOfExtension+7] == (UniChar)'e' && (strLen - startOfExtension == 8 || buff[startOfExtension+8] == (UniChar)'/')) {
+                } else if ((strLen - startOfExtension == 8 || strLen - startOfExtension == 9) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'p' && buff[startOfExtension+2] == (UniChar)'r' && buff[startOfExtension+3] == (UniChar)'o' && buff[startOfExtension+4] == (UniChar)'f' && buff[startOfExtension+5] == (UniChar)'i' && buff[startOfExtension+6] == (UniChar)'l' && buff[startOfExtension+7] == (UniChar)'e' && (strLen - startOfExtension == 8 || buff[startOfExtension+8] == (UniChar)PATH_SEP)) {
                     // This is an app (profile version)
                     *packageType = 0x4150504c;  // 'APPL'
-                } else if ((strLen - startOfExtension == 8 || strLen - startOfExtension == 9) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'s' && buff[startOfExtension+2] == (UniChar)'e' && buff[startOfExtension+3] == (UniChar)'r' && buff[startOfExtension+4] == (UniChar)'v' && buff[startOfExtension+5] == (UniChar)'i' && buff[startOfExtension+6] == (UniChar)'c' && buff[startOfExtension+7] == (UniChar)'e' && (strLen - startOfExtension == 8 || buff[startOfExtension+8] == (UniChar)'/')) {
+                } else if ((strLen - startOfExtension == 8 || strLen - startOfExtension == 9) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'s' && buff[startOfExtension+2] == (UniChar)'e' && buff[startOfExtension+3] == (UniChar)'r' && buff[startOfExtension+4] == (UniChar)'v' && buff[startOfExtension+5] == (UniChar)'i' && buff[startOfExtension+6] == (UniChar)'c' && buff[startOfExtension+7] == (UniChar)'e' && (strLen - startOfExtension == 8 || buff[startOfExtension+8] == (UniChar)PATH_SEP)) {
                     // This is a service
                     *packageType = 0x4150504c;  // 'APPL'
-                } else if ((strLen - startOfExtension == 10 || strLen - startOfExtension == 11) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'f' && buff[startOfExtension+2] == (UniChar)'r' && buff[startOfExtension+3] == (UniChar)'a' && buff[startOfExtension+4] == (UniChar)'m' && buff[startOfExtension+5] == (UniChar)'e' && buff[startOfExtension+6] == (UniChar)'w' && buff[startOfExtension+7] == (UniChar)'o' && buff[startOfExtension+8] == (UniChar)'r' && buff[startOfExtension+9] == (UniChar)'k' && (strLen - startOfExtension == 10 || buff[startOfExtension+10] == (UniChar)'/')) {
+                } else if ((strLen - startOfExtension == 10 || strLen - startOfExtension == 11) && buff[startOfExtension] == (UniChar)'.' && buff[startOfExtension+1] == (UniChar)'f' && buff[startOfExtension+2] == (UniChar)'r' && buff[startOfExtension+3] == (UniChar)'a' && buff[startOfExtension+4] == (UniChar)'m' && buff[startOfExtension+5] == (UniChar)'e' && buff[startOfExtension+6] == (UniChar)'w' && buff[startOfExtension+7] == (UniChar)'o' && buff[startOfExtension+8] == (UniChar)'r' && buff[startOfExtension+9] == (UniChar)'k' && (strLen - startOfExtension == 10 || buff[startOfExtension+10] == (UniChar)PATH_SEP)) {
                     // This is a framework
                     *packageType = 0x464d574b;  // 'FMWK'
                 } else {
@@ -2709,7 +2719,7 @@ CF_EXPORT CFArrayRef _CFBundleGetSupportedPlatforms(CFBundleRef bundle) {
 CF_EXPORT CFStringRef _CFBundleGetCurrentPlatform(void) {
 #if DEPLOYMENT_TARGET_MACOSX
     return CFSTR("MacOS");
-#elif DEPLOYMENT_TARGET_EMBEDDED
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return CFSTR("iPhoneOS");
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("Windows");
@@ -2727,7 +2737,7 @@ CF_EXPORT CFStringRef _CFBundleGetCurrentPlatform(void) {
 }
 
 __private_extern__ CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return CFSTR("MacOS");
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("Windows");
@@ -2745,7 +2755,7 @@ __private_extern__ CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(v
 }
 
 __private_extern__ CFStringRef _CFBundleGetAlternatePlatformExecutablesSubdirectoryName(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return CFSTR("Mac OS X");
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("WinNT");
@@ -2763,7 +2773,7 @@ __private_extern__ CFStringRef _CFBundleGetAlternatePlatformExecutablesSubdirect
 }
 
 __private_extern__ CFStringRef _CFBundleGetOtherPlatformExecutablesSubdirectoryName(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return CFSTR("MacOSClassic");
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("Other");
@@ -2781,7 +2791,7 @@ __private_extern__ CFStringRef _CFBundleGetOtherPlatformExecutablesSubdirectoryN
 }
 
 __private_extern__ CFStringRef _CFBundleGetOtherAlternatePlatformExecutablesSubdirectoryName(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return CFSTR("Mac OS 8");
 #elif DEPLOYMENT_TARGET_WINDOWS
     return CFSTR("Other");
@@ -2805,15 +2815,11 @@ __private_extern__ CFArrayRef _CFBundleCopyBundleRegionsArray(CFBundleRef bundle
 CF_EXPORT CFArrayRef CFBundleCopyBundleLocalizations(CFBundleRef bundle) {
     CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
     CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(bundle);
-#if READ_DIRECTORIES
     CFURLRef absoluteURL;
     CFStringRef directoryPath;
     CFArrayRef contents;
     CFRange contentsRange;
     CFIndex idx;
-#else /* READ_DIRECTORIES */
-    CFArrayRef urls = ((_CFBundleLayoutVersion(bundle) != 4) ? _CFContentsOfDirectory(CFGetAllocator(bundle), NULL, NULL, resourcesURL, _CFBundleLprojExtension) : NULL);
-#endif /* READ_DIRECTORIES */
     CFArrayRef predefinedLocalizations = NULL;
     CFMutableArrayRef result = NULL;
 
@@ -2830,14 +2836,13 @@ CF_EXPORT CFArrayRef CFBundleCopyBundleLocalizations(CFBundleRef bundle) {
         }
     }
 
-#if READ_DIRECTORIES
     if (resourcesURL) {
         absoluteURL = CFURLCopyAbsoluteURL(resourcesURL);
         directoryPath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
         contents = _CFBundleCopySortedDirectoryContentsAtPath(directoryPath, _CFBundleAllContents);
         contentsRange = CFRangeMake(0, CFArrayGetCount(contents));
         for (idx = 0; idx < contentsRange.length; idx++) {
-            CFStringRef name = CFArrayGetValueAtIndex(contents, idx);
+            CFStringRef name = (CFStringRef)CFArrayGetValueAtIndex(contents, idx);
             if (CFStringHasSuffix(name, _CFBundleLprojExtensionWithDot)) {
                 CFStringRef localization = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, name, CFRangeMake(0, CFStringGetLength(name) - 6));
                 if (!result) result = CFArrayCreateMutable(CFGetAllocator(bundle), 0, &kCFTypeArrayCallBacks);
@@ -2849,34 +2854,6 @@ CF_EXPORT CFArrayRef CFBundleCopyBundleLocalizations(CFBundleRef bundle) {
         CFRelease(directoryPath);
         CFRelease(absoluteURL);
     }
-#else /* READ_DIRECTORIES */
-    if (urls) {
-        CFIndex i, c = CFArrayGetCount(urls);
-        CFURLRef curURL, curAbsoluteURL;
-        CFStringRef curStr, regionStr;
-        UniChar buff[CFMaxPathSize];
-        CFIndex strLen, startOfLastPathComponent, regionLen;
-
-        if (c > 0 && !result) result = CFArrayCreateMutable(CFGetAllocator(bundle), 0, &kCFTypeArrayCallBacks);
-        for (i = 0; i < c; i++) {
-            curURL = (CFURLRef)CFArrayGetValueAtIndex(urls, i);
-            curAbsoluteURL = CFURLCopyAbsoluteURL(curURL);
-            curStr = CFURLCopyFileSystemPath(curAbsoluteURL, PLATFORM_PATH_STYLE);
-            CFRelease(curAbsoluteURL);
-            strLen = CFStringGetLength(curStr);
-            if (strLen > CFMaxPathSize) strLen = CFMaxPathSize;
-            CFStringGetCharacters(curStr, CFRangeMake(0, strLen), buff);
-
-            startOfLastPathComponent = _CFStartOfLastPathComponent(buff, strLen);
-            regionLen = _CFLengthAfterDeletingPathExtension(&(buff[startOfLastPathComponent]), strLen - startOfLastPathComponent);
-            regionStr = CFStringCreateWithCharacters(CFGetAllocator(bundle), &(buff[startOfLastPathComponent]), regionLen);
-            CFArrayAppendValue(result, regionStr);
-            CFRelease(regionStr);
-            CFRelease(curStr);
-        }
-        CFRelease(urls);
-    }
-#endif /* READ_DIRECTORIES */
     
     if (!result) {
         CFStringRef developmentLocalization = CFBundleGetDevelopmentRegion(bundle);
@@ -2936,4 +2913,920 @@ CFArrayRef CFBundleCopyLocalizationsForURL(CFURLRef url) {
         }
     }
     return result;
+}
+
+ 
+    
+CF_INLINE Boolean _CFBundleFindCharacterInStr(const UniChar *str, UniChar c, Boolean backward, CFIndex start, CFIndex length, CFRange *result){
+    *result = CFRangeMake(kCFNotFound, 0);
+    Boolean found = false;
+    if (backward) {
+        for (CFIndex i = start; i > start-length; i--) {
+            if (c == str[i]) {
+                result->location = i;
+                found = true;
+                break;
+            }
+        }
+    } else {
+        for (CFIndex i = start; i < start+length; i++) {
+            if (c == str[i]) {
+                result->location = i;
+                found = true;
+                break;
+            }
+        }
+    }
+    return found;
+}
+
+
+typedef enum {
+    _CFBundleFileVersionNoProductNoPlatform = 1,
+    _CFBundleFileVersionWithProductNoPlatform,
+    _CFBundleFileVersionNoProductWithPlatform,
+    _CFBundleFileVersionWithProductWithPlatform,
+    _CFBundleFileVersionUnmatched
+} _CFBundleFileVersion;
+
+static _CFBundleFileVersion _CFBundleCheckFileProductAndPlatform(CFStringRef file, UniChar *fileBuffer1, CFIndex fileLen, CFRange searchRange, CFStringRef product, CFStringRef platform, CFRange* prodp, CFRange* platp, CFIndex prodLen)
+{
+    _CFBundleFileVersion version;
+    CFRange found;
+    Boolean foundprod, foundplat;
+    foundplat = foundprod = NO;
+    UniChar fileBuffer2[CFMaxPathSize];
+    UniChar *fileBuffer;
+    Boolean wrong = false;
+    
+    if (fileBuffer1) {
+        fileBuffer = fileBuffer1;
+    }else{
+        fileLen = CFStringGetLength(file);
+        if (fileLen > CFMaxPathSize) fileLen = CFMaxPathSize;
+        CFStringGetCharacters(file, CFRangeMake(0, fileLen), fileBuffer2);
+        fileBuffer = fileBuffer2;
+    }
+        
+    if (_CFBundleFindCharacterInStr(fileBuffer, '~', NO, searchRange.location, searchRange.length, &found)) {
+        if (prodLen != 1) {
+            if (CFStringFindWithOptions(file, product, searchRange, kCFCompareEqualTo, prodp)) {
+                foundprod = YES;
+            }
+        }
+        if (!foundprod) {
+            for (CFIndex i = 0; i < _CFBundleNumberOfProducts; i++) {
+                if (CFStringFindWithOptions(file, _CFBundleSupportedProducts[i], searchRange, kCFCompareEqualTo, &found)) {
+                    wrong = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!wrong && _CFBundleFindCharacterInStr(fileBuffer, '-', NO, searchRange.location, searchRange.length, &found)) {
+        if (CFStringFindWithOptions(file, platform, searchRange, kCFCompareEqualTo, platp)) {
+            foundplat = YES;
+        }
+        if (!foundplat) {
+            for (CFIndex i = 0; i < _CFBundleNumberOfPlatforms; i++) {
+                if (CFStringFindWithOptions(file, _CFBundleSupportedPlatforms[i], searchRange, kCFCompareEqualTo, &found)) {
+                    wrong = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (wrong) {
+        version = _CFBundleFileVersionUnmatched;
+    } else if (foundplat && foundprod) {
+        version = _CFBundleFileVersionWithProductWithPlatform;
+    } else if (foundplat) {
+        version = _CFBundleFileVersionNoProductWithPlatform;
+    } else if (foundprod) {
+        version = _CFBundleFileVersionWithProductNoPlatform;
+    } else {
+        version = _CFBundleFileVersionNoProductNoPlatform;
+    }
+    return version;
+}
+
+    
+// ZFH
+    
+    
+static void _CFBundleAddValueForType(CFMutableStringRef type, UniChar* fileNameBuffer, CFMutableDictionaryRef queryTable, CFRange dotPosition, CFIndex fileLen, CFMutableDictionaryRef typeDir, CFTypeRef value, CFMutableDictionaryRef addedTypes, Boolean firstLproj){
+    CFIndex typeLen = fileLen - dotPosition.location - 1;
+    CFStringSetExternalCharactersNoCopy(type, fileNameBuffer+dotPosition.location+1, typeLen, typeLen);
+    CFMutableArrayRef tFiles = (CFMutableArrayRef) CFDictionaryGetValue(typeDir, type);
+    if (!tFiles) {
+        CFStringRef key = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@.%@"), _CFBundleTypeIndicator, type);
+        tFiles = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+        CFDictionarySetValue(queryTable, key, tFiles);
+        CFDictionarySetValue(typeDir, type, tFiles);
+        CFRelease(tFiles);
+        CFRelease(key);
+    }
+    if (!addedTypes) {
+        CFArrayAppendValue(tFiles, value);        
+    } else if (firstLproj) {
+        CFDictionarySetValue(addedTypes, type, type);
+        CFArrayAppendValue(tFiles, value);
+    } else if (!(CFDictionaryGetValue(addedTypes, type))) {
+        CFArrayAppendValue(tFiles, value);
+    }
+}
+
+static Boolean _CFBundleReadDirectory(CFStringRef pathOfDir, CFBundleRef bundle, CFURLRef bundleURL, UniChar *resDir, UniChar *subDir, CFIndex subDirLen, CFMutableArrayRef allFiles, Boolean hasFileAdded, CFMutableStringRef type, CFMutableDictionaryRef queryTable, CFMutableDictionaryRef typeDir, CFMutableDictionaryRef addedTypes, Boolean firstLproj, CFStringRef product, CFStringRef platform, CFStringRef lprojName, Boolean appendLprojCharacters) {
+
+    Boolean result = true;
+    
+    const CFIndex cPathBuffLen = CFStringGetMaximumSizeOfFileSystemRepresentation(pathOfDir) + 1;
+    const CFIndex valueBufferLen = cPathBuffLen + 1 + CFMaxPathSize;
+    UniChar *valueBuff = (UniChar *) CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * valueBufferLen, 0);
+    CFMutableStringRef valueStr = CFStringCreateMutableWithExternalCharactersNoCopy(kCFAllocatorSystemDefault, NULL, 0, 0, kCFAllocatorNull);
+    CFIndex pathOfDirWithSlashLen = 0; 
+    
+    CFIndex productLen = CFStringGetLength(product);
+    CFIndex platformLen = CFStringGetLength(platform);
+    
+    if (lprojName) {
+        // valueBuff is allocated with the actual length of lprojTarget
+        CFRange lprojRange = CFRangeMake(0, CFStringGetLength(lprojName));
+        CFStringGetCharacters(lprojName, lprojRange, valueBuff);
+        pathOfDirWithSlashLen += lprojRange.length;
+        if (appendLprojCharacters) _CFAppendPathExtension(valueBuff, &pathOfDirWithSlashLen, valueBufferLen, _LprojUniChars, _LprojLen);
+        _CFAppendTrailingPathSlash(valueBuff, &pathOfDirWithSlashLen, valueBufferLen);
+    }
+    
+    if (subDirLen) {
+        memmove(valueBuff+pathOfDirWithSlashLen, subDir, subDirLen*sizeof(UniChar));
+        pathOfDirWithSlashLen += subDirLen;
+        if (subDir[subDirLen-1] != _CFGetSlash()) {
+            _CFAppendTrailingPathSlash(valueBuff, &pathOfDirWithSlashLen, valueBufferLen);
+        }
+    }
+    
+    UniChar *fileNameBuffer = valueBuff + pathOfDirWithSlashLen;
+    char *cPathBuff = (char *)malloc(sizeof(char) * cPathBuffLen);
+
+    if (CFStringGetFileSystemRepresentation(pathOfDir, cPathBuff, cPathBuffLen)) {
+// this is a fix for traversing ouside of a bundle security issue: 8302591
+// it will be enabled after the bug 10956699 gets fixed
+#ifdef CFBUNDLE_NO_TRAVERSE_OUTSIDE
+#endif // CFBUNDLE_NO_TRAVERSE_OUTSIDE
+        
+#if DEPLOYMENT_TARGET_WINDOWS
+        wchar_t pathBuf[CFMaxPathSize];
+        CFStringRef pathInUTF8 = CFStringCreateWithCString(kCFAllocatorSystemDefault, cPathBuff, kCFStringEncodingUTF8);
+        CFIndex pathInUTF8Len = CFStringGetLength(pathInUTF8);
+        if (pathInUTF8Len > CFMaxPathSize) pathInUTF8Len = CFMaxPathSize;
+        
+        CFStringGetCharacters(pathInUTF8, CFRangeMake(0, pathInUTF8Len), (UniChar *)pathBuf);
+        pathBuf[pathInUTF8Len] = 0;
+        CFRelease(pathInUTF8);
+        WIN32_FIND_DATAW filePt;
+        HANDLE handle;
+        
+        if (pathInUTF8Len + 2 >= CFMaxPathLength) {
+            result = false;
+        }
+        
+        pathBuf[pathInUTF8Len] = '\\';
+        pathBuf[pathInUTF8Len + 1] = '*';
+        pathBuf[pathInUTF8Len + 2] = '\0';
+        handle = FindFirstFileW(pathBuf, (LPWIN32_FIND_DATAW)&filePt);
+        if (INVALID_HANDLE_VALUE == handle) {
+            pathBuf[pathInUTF8Len] = '\0';
+            result = false;
+        }
+        if (!result) {
+            free(cPathBuff);
+            CFAllocatorDeallocate(kCFAllocatorSystemDefault, valueBuff);
+            CFRelease(valueStr);
+            return result;
+        }
+        
+        do {
+            CFIndex nameLen = wcslen(filePt.cFileName);
+            if (filePt.cFileName[0] == '.' && (nameLen == 1 || (nameLen == 2  && filePt.cFileName[1] == '.'))) {
+                continue;
+            }
+            CFStringRef file = CFStringCreateWithBytes(kCFAllocatorSystemDefault, (const uint8_t *)filePt.cFileName, nameLen * sizeof(wchar_t), kCFStringEncodingUTF16, NO);
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+        DIR *dirp = NULL;
+        struct dirent* dent;
+        if ( result && (dirp = opendir(cPathBuff))) {
+            
+            while ((dent = readdir(dirp))) {
+
+#if DEPLOYMENT_TARGET_LINUX
+                CFIndex nameLen = strlen(dent->d_name);
+#else
+                CFIndex nameLen = dent->d_namlen;
+#endif
+                if (0 == nameLen || 0 == dent->d_fileno || ('.' == dent->d_name[0] && (1 == nameLen || (2 == nameLen && '.' == dent->d_name[1]) || '_' == dent->d_name[1]))) 
+                    continue;
+                
+                CFStringRef file = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, dent->d_name);
+#else
+#error unknown architecture, not implemented
+#endif
+                if (file) {
+                    
+                    CFIndex fileNameLen = CFStringGetLength(file);
+                    if (fileNameLen > CFMaxPathSize) fileNameLen = CFMaxPathSize;
+                    CFStringGetCharacters(file, CFRangeMake(0, fileNameLen), fileNameBuffer);
+                    CFIndex valueTotalLen = pathOfDirWithSlashLen + fileNameLen;
+                    
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+                    // construct the path for a file, which is the value in the query table
+                    // if it is a dir
+                    if (dent->d_type == DT_DIR) {
+                        _CFAppendTrailingPathSlash(valueBuff, &valueTotalLen, valueBufferLen);
+                    } else if (dent->d_type == DT_UNKNOWN) {
+                        Boolean isDir = false;
+                        char subdirPath[CFMaxPathLength];
+                        struct stat statBuf;
+                        strlcpy(subdirPath, cPathBuff, sizeof(subdirPath));
+                        strlcat(subdirPath, "/", sizeof(subdirPath));
+                        strlcat(subdirPath, dent->d_name, sizeof(subdirPath));
+                        if (stat(subdirPath, &statBuf) == 0) {
+                             isDir = ((statBuf.st_mode & S_IFMT) == S_IFDIR);
+                        }
+                        if (isDir) {
+                            _CFAppendTrailingPathSlash(valueBuff, &valueTotalLen, valueBufferLen);
+                        }
+                    } 
+#elif DEPLOYMENT_TARGET_WINDOWS
+                    if ((filePt.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                        _CFAppendTrailingPathSlash(valueBuff, &valueTotalLen, valueBufferLen);   
+                    }
+#endif
+                    CFStringSetExternalCharactersNoCopy(valueStr, valueBuff, valueTotalLen, valueBufferLen);
+                    CFTypeRef value = CFStringCreateCopy(kCFAllocatorSystemDefault, valueStr);
+                    
+                    // put it into all file array
+                    if (!hasFileAdded) {
+                        CFArrayAppendValue(allFiles, value);
+                    }
+                    
+                    // put it into type array
+                    // search the type from the end
+                    CFRange backDotPosition, dotPosition; 
+                    Boolean foundDot = _CFBundleFindCharacterInStr(fileNameBuffer, '.', YES, fileNameLen-1, fileNameLen, &backDotPosition);
+
+                    if (foundDot && backDotPosition.location != (fileNameLen-1)) {
+                        _CFBundleAddValueForType(type, fileNameBuffer, queryTable, backDotPosition, fileNameLen, typeDir, value, addedTypes, firstLproj);
+                    }
+                    
+                    // search the type from the beginning
+                    //CFRange dotPosition = CFStringFind(file, _CFBundleDot, kCFCompareEqualTo);
+                    foundDot = _CFBundleFindCharacterInStr(fileNameBuffer, '.', NO, 0, fileNameLen, &dotPosition);
+                    if (dotPosition.location != backDotPosition.location && foundDot) {
+                        _CFBundleAddValueForType(type, fileNameBuffer, queryTable, dotPosition, fileNameLen, typeDir, value, addedTypes, firstLproj);
+                    }
+                    
+                    // check if the file is product and platform specific
+                    CFRange productRange, platformRange;
+                    _CFBundleFileVersion fileVersion = _CFBundleCheckFileProductAndPlatform(file, fileNameBuffer, fileNameLen, CFRangeMake(0, fileNameLen), product, platform, &productRange, &platformRange, productLen);
+                    
+                    if (fileVersion == _CFBundleFileVersionNoProductNoPlatform || fileVersion == _CFBundleFileVersionUnmatched) {                        
+                        // No product/no platform, or unmatched files get added directly to the query table.
+                        CFStringRef prevPath = (CFStringRef)CFDictionaryGetValue(queryTable, file);
+                        if (!prevPath) {
+                            CFDictionarySetValue(queryTable, file, value);
+                        }
+                    } else {
+                        // If the file has a product or platform extension, we add the full name to the query table so that it may be found using that name.
+                        // Then we add the more specific name as well.
+                        CFDictionarySetValue(queryTable, file, value);
+                        
+                        CFIndex searchOffset = platformLen;
+                        CFStringRef key = NULL;
+                        
+                        // set the key accordining to the version of the file (product and platform)
+                        switch (fileVersion) {
+                            case _CFBundleFileVersionWithProductNoPlatform:
+                                platformRange = productRange;
+                                searchOffset = productLen;
+                            case _CFBundleFileVersionNoProductWithPlatform:
+                            case _CFBundleFileVersionWithProductWithPlatform:
+                                foundDot = _CFBundleFindCharacterInStr(fileNameBuffer, '.', NO, platformRange.location+searchOffset, fileNameLen-platformRange.location-searchOffset, &dotPosition);
+                                if (foundDot) {
+                                    CFMutableStringRef mutableKey = CFStringCreateMutable(kCFAllocatorSystemDefault, platformRange.location + (fileNameLen - dotPosition.location));
+                                    CFStringAppendCharacters(mutableKey, fileNameBuffer, platformRange.location);
+                                    CFStringAppendCharacters(mutableKey, fileNameBuffer+dotPosition.location, fileNameLen - dotPosition.location);
+                                    key = (CFStringRef)mutableKey;
+                                } else {
+                                    key = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, fileNameBuffer, platformRange.location);
+                                }
+                                break;
+                            default:
+                                CFLog(kCFLogLevelError, CFSTR("CFBundle: Unknown kind of file (%d) when creating CFBundle: %@"), pathOfDir);
+                                break;
+                        }
+                        
+                        if (key) {
+                            // add the path of the key into the query table
+                            CFStringRef prevPath = (CFStringRef) CFDictionaryGetValue(queryTable, key);
+                            if (!prevPath) {
+                                CFDictionarySetValue(queryTable, key, value);
+                            } else {
+                                if (!lprojName || CFStringHasPrefix(prevPath, lprojName)) {
+                                    // we need to know the version of exisiting path to see if we can replace it by the current path
+                                    CFRange searchRange;
+                                    if (lprojName) {
+                                        searchRange.location = CFStringGetLength(lprojName);
+                                        searchRange.length = CFStringGetLength(prevPath) - searchRange.location;
+                                    } else {
+                                        searchRange.location = 0;
+                                        searchRange.length = CFStringGetLength(prevPath);
+                                    }
+                                    _CFBundleFileVersion prevFileVersion = _CFBundleCheckFileProductAndPlatform(prevPath, NULL, 0, searchRange, product, platform, &productRange, &platformRange, productLen);
+                                    switch (prevFileVersion) {
+                                        case _CFBundleFileVersionNoProductNoPlatform:
+                                            CFDictionarySetValue(queryTable, key, value);
+                                            break;
+                                        case _CFBundleFileVersionWithProductNoPlatform:
+                                            if (fileVersion == _CFBundleFileVersionWithProductWithPlatform) CFDictionarySetValue(queryTable, key, value);
+                                            break;
+                                        case _CFBundleFileVersionNoProductWithPlatform:
+                                            CFDictionarySetValue(queryTable, key, value);
+                                            break;
+                                        default:
+                                            break;
+                                    }
+                                }
+                            }
+                            
+                            CFRelease(key);
+                        }
+                    }
+                    
+                    CFRelease(value);
+                    CFRelease(file);
+                }
+                
+                
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+            }
+            closedir(dirp);
+        } else { // opendir
+            result = false;
+        }            
+#elif DEPLOYMENT_TARGET_WINDOWS
+        } while ((FindNextFileW(handle, &filePt)));    
+        FindClose(handle);
+        pathBuf[pathInUTF8Len] = '\0';
+#endif
+
+    } else { // the path counld not be resolved to be a file system representation
+        result = false;
+    }
+    
+    free(cPathBuff);
+    CFAllocatorDeallocate(kCFAllocatorSystemDefault, valueBuff);
+    CFRelease(valueStr);
+    return result;
+}
+
+__private_extern__ CFDictionaryRef _CFBundleCreateQueryTableAtPath(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, UniChar *resDir, CFIndex resDirLen, UniChar *subDir, CFIndex subDirLen)
+{
+    const CFIndex pathBufferSize = 2*CFMaxPathSize+resDirLen+subDirLen+2;
+    UniChar *pathBuffer = (UniChar *) CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * pathBufferSize, 0);
+    
+    CFMutableDictionaryRef queryTable = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFMutableArrayRef allFiles = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+    CFMutableDictionaryRef typeDir = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFMutableStringRef type = CFStringCreateMutableWithExternalCharactersNoCopy(kCFAllocatorSystemDefault, NULL, 0, 0, kCFAllocatorNull); 
+    
+    CFStringRef productName = _CFGetProductName();//CFSTR("iphone");
+    CFStringRef platformName = _CFGetPlatformName();//CFSTR("iphoneos");
+    if (CFEqual(productName, CFSTR("ipod"))) {
+        productName = CFSTR("iphone");
+    }
+    CFStringRef product = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("~%@"), productName);
+    CFStringRef platform = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("-%@"), platformName);
+    
+    CFStringRef bundlePath = NULL;
+    if (bundle) {
+        bundlePath = _CFBundleGetBundlePath(bundle);
+        CFRetain(bundlePath);
+    } else {
+        CFURLRef url = CFURLCopyAbsoluteURL(bundleURL);
+        bundlePath = CFURLCopyFileSystemPath(url, PLATFORM_PATH_STYLE);
+        CFRelease(url);
+    }
+    // bundlePath is an actual path, so it should not have a length greater than CFMaxPathSize
+    CFIndex pathLen = CFStringGetLength(bundlePath);
+    CFStringGetCharacters(bundlePath, CFRangeMake(0, pathLen), pathBuffer);
+    CFRelease(bundlePath);
+    
+    Boolean appendSucc = true;
+    if (resDirLen > 0) { // should not fail, buffer has enought space
+        appendSucc = _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, resDir, resDirLen);
+    }
+    
+    CFStringRef basePath = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathBuffer, pathLen);
+    
+    if (subDirLen > 0) { // should not fail, buffer has enought space
+        appendSucc = _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, subDir, subDirLen);
+    }
+    
+    CFStringRef pathToRead = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathBuffer, pathLen);
+    
+    // read the content in sub dir and put them into query table
+    _CFBundleReadDirectory(pathToRead, bundle, bundleURL, resDir, subDir, subDirLen, allFiles, false, type, queryTable, typeDir, NULL, false, product, platform, NULL, false);
+    
+    CFRelease(pathToRead);
+    
+    CFIndex numOfAllFiles = CFArrayGetCount(allFiles);
+    
+    if (bundle && !languages) {
+        languages = _CFBundleGetLanguageSearchList(bundle);
+    }
+    CFIndex numLprojs = languages ? CFArrayGetCount(languages) : 0;
+    CFMutableDictionaryRef addedTypes = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    
+    CFIndex basePathLen = CFStringGetLength(basePath);
+    Boolean hasFileAdded = false;
+    Boolean firstLproj = true;
+
+    // First, search lproj for user's chosen language
+    if (numLprojs >= 1) {
+        CFStringRef lprojTarget = (CFStringRef)CFArrayGetValueAtIndex(languages, 0);
+        // lprojTarget is from _CFBundleGetLanguageSearchList, so it should not have a length greater than CFMaxPathSize
+        UniChar lprojBuffer[CFMaxPathSize];
+        CFIndex lprojLen = CFStringGetLength(lprojTarget);
+        CFStringGetCharacters(lprojTarget, CFRangeMake(0, lprojLen), lprojBuffer);
+        
+        pathLen = basePathLen;
+        _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, lprojBuffer, lprojLen);
+        _CFAppendPathExtension(pathBuffer, &pathLen, pathBufferSize, _LprojUniChars, _LprojLen);
+        if (subDirLen > 0) {
+            _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, subDir, subDirLen);
+        }
+        pathToRead = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathBuffer, pathLen);        
+        _CFBundleReadDirectory(pathToRead, bundle, bundleURL, resDir, subDir, subDirLen, allFiles, hasFileAdded, type, queryTable, typeDir, addedTypes, firstLproj, product, platform, lprojTarget, true);
+        CFRelease(pathToRead);
+        
+        if (!hasFileAdded && numOfAllFiles < CFArrayGetCount(allFiles)) {
+            hasFileAdded = true;
+        }
+        firstLproj = false;
+    }
+    
+    // Next, search Base.lproj folder
+    pathLen = basePathLen;
+    _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, _BaseUniChars, _BaseLen);
+    _CFAppendPathExtension(pathBuffer, &pathLen, pathBufferSize, _LprojUniChars, _LprojLen);
+    if (subDirLen > 0) {
+        _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, subDir, subDirLen);
+    }
+    pathToRead = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathBuffer, pathLen);
+    _CFBundleReadDirectory(pathToRead, bundle, bundleURL, resDir, subDir, subDirLen, allFiles, hasFileAdded, type, queryTable, typeDir, addedTypes, YES, product, platform, _CFBundleBaseDirectory, true);
+    CFRelease(pathToRead);
+    
+    if (!hasFileAdded && numOfAllFiles < CFArrayGetCount(allFiles)) {
+        hasFileAdded = true;
+    }
+
+    // Finally, search remaining languages (development language first)
+    if (numLprojs >= 2) {
+        // for each lproj we are interested in, read the content and put them into query table
+        for (CFIndex i = 1; i < CFArrayGetCount(languages); i++) {
+            CFStringRef lprojTarget = (CFStringRef) CFArrayGetValueAtIndex(languages, i);
+            // lprojTarget is from _CFBundleGetLanguageSearchList, so it should not have a length greater than CFMaxPathSize
+            UniChar lprojBuffer[CFMaxPathSize];
+            CFIndex lprojLen = CFStringGetLength(lprojTarget);
+            CFStringGetCharacters(lprojTarget, CFRangeMake(0, lprojLen), lprojBuffer);
+            
+            pathLen = basePathLen;
+            _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, lprojBuffer, lprojLen);
+            _CFAppendPathExtension(pathBuffer, &pathLen, pathBufferSize, _LprojUniChars, _LprojLen);
+            if (subDirLen > 0) {
+                _CFAppendPathComponent(pathBuffer, &pathLen, pathBufferSize, subDir, subDirLen);
+            }
+            pathToRead = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathBuffer, pathLen);
+            _CFBundleReadDirectory(pathToRead, bundle, bundleURL, resDir, subDir, subDirLen, allFiles, hasFileAdded, type, queryTable, typeDir, addedTypes, false, product, platform, lprojTarget, true);            
+            CFRelease(pathToRead);
+            
+            if (!hasFileAdded && numOfAllFiles < CFArrayGetCount(allFiles)) {
+                hasFileAdded = true;
+            }
+        }
+    }
+    
+    CFRelease(addedTypes);
+    
+    // put the array of all files in sub dir to the query table
+    if (CFArrayGetCount(allFiles) > 0) {
+        CFDictionarySetValue(queryTable, _CFBundleAllFiles, allFiles);
+    }
+    
+    CFRelease(platform);
+    CFRelease(product);
+    CFRelease(allFiles);
+    CFRelease(typeDir);
+    CFRelease(type);
+    CFRelease(basePath);
+    
+    CFAllocatorDeallocate(kCFAllocatorSystemDefault, pathBuffer);
+    return queryTable;
+}   
+    
+static CFURLRef _CFBundleCreateURLFromPath(CFStringRef path, UniChar slash, UniChar *urlBuffer, CFIndex urlBufferLen, CFMutableStringRef urlStr)
+{
+    CFURLRef url = NULL;
+    // path is a part of an actual path in the query table, so it should not have a length greater than the buffer size
+    CFIndex pathLen = CFStringGetLength(path);
+    CFStringGetCharacters(path, CFRangeMake(0, pathLen), urlBuffer+urlBufferLen);
+    CFStringSetExternalCharactersNoCopy(urlStr, urlBuffer, urlBufferLen+pathLen, CFMaxPathSize);
+    if (CFStringGetCharacterAtIndex(path, pathLen-1) == slash) {
+        url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, urlStr, PLATFORM_PATH_STYLE, YES);
+    } else {
+        url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, urlStr, PLATFORM_PATH_STYLE, NO);
+    }
+    
+    return url;
+}
+    
+static CFURLRef _CFBundleCreateRelativeURLFromBaseAndPath(CFStringRef path, CFURLRef base, UniChar slash, CFStringRef slashStr)
+{
+    CFURLRef url = NULL;
+    CFRange resultRange;
+    Boolean needToRelease = false;
+    if (CFStringFindWithOptions(path, slashStr, CFRangeMake(0, CFStringGetLength(path)-1), kCFCompareBackwards, &resultRange)) {
+        CFStringRef subPathCom = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, path, CFRangeMake(0, resultRange.location));
+        base = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, base, subPathCom, YES);
+        path = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, path, CFRangeMake(resultRange.location+1, CFStringGetLength(path)-resultRange.location-1));
+        CFRelease(subPathCom);
+        needToRelease = true;
+    }
+    if (CFStringGetCharacterAtIndex(path, CFStringGetLength(path)-1) == slash) {
+        url = (CFURLRef)CFURLCreateWithFileSystemPathRelativeToBase(kCFAllocatorSystemDefault, path, PLATFORM_PATH_STYLE, YES, base);
+    } else {
+        url = (CFURLRef)CFURLCreateWithFileSystemPathRelativeToBase(kCFAllocatorSystemDefault, path, PLATFORM_PATH_STYLE, NO, base);
+    }
+    if (needToRelease) {
+        CFRelease(base);
+        CFRelease(path);
+    }
+    return url;
+}
+    
+static void _CFBundleFindResourcesWithPredicate(CFMutableArrayRef interResult, CFDictionaryRef queryTable, Boolean (^predicate)(CFStringRef filename, Boolean *stop), Boolean *stop)
+{
+    CFIndex dictSize = CFDictionaryGetCount(queryTable);
+    if (dictSize == 0) {
+        return;
+    }
+    STACK_BUFFER_DECL(CFTypeRef, keys, dictSize);
+    STACK_BUFFER_DECL(CFTypeRef, values, dictSize);
+    CFDictionaryGetKeysAndValues(queryTable, keys, values);
+    for (CFIndex i = 0; i < dictSize; i++) {
+        if (predicate((CFStringRef)keys[i], stop)) {
+            if (CFGetTypeID(values[i]) == CFStringGetTypeID()) {
+                CFArrayAppendValue(interResult, values[i]);
+            } else {
+                CFArrayAppendArray(interResult, (CFArrayRef)values[i], CFRangeMake(0, CFArrayGetCount((CFArrayRef)values[i])));
+            }
+        }
+        
+        if (*stop) break;
+    }
+}
+    
+static CFTypeRef _CFBundleCopyURLsOfKey(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, UniChar *resDir, CFIndex resDirLen, UniChar *subDirBuffer, CFIndex subDirLen, CFStringRef subDir, CFStringRef key, CFStringRef lproj, UniChar *lprojBuff, Boolean returnArray, Boolean localized, uint8_t bundleVersion, Boolean (^predicate)(CFStringRef filename, Boolean *stop))
+{
+    CFTypeRef value = NULL;
+    Boolean stop = false; // for predicate
+    CFMutableArrayRef interResult = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+    CFDictionaryRef subTable = NULL;
+        
+    if (1 == bundleVersion) {
+        CFIndex savedResDirLen = resDirLen;
+        // add the non-localized resource dir
+        Boolean appendSucc = _CFAppendPathComponent(resDir, &resDirLen, CFMaxPathSize, _GlobalResourcesUniChars, _GlobalResourcesLen);
+        if (appendSucc) {
+            subTable = _CFBundleCopyQueryTable(bundle, bundleURL, languages, resDir, resDirLen, subDirBuffer, subDirLen);
+            if (predicate) {
+                _CFBundleFindResourcesWithPredicate(interResult, subTable, predicate, &stop);
+            } else {
+                value = CFDictionaryGetValue(subTable, key);
+            }
+        }
+        resDirLen = savedResDirLen;
+    }
+    
+    if (!value && !stop) {
+        if (subTable) CFRelease(subTable);
+        subTable = _CFBundleCopyQueryTable(bundle, bundleURL, languages, resDir, resDirLen, subDirBuffer, subDirLen);
+        if (predicate) {
+            _CFBundleFindResourcesWithPredicate(interResult, subTable, predicate, &stop);
+        } else {
+            // get the path or paths for the given key
+            value = CFDictionaryGetValue(subTable, key);
+        }
+    }
+    
+    // if localization is needed, we filter out the paths for the localization and put the valid ones in the interResult
+    Boolean checkLP = true;
+    CFIndex lpLen = lproj ? CFStringGetLength(lproj) : 0;
+    if (localized && value) {
+        
+        if (CFGetTypeID(value) == CFStringGetTypeID()){
+            // We had one result, but since we are going to do a search in a different localization, we will convert the one result into an array of results.
+            value = CFArrayCreate(kCFAllocatorSystemDefault, (const void **)&value, 1, &kCFTypeArrayCallBacks);
+        } else {
+            CFRetain(value);
+        }
+        
+        CFRange resultRange, searchRange;
+        CFIndex pathValueLen;
+        CFIndex limit = returnArray ? CFArrayGetCount((CFArrayRef)value) : 1;
+        searchRange.location = 0;
+        for (CFIndex i = 0; i < limit; i++) {
+            CFStringRef pathValue = (CFStringRef) CFArrayGetValueAtIndex((CFArrayRef)value, i);
+            pathValueLen = CFStringGetLength(pathValue);
+            searchRange.length = pathValueLen;
+            
+            // if we have subdir, we find the subdir and see if it is after the base path (bundle path + res dir)
+            Boolean searchForLocalization = false;
+            if (subDirLen) {
+                if (CFStringFindWithOptions(pathValue, subDir, searchRange, kCFCompareEqualTo, &resultRange) && resultRange.location != searchRange.location) {
+                    searchForLocalization = true;
+                }
+            } else if (!subDirLen && searchRange.length != 0) {
+                if (CFStringFindWithOptions(pathValue, _CFBundleLprojExtensionWithDot, searchRange, kCFCompareEqualTo, &resultRange) && resultRange.location + 7 < pathValueLen) {
+                    searchForLocalization = true;
+                }
+            }
+            
+            if (searchForLocalization) {
+                if (!lpLen || !(CFStringFindWithOptions(pathValue, lproj, searchRange, kCFCompareEqualTo | kCFCompareAnchored, &resultRange) && CFStringFindWithOptions(pathValue, CFSTR("."), CFRangeMake(resultRange.location + resultRange.length, 1), kCFCompareEqualTo, &resultRange))) {
+                    break;
+                }
+                checkLP = false;
+            }
+            
+            CFArrayAppendValue(interResult, pathValue);
+        }
+        
+        CFRelease(value);
+        
+        if (!returnArray && CFArrayGetCount(interResult) != 0) {
+            checkLP = false;
+        }
+    } else if (value) {
+        if (CFGetTypeID(value) == CFArrayGetTypeID()) {
+            CFArrayAppendArray(interResult, (CFArrayRef)value, CFRangeMake(0, CFArrayGetCount((CFArrayRef)value)));
+        } else {
+            CFArrayAppendValue(interResult, value);
+        }
+    }
+    
+    value = NULL;
+    CFRelease(subTable);
+    
+    // we fetch the result for a given lproj and join them with the nonlocalized result fetched above
+    if (lpLen && checkLP) {
+        CFIndex lprojBuffLen = lpLen;
+        // lprojBuff is allocated with the actual size of lproj
+        CFStringGetCharacters(lproj, CFRangeMake(0, lpLen), lprojBuff);
+        _CFAppendPathExtension(lprojBuff, &lprojBuffLen, lprojBuffLen+7, _LprojUniChars, _LprojLen);
+        
+        if (subDirLen) {
+            _CFAppendTrailingPathSlash(lprojBuff, &lprojBuffLen, lprojBuffLen+1);
+        }
+        subTable = _CFBundleCopyQueryTable(bundle, bundleURL, languages, resDir, resDirLen, lprojBuff, subDirLen+lprojBuffLen);
+        
+        value = CFDictionaryGetValue(subTable, key);
+        
+        if (value) {
+            if (CFGetTypeID(value) == CFStringGetTypeID()) {
+                CFArrayAppendValue(interResult, value);
+            } else {
+                CFArrayAppendArray(interResult, (CFArrayRef)value, CFRangeMake(0, CFArrayGetCount((CFArrayRef)value)));
+            }
+        }
+        
+        CFRelease(subTable);
+    }
+    
+    // after getting paths, we create urls from the paths
+    CFTypeRef result = NULL;
+    if (CFArrayGetCount(interResult) > 0) {
+        UniChar slash = _CFGetSlash();
+        UniChar *urlBuffer = (UniChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * CFMaxPathSize, 0);
+        CFMutableStringRef urlStr = CFStringCreateMutableWithExternalCharactersNoCopy(kCFAllocatorSystemDefault, NULL, 0, 0, kCFAllocatorNull);
+        CFStringRef bundlePath = NULL;
+        if (bundle) {
+            bundlePath = _CFBundleGetBundlePath(bundle);
+            CFRetain(bundlePath);
+        } else {
+            CFURLRef url = CFURLCopyAbsoluteURL(bundleURL);
+            bundlePath = CFURLCopyFileSystemPath(url, PLATFORM_PATH_STYLE);
+            CFRelease(url);
+        }
+        CFIndex urlBufferLen = CFStringGetLength(bundlePath);
+        CFStringGetCharacters(bundlePath, CFRangeMake(0, urlBufferLen), urlBuffer);
+        CFRelease(bundlePath);
+        
+        if (resDirLen) {
+            _CFAppendPathComponent(urlBuffer, &urlBufferLen, CFMaxPathSize, resDir, resDirLen);
+        }
+        _CFAppendTrailingPathSlash(urlBuffer, &urlBufferLen, CFMaxPathSize);
+        
+        if (!returnArray) {
+            Boolean isOnlyTypeOrAllFiles = CFStringHasPrefix(key, _CFBundleTypeIndicator);
+            isOnlyTypeOrAllFiles |= CFStringHasPrefix(key, _CFBundleAllFiles);
+            
+            CFStringRef resultPath = (CFStringRef)CFArrayGetValueAtIndex((CFArrayRef)interResult, 0);
+            if (!isOnlyTypeOrAllFiles) {
+                result = (CFURLRef)_CFBundleCreateURLFromPath((CFStringRef)resultPath, slash, urlBuffer, urlBufferLen, urlStr);
+            } else { // need to create relative URLs for binary compatibility issues
+                CFStringSetExternalCharactersNoCopy(urlStr, urlBuffer, urlBufferLen, CFMaxPathSize);
+                CFURLRef base = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, urlStr, PLATFORM_PATH_STYLE, YES);
+                CFStringRef slashStr = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &slash, 1);
+                result = (CFURLRef)_CFBundleCreateRelativeURLFromBaseAndPath(resultPath, base, slash, slashStr);
+                CFRelease(slashStr);
+                CFRelease(base);
+            }
+        } else {
+            // need to create relative URLs for binary compatibility issues
+            CFIndex numOfPaths = CFArrayGetCount((CFArrayRef)interResult);
+            CFStringSetExternalCharactersNoCopy(urlStr, urlBuffer, urlBufferLen, CFMaxPathSize);
+            CFURLRef base = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, urlStr, PLATFORM_PATH_STYLE, YES);
+            CFStringRef slashStr = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &slash, 1);
+            CFMutableArrayRef urls = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+            for (CFIndex i = 0; i < numOfPaths; i++) {
+                CFStringRef path = (CFStringRef)CFArrayGetValueAtIndex((CFArrayRef)interResult, i);
+                CFURLRef url = _CFBundleCreateRelativeURLFromBaseAndPath(path, base, slash, slashStr);
+                CFArrayAppendValue(urls, url);
+                CFRelease(url);
+            }
+            result = urls;
+            CFRelease(base);
+        }
+        CFRelease(urlStr);
+        CFAllocatorDeallocate(kCFAllocatorSystemDefault, urlBuffer);
+    } else if (returnArray) {
+        result = CFRetain(interResult);
+    }
+    
+    CFRelease(interResult);
+    return result;
+}
+
+CFTypeRef _CFBundleCopyFindResources(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized, Boolean (^predicate)(CFStringRef filename, Boolean *stop))
+{
+    CFIndex rnameLen = 0;
+    CFIndex typeLen = resourceType ? CFStringGetLength(resourceType) : 0;
+    CFIndex lprojLen = lproj ? CFStringGetLength(lproj) + 7 : 0; // 7 is the length of ".lproj/"
+    CFStringRef subPathFromResourceName = NULL;
+    CFIndex subPathFromResourceNameLen = 0;
+    if (resourceName) {
+        UniChar tmpNameBuffer[CFMaxPathSize];
+        rnameLen = CFStringGetLength(resourceName);
+        if (rnameLen > CFMaxPathSize) rnameLen = CFMaxPathSize;
+        CFStringGetCharacters(resourceName, CFRangeMake(0, rnameLen), tmpNameBuffer);
+        CFIndex rnameIndex = _CFStartOfLastPathComponent(tmpNameBuffer, rnameLen);
+        if (rnameIndex != 0) {
+            resourceName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, tmpNameBuffer+rnameIndex, rnameLen - rnameIndex);
+            subPathFromResourceName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, tmpNameBuffer, rnameIndex-1);
+            subPathFromResourceNameLen = rnameIndex-1;
+        } else {
+            CFRetain(resourceName);
+        }
+        
+        char buff[CFMaxPathSize];
+        CFStringRef newResName = NULL;
+        if (CFStringGetFileSystemRepresentation(resourceName, buff, CFMaxPathSize)) {
+            newResName = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, buff);
+        }
+        CFStringRef tmpStr = resourceName;
+        resourceName = newResName ? newResName : (CFStringRef)CFRetain(resourceName);
+        rnameLen = CFStringGetLength(resourceName);
+        CFRelease(tmpStr);
+    }
+    CFIndex subDirLen = subPath ? CFStringGetLength(subPath) : 0;
+    if (subDirLen == 0) subPath = NULL;
+    if (subDirLen && subPathFromResourceName) {
+        subDirLen += (subPathFromResourceNameLen + 1);
+    } else if (subPathFromResourceNameLen) {
+        subDirLen = subPathFromResourceNameLen;
+    }
+    
+    // the nameBuff have the format: [resourceName].[resourceType][lprojName.lproj/][subPath][resource dir]
+    UniChar *nameBuff = (UniChar *) CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * (rnameLen + 1 + typeLen + subDirLen + lprojLen + CFMaxPathSize), 0);
+    UniChar *typeBuff = rnameLen ? nameBuff + rnameLen + 1 : nameBuff + CFStringGetLength(_CFBundleTypeIndicator) + 1;
+    UniChar *lprojBuffer = typeBuff + typeLen;
+    UniChar *subDirBuffer = lprojBuffer + lprojLen;
+    UniChar *resDir = subDirBuffer + subDirLen;
+    
+    CFStringRef key = NULL;
+    
+    CFIndex typeP = 0;
+    if (typeLen && CFStringGetCharacterAtIndex(resourceType, 0) == '.') {
+        typeP = 1;
+        typeLen--;
+    }
+    if (rnameLen && typeLen) {
+        CFStringGetCharacters(resourceName, CFRangeMake(0, rnameLen), nameBuff);
+        nameBuff[rnameLen] = '.';
+        CFStringGetCharacters(resourceType, CFRangeMake(typeP, typeLen), typeBuff);
+        key = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, nameBuff, rnameLen+typeLen+1);
+    } else if (rnameLen) {
+        CFStringGetCharacters(resourceName, CFRangeMake(0, rnameLen), nameBuff);
+        key = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, nameBuff, rnameLen);
+    } else if (typeLen) {
+        rnameLen = CFStringGetLength(_CFBundleTypeIndicator);
+        CFStringGetCharacters(_CFBundleTypeIndicator, CFRangeMake(0, rnameLen), nameBuff);
+        nameBuff[rnameLen] = '.';
+        CFStringGetCharacters(resourceType, CFRangeMake(typeP, typeLen), typeBuff);
+        key = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, nameBuff, rnameLen+typeLen+1);
+    } else {
+        key = (CFStringRef)CFRetain(_CFBundleAllFiles);
+    }
+    
+    if (subDirLen) {
+        CFIndex subPathLen = 0;
+        if (subPath) {
+            subPathLen = CFStringGetLength(subPath);
+            CFStringGetCharacters(subPath, CFRangeMake(0, subPathLen), subDirBuffer);
+            if (subPathFromResourceName) _CFAppendTrailingPathSlash(subDirBuffer, &subPathLen, subDirLen);
+        }
+        if (subPathFromResourceName) {
+            CFStringGetCharacters(subPathFromResourceName, CFRangeMake(0, subPathFromResourceNameLen), subDirBuffer+subPathLen);
+            subPathLen += subPathFromResourceNameLen;
+            subPath = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, subDirBuffer, subPathLen);
+        } else {
+            CFRetain(subPath);
+        }
+    }
+    
+    // Init the one-time-only unichar buffers.
+    _CFEnsureStaticBuffersInited();
+    
+    CFIndex resDirLen = 0;
+    uint8_t bundleVersion = bundle ? _CFBundleLayoutVersion(bundle) : 0;
+    if (bundleURL && !languages) {
+        languages = _CFBundleCopyLanguageSearchListInDirectory(kCFAllocatorSystemDefault, bundleURL, &bundleVersion);
+    } else if (languages) {
+        CFRetain(languages);
+    }
+
+    _CFBundleSetResourceDir(resDir, &resDirLen, CFMaxPathSize, bundleVersion);
+    
+    CFTypeRef returnValue = _CFBundleCopyURLsOfKey(bundle, bundleURL, languages, resDir, resDirLen, subDirBuffer, subDirLen, subPath, key, lproj, lprojBuffer, returnArray, localized, bundleVersion, predicate);
+        
+    if ((!returnValue || (CFGetTypeID(returnValue) == CFArrayGetTypeID() && CFArrayGetCount((CFArrayRef)returnValue) == 0)) && (0 == bundleVersion || 2 == bundleVersion)) {
+        CFStringRef bundlePath = NULL;
+        if (bundle) {
+            bundlePath = _CFBundleGetBundlePath(bundle);
+            CFRetain(bundlePath);
+        } else {
+            CFURLRef absoluteURL = CFURLCopyAbsoluteURL(bundleURL);
+            bundlePath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
+            CFRelease(absoluteURL);
+        }
+        if ((0 == bundleVersion) || CFEqual(CFSTR("/Library/Spotlight"), bundlePath)){
+            if (returnValue) CFRelease(returnValue);
+            CFRange found;
+            // 9 is the length of "Resources"
+            if ((bundleVersion == 0 && subPath && CFEqual(subPath, CFSTR("Resources"))) || (bundleVersion == 2 && subPath && CFEqual(subPath, CFSTR("Contents/Resources")))){
+                subDirLen = 0;
+            } else if ((bundleVersion == 0 && subPath && CFStringFindWithOptions(subPath, CFSTR("Resources/"), CFRangeMake(0, 10), kCFCompareEqualTo, &found) && found.location+10 < subDirLen)) {
+                subDirBuffer = subDirBuffer + 10;
+                subDirLen -= 10;
+            } else if ((bundleVersion == 2 && subPath && CFStringFindWithOptions(subPath, CFSTR("Contents/Resources/"), CFRangeMake(0, 19), kCFCompareEqualTo, &found) && found.location+19 < subDirLen)) {
+                subDirBuffer = subDirBuffer + 19;
+                subDirLen -= 19;
+            } else {
+                resDirLen = 0;
+            }
+            if (subDirLen > 0) {
+                CFRelease(subPath);
+                subPath = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, subDirBuffer, subDirLen);
+            }
+            returnValue = _CFBundleCopyURLsOfKey(bundle, bundleURL, languages, resDir, resDirLen, subDirBuffer, subDirLen, subPath, key, lproj, lprojBuffer, returnArray, localized, bundleVersion, predicate);
+        }
+        CFRelease(bundlePath);
+    }
+
+    if (resourceName) CFRelease(resourceName);
+    if (subPath) CFRelease(subPath);
+    if (subPathFromResourceName) CFRelease(subPathFromResourceName);
+    if (languages) CFRelease(languages);
+    CFAllocatorDeallocate(kCFAllocatorSystemDefault, nameBuff);
+    CFRelease(key);
+    return returnValue;
+}
+
+__private_extern__ CFTypeRef _CFBundleCopyFindResourcesWithNoBlock(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized)
+{
+    return _CFBundleCopyFindResources(bundle, bundleURL, languages, resourceName, resourceType, subPath, lproj, returnArray, localized, NULL);
 }

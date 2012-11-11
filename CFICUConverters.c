@@ -22,7 +22,7 @@
  */
 
 /*	CFICUConverters.c
-	Copyright (c) 2004-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -238,7 +238,7 @@ static CFIndex __CFStringEncodingConverterReleaseICUConverter(UConverter *conver
 #define MAX_BUFFER_SIZE (1000)
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#if (U_ICU_VERSION_MAJOR_NUM > 4) || ((U_ICU_VERSION_MAJOR_NUM == 4) && (U_ICU_VERSION_MINOR_NUM > 6))
+#if (U_ICU_VERSION_MAJOR_NUM > 49)
 #warning Unknown ICU version. Check binary compatibility issues for rdar://problem/6024743
 #endif
 #endif

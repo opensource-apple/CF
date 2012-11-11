@@ -22,7 +22,7 @@
  */
 
 /*	CFNumber.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -31,6 +31,7 @@
 #include <CoreFoundation/CFPriv.h>
 #include <math.h>
 #include <float.h>
+
 
 #if DEPLOYMENT_TARGET_WINDOWS
 #define isnan(A) _isnan(A)
@@ -100,7 +101,7 @@ CFTypeID CFBooleanGetTypeID(void) {
 }
 
 Boolean CFBooleanGetValue(CFBooleanRef boolean) {
-    CF_OBJC_FUNCDISPATCH0(__kCFBooleanTypeID, Boolean, boolean, "boolValue");
+    CF_OBJC_FUNCDISPATCHV(__kCFBooleanTypeID, Boolean, (NSNumber *)boolean, boolValue);
     return (boolean == kCFBooleanTrue) ? true : false;
 }
 
@@ -110,6 +111,8 @@ Boolean CFBooleanGetValue(CFBooleanRef boolean) {
 #define OLD_CRAP_TOO 0
 
 #if OLD_CRAP_TOO
+
+// old implementation, for runtime comparison purposes
 
 typedef union {
     SInt32 valSInt32;
@@ -150,7 +153,7 @@ static CFComparisonResult CFNumberCompare_old(struct __CFNumber_old * number1, s
 #define BITSFORDOUBLEPOSINF	((uint64_t)0x7ff0000000000000ULL)
 #define BITSFORDOUBLENEGINF	((uint64_t)0xfff0000000000000ULL)
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #define FLOAT_POSITIVE_2_TO_THE_64	0x1.0p+64L
 #define FLOAT_NEGATIVE_2_TO_THE_127	-0x1.0p+127L
 #define FLOAT_POSITIVE_2_TO_THE_127	0x1.0p+127L
@@ -1025,6 +1028,7 @@ static const CFRuntimeClass __CFNumberClass = {
     __CFNumberCopyDescription
 };
 
+
 __private_extern__ void __CFNumberInitialize(void) {
     __kCFNumberTypeID = _CFRuntimeRegisterClass(&__CFNumberClass);
 
@@ -1076,22 +1080,30 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
 	case kCFNumberSInt32Type: {
             int32_t value = *(int32_t *)valuePtr;
 #if !__LP64__
-            // We don't bother allowing the min 24-bit integer -2^24 to also be fast-pathed;
+            // We don't bother allowing the min 24-bit integer -2^23 to also be fast-pathed;
             // tell anybody that complains about that to go ... hang.
-            if ((1L << 23) <= -value || (1L << 23) <= value) break;
+            int32_t limit = (1L << 23);
+            if (value <= -limit || limit <= value) break;
 #endif
-            return (CFNumberRef)((uintptr_t)((intptr_t)value << 8) | (2 << 6) | kCFTaggedObjectID_Integer);
+            uintptr_t ptr_val = ((uintptr_t)((intptr_t)value << 8) | (2 << 6) | kCFTaggedObjectID_Integer);
+            return (CFNumberRef)ptr_val;
         }
-#if __LP64__
 	case kCFNumberSInt64Type: {
             int64_t value = *(int64_t *)valuePtr;
-            // We don't bother allowing the min 56-bit integer -2^56 to also be fast-pathed;
+#if __LP64__
+            // We don't bother allowing the min 56-bit integer -2^55 to also be fast-pathed;
             // tell anybody that complains about that to go ... hang.
-            if ((1L << 55) <= -value || (1L << 55) <= value) break;
-            uintptr_t ptr_val = ((uintptr_t)(value << 8) | (3 << 6) | kCFTaggedObjectID_Integer);
+            int64_t limit = (1L << 55);
+            if (value <= -limit || limit <= value) break;
+#else
+            // We don't bother allowing the min 24-bit integer -2^23 to also be fast-pathed;
+            // tell anybody that complains about that to go ... hang.
+            int64_t limit = (1L << 23);
+            if (value <= -limit || limit <= value) break;
+#endif
+            uintptr_t ptr_val = ((uintptr_t)((intptr_t)value << 8) | (3 << 6) | kCFTaggedObjectID_Integer);
             return (CFNumberRef)ptr_val;
 	}
-#endif
 	}
     }
 
@@ -1185,7 +1197,7 @@ CFNumberType CFNumberGetType(CFNumberRef number) {
     if (CF_IS_TAGGED_INT(number)) {
         return __CFNumberGetType(number);
     }
-    CF_OBJC_FUNCDISPATCH0(__kCFNumberTypeID, CFNumberType, number, "_cfNumberType");
+    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFNumberType, (NSNumber *)number, _cfNumberType);
     __CFAssertIsNumber(number);
     CFNumberType type = __CFNumberGetType(number);
     if (kCFNumberSInt128Type == type) type = kCFNumberSInt64Type; // must hide this type, since it is not public
@@ -1291,7 +1303,7 @@ Boolean CFNumberGetValue(CFNumberRef number, CFNumberType type, void *valuePtr) 
         Boolean r = __CFNumberGetValueCompat(number, type, valuePtr);
         return r;
     }
-    CF_OBJC_FUNCDISPATCH2(__kCFNumberTypeID, Boolean, number, "_getValue:forType:", valuePtr, __CFNumberTypeTable[type].canonicalType);
+    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, Boolean, (NSNumber *)number, _getValue:(void *)valuePtr forType:(CFNumberType)__CFNumberTypeTable[type].canonicalType);
     __CFAssertIsNumber(number);
     __CFAssertIsValidNumberType(type);
     uint8_t localMemory[128];
@@ -1315,8 +1327,8 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL 2 in CFNumberGetValue: BYTES NOT 
 }
 
 static CFComparisonResult CFNumberCompare_new(CFNumberRef number1, CFNumberRef number2, void *context) {
-    CF_OBJC_FUNCDISPATCH1(__kCFNumberTypeID, CFComparisonResult, number1, "compare:", number2);
-    CF_OBJC_FUNCDISPATCH1(__kCFNumberTypeID, CFComparisonResult, number2, "_reverseCompare:", number1);
+    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFComparisonResult, (NSNumber *)number1, compare:(NSNumber *)number2);
+    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFComparisonResult, (NSNumber *)number2, _reverseCompare:(NSNumber *)number1);
     __CFAssertIsNumber(number1);
     __CFAssertIsNumber(number2);
 

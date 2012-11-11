@@ -26,7 +26,7 @@
  *  CoreFoundation
  *
  *  Created by aki on Wed Oct 03 2001.
- *  Copyright (c) 2001-2011, Apple Inc. All rights reserved.
+ *  Copyright (c) 2001-2012, Apple Inc. All rights reserved.
  *
  */
 

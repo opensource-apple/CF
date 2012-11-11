@@ -22,7 +22,7 @@
  */
 
 /*	CFCharacterSetPriv.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFCHARACTERSETPRIV__)
@@ -62,7 +62,7 @@ CF_INLINE Boolean CFCharacterSetIsSurrogateLowCharacter(UniChar character) {
 	@result The UTF-32 value for the surrogate pair.
 */
 CF_INLINE UTF32Char CFCharacterSetGetLongCharacterForSurrogatePair(UniChar surrogateHigh, UniChar surrogateLow) {
-    return ((surrogateHigh - 0xD800UL) << 10) + (surrogateLow - 0xDC00UL) + 0x0010000UL;
+    return (UTF32Char)(((surrogateHigh - 0xD800UL) << 10) + (surrogateLow - 0xDC00UL) + 0x0010000UL);
 }
 
 /* Check to see if the character represented by the surrogate pair surrogateHigh & surrogateLow is in the chraracter set */
@@ -70,14 +70,13 @@ CF_EXPORT Boolean CFCharacterSetIsSurrogatePairMember(CFCharacterSetRef theSet, 
 
 /* Keyed-coding support
 */
-enum {
+typedef CF_ENUM(CFIndex, CFCharacterSetKeyedCodingType) {
     kCFCharacterSetKeyedCodingTypeBitmap = 1,
     kCFCharacterSetKeyedCodingTypeBuiltin = 2,
     kCFCharacterSetKeyedCodingTypeRange = 3,
     kCFCharacterSetKeyedCodingTypeString = 4,
     kCFCharacterSetKeyedCodingTypeBuiltinAndBitmap = 5
 };
-typedef CFIndex CFCharacterSetKeyedCodingType;
 
 CF_EXPORT CFCharacterSetKeyedCodingType _CFCharacterSetGetKeyedCodingType(CFCharacterSetRef cset);
 CF_EXPORT CFCharacterSetPredefinedSet _CFCharacterSetGetKeyedCodingBuiltinType(CFCharacterSetRef cset);

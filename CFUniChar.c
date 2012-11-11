@@ -22,7 +22,7 @@
  */
 
 /*	CFUniChar.c
-	Copyright (c) 2001-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2001-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -32,7 +32,7 @@
 #include "CFStringEncodingConverterExt.h"
 #include "CFUnicodeDecomposition.h"
 #include "CFUniCharPriv.h"
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,7 +51,7 @@ extern void _CFGetFrameworkPath(wchar_t *path, int maxLength);
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #define __kCFCharacterSetDir "/System/Library/CoreServices"
-#elif DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#elif DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #define __kCFCharacterSetDir "/usr/local/share/CoreFoundation"
 #elif DEPLOYMENT_TARGET_WINDOWS
 #define __kCFCharacterSetDir "\\Windows\\CoreFoundation"
@@ -99,7 +99,7 @@ static const void *__CFGetSectDataPtr(const char *segname, const char *sectname,
 
 // Memory map the file
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 CF_INLINE void __CFUniCharCharacterSetPath(char *cpath) {
 #elif DEPLOYMENT_TARGET_WINDOWS
 CF_INLINE void __CFUniCharCharacterSetPath(wchar_t *wpath) {
@@ -163,7 +163,7 @@ void __AddBitmapStateForName(const wchar_t *bitmapName) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 static bool __CFUniCharLoadBytesFromFile(const char *fileName, const void **bytes, int64_t *fileSize) {
 #elif DEPLOYMENT_TARGET_WINDOWS
 static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **bytes, int64_t *fileSize) {
@@ -229,7 +229,7 @@ static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **b
 
 #endif // USE_MACHO_SEGMENT
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 static bool __CFUniCharLoadFile(const char *bitmapName, const void **bytes, int64_t *fileSize) {
 #elif DEPLOYMENT_TARGET_WINDOWS
 static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes, int64_t *fileSize) {
@@ -243,7 +243,7 @@ static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes, i
 
     return *bytes ? true : false;
 #else
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
     char cpath[MAXPATHLEN];
     __CFUniCharCharacterSetPath(cpath);
     strlcat(cpath, bitmapName, MAXPATHLEN);
@@ -319,7 +319,7 @@ static __CFUniCharBitmapData *__CFUniCharBitmapDataArray = NULL;
 
 static CFSpinLock_t __CFUniCharBitmapLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if !defined(CF_UNICHAR_BITMAP_FILE)
 #if USE_MACHO_SEGMENT
 #define CF_UNICHAR_BITMAP_FILE "__csbitmaps"
@@ -624,7 +624,7 @@ static const void **__CFUniCharMappingTables = NULL;
 
 static CFSpinLock_t __CFUniCharMappingTableLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if __CF_BIG_ENDIAN__
 #if USE_MACHO_SEGMENT
 #define MAPPING_TABLE_FILE "__data"
@@ -767,11 +767,13 @@ static bool __CFUniCharLoadCaseMappingTable(void) {
 #define LITHUANIAN_LANG_CODE	(0x6C74) // lt
 #define AZERI_LANG_CODE		(0x617A) // az
 #define DUTCH_LANG_CODE		(0x6E6C) // nl
+#define GREEK_LANG_CODE		(0x656C) // el
 #else
 #define TURKISH_LANG_CODE	(0x7274) // tr
 #define LITHUANIAN_LANG_CODE	(0x746C) // lt
 #define AZERI_LANG_CODE		(0x7A61) // az
 #define DUTCH_LANG_CODE		(0x6C6E) // nl
+#define GREEK_LANG_CODE		(0x6C65) // el
 #endif
 
 CFIndex CFUniCharMapCaseTo(UTF32Char theChar, UTF16Char *convertedChar, CFIndex maxLength, uint32_t ctype, uint32_t flags, const uint8_t *langCode) {
@@ -789,6 +791,54 @@ caseFoldRetry:
     }
 
     if (langCode) {
+        if (flags & kCFUniCharCaseMapGreekTonos) { // localized Greek uppercasing
+            if (theChar == 0x0301) { // GREEK TONOS
+                return 0;
+            } else if (theChar == 0x0344) {// COMBINING GREEK DIALYTIKA TONOS
+                *convertedChar = 0x0308; // COMBINING GREEK DIALYTIKA
+                return 1;
+            } else if (CFUniCharIsMemberOf(theChar, kCFUniCharDecomposableCharacterSet)) {
+                UTF32Char buffer[MAX_DECOMPOSED_LENGTH];
+                CFIndex length = CFUniCharDecomposeCharacter(theChar, buffer, MAX_DECOMPOSED_LENGTH);
+
+                if (length > 1) {
+                    UTF32Char *characters = buffer + 1;
+                    UTF32Char *tail = buffer + length;
+
+                    while (characters < tail) {
+                        if (*characters == 0x0301) break;
+                        ++characters;
+                    }
+
+                    if (characters < tail) { // found a tonos
+                        CFIndex convertedLength = CFUniCharMapCaseTo(*buffer, convertedChar, maxLength, ctype, 0, langCode);
+
+                        if (convertedLength == 0) {
+                            *convertedChar = (UTF16Char)*buffer;
+                            convertedLength = 1;
+                        }
+
+                        characters = buffer + 1;
+
+                        while (characters < tail) {
+                            if (*characters != 0x0301) { // not tonos
+                                if (*characters < 0x10000) { // BMP
+                                    convertedChar[convertedLength] = (UTF16Char)*characters;
+                                    ++convertedLength;
+                                } else {
+                                    UTF32Char character = *characters - 0x10000;
+                                    convertedChar[convertedLength++] = (UTF16Char)((character >> 10) + 0xD800UL);
+                                    convertedChar[convertedLength++] = (UTF16Char)((character & 0x3FF) + 0xDC00UL);
+                                }
+                            }
+                            ++characters;
+                        }
+
+                        return convertedLength;
+                    }
+                }
+            }
+        }
         switch (*(uint16_t *)langCode) {
             case LITHUANIAN_LANG_CODE:
                 if (theChar == 0x0307 && (flags & kCFUniCharCaseMapAfter_i)) {
@@ -1082,6 +1132,15 @@ __private_extern__ uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char th
 		}
 	    }
 	}
+
+        if (kCFUniCharCaseMapGreekTonos & lastFlags) { // still searching for tonos
+            if (CFUniCharIsMemberOf(theChar, kCFUniCharNonBaseCharacterSet)) {
+                return kCFUniCharCaseMapGreekTonos;
+            }
+        }
+        if (((theChar >= 0x0370) && (theChar < 0x0400)) || ((theChar >= 0x1F00) && (theChar < 0x2000))) { // Greek/Coptic & Greek extended ranges
+            if (((type == kCFUniCharToUppercase) || (type == kCFUniCharToTitlecase))&& (CFUniCharIsMemberOf(theChar, kCFUniCharLetterCharacterSet))) return kCFUniCharCaseMapGreekTonos;
+        }
     }
     return 0;
 }
@@ -1092,7 +1151,7 @@ static int __CFUniCharUnicodePropertyTableCount = 0;
 
 static CFSpinLock_t __CFUniCharPropTableLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if USE_MACHO_SEGMENT
 #define PROP_DB_FILE "__properties"
 #else

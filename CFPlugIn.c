@@ -22,8 +22,8 @@
  */
 
 /*      CFPlugIn.c
-        Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
-        Responsibility: David Smith
+        Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Responsibility: Tony Parker
 */
 
 #include "CFBundle_Internal.h"
@@ -43,35 +43,49 @@ __private_extern__ void __CFPlugInInitialize(void) {
 /* Functions for finding factories to create specific types and actually creating instances of a type. */
 
 CF_EXPORT CFArrayRef CFPlugInFindFactoriesForPlugInType(CFUUIDRef typeID) {
-    CFArrayRef array = _CFPFactoryFindForType(typeID);
+    CFArrayRef array = _CFPFactoryFindCopyForType(typeID);
     CFMutableArrayRef result = NULL;
     
     if (array) {
         SInt32 i, c = CFArrayGetCount(array);
         result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
-        for (i = 0; i < c; i++) CFArrayAppendValue(result, _CFPFactoryGetFactoryID((_CFPFactory *)CFArrayGetValueAtIndex(array, i)));
+        for (i = 0; i < c; i++) {
+            CFUUIDRef factoryId = _CFPFactoryCopyFactoryID((_CFPFactoryRef)CFArrayGetValueAtIndex(array, i));
+            if (factoryId) {
+                CFArrayAppendValue(result, factoryId);
+                CFRelease(factoryId);
+            }
+        }
+        CFRelease(array);
     }
     return result;
 }
 
 CF_EXPORT CFArrayRef CFPlugInFindFactoriesForPlugInTypeInPlugIn(CFUUIDRef typeID, CFPlugInRef plugIn) {
-    CFArrayRef array = _CFPFactoryFindForType(typeID);
+    CFArrayRef array = _CFPFactoryFindCopyForType(typeID);
     CFMutableArrayRef result = NULL;
 
     if (array) {
         SInt32 i, c = CFArrayGetCount(array);
-        _CFPFactory *factory;
+        _CFPFactoryRef factory;
         result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
         for (i = 0; i < c; i++) {
-            factory = (_CFPFactory *)CFArrayGetValueAtIndex(array, i);
-            if (_CFPFactoryGetPlugIn(factory) == plugIn) CFArrayAppendValue(result, _CFPFactoryGetFactoryID(factory));
+            factory = (_CFPFactoryRef )CFArrayGetValueAtIndex(array, i);
+            CFPlugInRef factoryPlugIn = _CFPFactoryCopyPlugIn(factory);
+            if (factoryPlugIn == plugIn) {
+                CFUUIDRef factoryId = _CFPFactoryCopyFactoryID(factory);
+                CFArrayAppendValue(result, factoryId);
+                CFRelease(factoryId);
+            }
+            if (factoryPlugIn) CFRelease(factoryPlugIn);
         }
+        CFRelease(array);
     }
     return result;
 }
 
 CF_EXPORT void *CFPlugInInstanceCreate(CFAllocatorRef allocator, CFUUIDRef factoryID, CFUUIDRef typeID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
     void *result = NULL;
     if (!factory) {
         /* MF:!!! No such factory. */
@@ -94,7 +108,7 @@ CF_EXPORT void *CFPlugInInstanceCreate(CFAllocatorRef allocator, CFUUIDRef facto
 CF_EXPORT Boolean CFPlugInRegisterFactoryFunction(CFUUIDRef factoryID, CFPlugInFactoryFunction func) {
     // Create factories without plugIns from default allocator
     // MF:!!! Should probably check that this worked, and maybe do some pre-checking to see if it already exists
-    // _CFPFactory *factory =
+    // _CFPFactoryRef factory =
     (void)_CFPFactoryCreate(kCFAllocatorSystemDefault, factoryID, func);
     return true;
 }
@@ -102,13 +116,13 @@ CF_EXPORT Boolean CFPlugInRegisterFactoryFunction(CFUUIDRef factoryID, CFPlugInF
 CF_EXPORT Boolean CFPlugInRegisterFactoryFunctionByName(CFUUIDRef factoryID, CFPlugInRef plugIn, CFStringRef functionName) {
     // Create factories with plugIns from plugIn's allocator
     // MF:!!! Should probably check that this worked, and maybe do some pre-checking to see if it already exists
-    // _CFPFactory *factory =
+    // _CFPFactoryRef factory =
     (void)_CFPFactoryCreateByName(CFGetAllocator(plugIn), factoryID, plugIn, functionName);
     return true;
 }
 
 CF_EXPORT Boolean CFPlugInUnregisterFactory(CFUUIDRef factoryID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
     
     if (!factory) {
         /* MF:!!! Error.  No factory registered for this ID. */
@@ -119,7 +133,7 @@ CF_EXPORT Boolean CFPlugInUnregisterFactory(CFUUIDRef factoryID) {
 }
 
 CF_EXPORT Boolean CFPlugInRegisterPlugInType(CFUUIDRef factoryID, CFUUIDRef typeID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
 
     if (!factory) {
         /* MF:!!! Error.  Factory must be registered (and not disabled) before types can be associated with it. */
@@ -130,7 +144,7 @@ CF_EXPORT Boolean CFPlugInRegisterPlugInType(CFUUIDRef factoryID, CFUUIDRef type
 }
 
 CF_EXPORT Boolean CFPlugInUnregisterPlugInType(CFUUIDRef factoryID, CFUUIDRef typeID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
 
     if (!factory) {
         /* MF:!!! Error.  Could not find factory. */
@@ -146,7 +160,7 @@ CF_EXPORT Boolean CFPlugInUnregisterPlugInType(CFUUIDRef factoryID, CFUUIDRef ty
 /* This means that an instance must keep track of the CFUUIDRef of the factory that created it so it can unregister when it goes away. */
 
 CF_EXPORT void CFPlugInAddInstanceForFactory(CFUUIDRef factoryID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
 
     if (!factory) {
         /* MF:!!! Error.  Could not find factory. */
@@ -156,7 +170,7 @@ CF_EXPORT void CFPlugInAddInstanceForFactory(CFUUIDRef factoryID) {
 }
 
 CF_EXPORT void CFPlugInRemoveInstanceForFactory(CFUUIDRef factoryID) {
-    _CFPFactory *factory = _CFPFactoryFind(factoryID, true);
+    _CFPFactoryRef factory = _CFPFactoryFind(factoryID, true);
 
     if (!factory) {
         /* MF:!!! Error.  Could not find factory. */

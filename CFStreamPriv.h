@@ -22,7 +22,7 @@
  */
 
 /*	CFStreamPriv.h
-	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2012, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTREAMPRIV__)
@@ -196,6 +196,15 @@ CF_EXPORT
 void __CFSocketSetSocketReadBufferAttrs(CFSocketRef s, CFTimeInterval timeout, CFIndex length);
 
 CF_EXTERN_C_END
+
+/*
+ * for CF{Read/Write}StreamCopyProperty created from a file.  The
+ * result is a CFDataRef containing sizeof(int) bytes in machine byte
+ * ordering representing the file descriptor of the underlying open
+ * file.  If the underlying file descriptor is not open, the property
+ * value will be NULL (as opposed to containing ((int) -1)).
+ */
+CF_EXPORT const CFStringRef _kCFStreamPropertyFileNativeHandle CF_AVAILABLE_IOS(5_0);
 
 #endif /* ! __COREFOUNDATION_CFSTREAMPRIV__ */
 

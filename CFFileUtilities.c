@@ -22,17 +22,21 @@
  */
 
 /*	CFFileUtilities.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
 #include "CFInternal.h"
 #include <CoreFoundation/CFPriv.h>
+
+#include <sys/stat.h>
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+
 #if DEPLOYMENT_TARGET_WINDOWS
 #include <io.h>
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <errno.h>
 
 #define close _close
 #define write _write
@@ -47,15 +51,12 @@
 #define statinfo _stat
 
 #else
-    #include <string.h>
-    #include <unistd.h>
-    #include <dirent.h>
-    #include <sys/stat.h>
-    #include <sys/types.h>
-    #include <pwd.h>
-    #include <fcntl.h>
-    #include <errno.h>
-    #include <stdio.h>
+
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <fcntl.h>
 
 #define statinfo stat
 
@@ -70,10 +71,7 @@ CF_INLINE int openAutoFSNoWait() {
 }
 
 CF_INLINE void closeAutoFSNoWait(int fd) {
-#if DEPLOYMENT_TARGET_WINDOWS
-#else
     if (-1 != fd) close(fd);
-#endif
 }
 
 __private_extern__ CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType) {
@@ -87,13 +85,6 @@ __private_extern__ Boolean _CFCreateDirectory(const char *path) {
     closeAutoFSNoWait(no_hang_fd);
     return ret;
 }
-
-#if DEPLOYMENT_TARGET_WINDOWS
-// todo: remove this function and make callers use _CFCreateDirectory
-__private_extern__ Boolean _CFCreateDirectoryWide(const wchar_t *path) {
-    return CreateDirectoryW(path, 0);
-}
-#endif
 
 __private_extern__ Boolean _CFRemoveDirectory(const char *path) {
     int no_hang_fd = openAutoFSNoWait();
@@ -109,34 +100,30 @@ __private_extern__ Boolean _CFDeleteFile(const char *path) {
     return ret;
 }
 
-__private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength) {
-    // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
-    int fd = -1;
+__private_extern__ Boolean _CFReadBytesFromPathAndGetFD(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags, int *fd) {    // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
     struct statinfo statBuf;
-    char path[CFMaxPathSize];
-    if (!CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize)) {
-        return false;
-    }
-
+    
     *bytes = NULL;
-
+    
     
     int no_hang_fd = openAutoFSNoWait();
-    fd = open(path, O_RDONLY|CF_OPENFLGS, 0666);
-
-    if (fd < 0) {
+    *fd = open(path, O_RDONLY|extraOpenFlags|CF_OPENFLGS, 0666);
+    
+    if (*fd < 0) {
         closeAutoFSNoWait(no_hang_fd);
         return false;
     }
-    if (fstat(fd, &statBuf) < 0) {
+    if (fstat(*fd, &statBuf) < 0) {
         int saveerr = thread_errno();
-        close(fd);
+        close(*fd);
+        *fd = -1;
         closeAutoFSNoWait(no_hang_fd);
         thread_set_errno(saveerr);
         return false;
     }
     if ((statBuf.st_mode & S_IFMT) != S_IFREG) {
-        close(fd);
+        close(*fd);
+        *fd = -1;
         closeAutoFSNoWait(no_hang_fd);
         thread_set_errno(EACCES);
         return false;
@@ -154,18 +141,36 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
         }
         *bytes = CFAllocatorAllocate(alloc, desiredLength, 0);
 	if (__CFOASafe) __CFSetLastAllocationEventName(*bytes, "CFUtilities (file-bytes)");
-//	fcntl(fd, F_NOCACHE, 1);
-        if (read(fd, *bytes, desiredLength) < 0) {
+        //	fcntl(fd, F_NOCACHE, 1);
+        if (read(*fd, *bytes, desiredLength) < 0) {
             CFAllocatorDeallocate(alloc, *bytes);
-            close(fd);
-	        closeAutoFSNoWait(no_hang_fd);
+            close(*fd);
+            *fd = -1;
+            closeAutoFSNoWait(no_hang_fd);
             return false;
         }
         *length = desiredLength;
     }
-    close(fd);
     closeAutoFSNoWait(no_hang_fd);
     return true;
+}
+
+__private_extern__ Boolean _CFReadBytesFromPath(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
+    int fd = -1;
+    Boolean result = _CFReadBytesFromPathAndGetFD(alloc, path, bytes, length, maxLength, extraOpenFlags, &fd);
+    if (fd >= 0) {
+        close(fd);
+    }
+    return result;
+}
+__private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
+    // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
+    
+    char path[CFMaxPathSize];
+    if (!CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize)) {
+        return false;
+    }
+    return _CFReadBytesFromPath(alloc, (const char *)path, bytes, length, maxLength, extraOpenFlags);
 }
 
 __private_extern__ Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, CFIndex length) {
@@ -348,7 +353,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     FindClose(handle);
     pathBuf[pathLength] = '\0';
 
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     uint8_t extBuff[CFMaxPathSize];
     int extBuffInteriorDotCount = 0; //people insist on using extensions like ".trace.plist", so we need to know how many dots back to look :(
     
@@ -445,7 +450,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
             dirURL = CFURLCreateFromFileSystemRepresentation(alloc, (uint8_t *)dirPath, pathLength, true);
             releaseBase = true;
         }
-        if (dp->d_type == DT_DIR || dp->d_type == DT_UNKNOWN) {
+        if (dp->d_type == DT_DIR || dp->d_type == DT_UNKNOWN || dp->d_type == DT_LNK || dp->d_type == DT_WHT) {
             Boolean isDir = (dp->d_type == DT_DIR);
             if (!isDir) {
                 // Ugh; must stat.
@@ -601,13 +606,10 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
 }
 
 
-// MF:!!! Should pull in the rest of the UniChar based path utils from Foundation.
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    #define UNIX_PATH_SEMANTICS
-#elif DEPLOYMENT_TARGET_WINDOWS
-    #define WINDOWS_PATH_SEMANTICS
+#if DEPLOYMENT_TARGET_WINDOWS
+#define WINDOWS_PATH_SEMANTICS
 #else
-#error Unknown platform
+#define UNIX_PATH_SEMANTICS
 #endif
 
 #if defined(WINDOWS_PATH_SEMANTICS)
@@ -635,6 +637,10 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
 #elif defined(HFS_PATH_SEMANTICS)
     #define IS_SLASH(C)	((C) == ':')
 #endif
+
+__private_extern__ UniChar _CFGetSlash(){
+    return CFPreferredSlash;
+}
 
 __private_extern__ Boolean _CFIsAbsolutePath(UniChar *unichars, CFIndex length) {
     if (length < 1) {
@@ -837,12 +843,4 @@ __private_extern__ CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars
     return ((0 < start) ? start : length);
 }
 
-#undef CF_OPENFLGS
-#undef UNIX_PATH_SEMANTICS
-#undef WINDOWS_PATH_SEMANTICS
-#undef HFS_PATH_SEMANTICS
-#undef CFPreferredSlash
-#undef HAS_DRIVE
-#undef HAS_NET
-#undef IS_SLASH
 

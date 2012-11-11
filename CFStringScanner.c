@@ -22,7 +22,7 @@
  */
 
 /*	CFStringScanner.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 

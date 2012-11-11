@@ -22,7 +22,7 @@
  */
 
 /*	CFBuiltinConverters.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -38,7 +38,7 @@
 static int8_t __CFMapsParagraphSeparator = -1;
 
 CF_INLINE bool __CFIsParagraphSeparator(UTF16Char character) {
-    if (-1 == __CFMapsParagraphSeparator) __CFMapsParagraphSeparator = (_CFExecutableLinkedOnOrAfter(CFSystemVersionLeopard) ? false : true);
+    if (-1 == __CFMapsParagraphSeparator) __CFMapsParagraphSeparator = (1 ? false : true);
 
     return ((__CFMapsParagraphSeparator && (ParagraphSeparator == character)) ? true : false);
 }

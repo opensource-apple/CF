@@ -22,7 +22,7 @@
  */
 
 /*	CFTree.c
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -105,11 +105,13 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
 static void __CFTreeDeallocate(CFTypeRef cf) {
     CFTreeRef tree = (CFTreeRef)cf;
     const struct __CFTreeCallBacks *cb;
+#if DEPLOYMENT_TARGET_MACOSX
     CFAllocatorRef allocator = __CFGetAllocator(tree);
     if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
         // GC:  keep the tree intact during finalization.
         CFTreeRemoveAllChildren(tree);
     }
+#endif
     cb = __CFTreeGetCallBacks(tree);
     if (NULL != cb->release) {
         INVOKE_CALLBACK1(cb->release, tree->_info);

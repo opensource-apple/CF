@@ -22,7 +22,7 @@
  */
 
 /*	CFPlatformConverters.c
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -30,7 +30,6 @@
 #include <CoreFoundation/CFString.h>
 #include "CFStringEncodingConverterExt.h"
 #include <CoreFoundation/CFStringEncodingExt.h>
-#include <CoreFoundation/CFPreferences.h>
 #include "CFUniChar.h"
 #include "CFUnicodeDecomposition.h"
 #include "CFStringEncodingConverterPriv.h"
@@ -62,7 +61,17 @@ static const CFStringEncodingConverter __CFPlatformBootstrap = {
 
 __private_extern__ const CFStringEncodingConverter *__CFStringEncodingGetExternalConverter(uint32_t encoding) {
 
-    return (__CFIsPlatformConverterAvailable(encoding) ? &__CFPlatformBootstrap : (__CFStringEncodingGetICUName(encoding) ? &__CFICUBootstrap : NULL)); // we prefer Text Encoding Converter ICU since it's more reliable
+    // we prefer Text Encoding Converter ICU since it's more reliable
+    if (__CFIsPlatformConverterAvailable(encoding)) {
+        return &__CFPlatformBootstrap;
+    } else {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
+        if (__CFStringEncodingGetICUName(encoding)) {
+            return &__CFICUBootstrap;
+        }
+#endif
+        return NULL;
+    }
 }
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
@@ -173,7 +182,7 @@ __private_extern__ CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t enc
         dwFlags |= (flags & (kCFStringEncodingUseCanonical|kCFStringEncodingUseHFSPlusCanonical) ? MB_COMPOSITE : MB_PRECOMPOSED);
     }
 
-    if ((usedLen = MultiByteToWideChar(CFStringConvertEncodingToWindowsCodepage(encoding), dwFlags, (LPCSTR)bytes, numBytes, (LPWSTR)characters, maxCharLen) == 0)) {
+    if ((usedLen = MultiByteToWideChar(CFStringConvertEncodingToWindowsCodepage(encoding), dwFlags, (LPCSTR)bytes, numBytes, (LPWSTR)characters, maxCharLen)) == 0) {
         if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
             CPINFO cpInfo;
 

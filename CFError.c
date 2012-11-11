@@ -22,7 +22,7 @@
  */
 
 /*	CFError.c
-	Copyright (c) 2006-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2006-2012, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -33,6 +33,7 @@
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <mach/mach_error.h>
 #endif
+
 
 /* Pre-defined userInfo keys
 */
@@ -198,7 +199,7 @@ static CFDictionaryRef _CFErrorCreateEmptyDictionary(CFAllocatorRef allocator) {
 /* A non-retained accessor for the userInfo. Might return NULL in some cases, if the subclass of NSError returned nil for some reason. It works with a CF or NSError.
 */
 static CFDictionaryRef _CFErrorGetUserInfo(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCH0(__kCFErrorTypeID, CFDictionaryRef, err, "userInfo");
+    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFDictionaryRef, (NSError *)err, userInfo);
     __CFAssertIsError(err);
     return err->userInfo;
 }
@@ -314,7 +315,7 @@ CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err) {
     CFStringAppendFormat(result, NULL, CFSTR("Error Domain=%@ Code=%d"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
     CFStringAppendFormat(result, NULL, CFSTR(" \"%@\""), desc);
     if (debugDesc && CFStringGetLength(debugDesc) > 0) CFStringAppendFormat(result, NULL, CFSTR(" (%@)"), debugDesc);
-    if (userInfo) {
+    if (userInfo && CFDictionaryGetCount(userInfo)) {
         CFStringAppendFormat(result, NULL, CFSTR(" UserInfo=%p {"), userInfo);
 	CFDictionaryApplyFunction(userInfo, userInfoKeyValueShow, (void *)result);
 	CFIndex commaLength = (CFStringHasSuffix(result, CFSTR(", "))) ? 2 : 0;
@@ -362,13 +363,13 @@ CFErrorRef CFErrorCreateWithUserInfoKeysAndValues(CFAllocatorRef allocator, CFSt
 }
 
 CFStringRef CFErrorGetDomain(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCH0(__kCFErrorTypeID, CFStringRef, err, "domain");
+    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFStringRef, (NSError *)err, domain);
     __CFAssertIsError(err);
     return err->domain;
 }
 
 CFIndex CFErrorGetCode(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCH0(__kCFErrorTypeID, CFIndex, err, "code");
+    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFIndex, (NSError *)err, code);
     __CFAssertIsError(err);
     return err->code;
 }
@@ -382,8 +383,7 @@ CFDictionaryRef CFErrorCopyUserInfo(CFErrorRef err) {
 
 CFStringRef CFErrorCopyDescription(CFErrorRef err) {
     if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
-        CFStringRef desc;
-        CF_OBJC_CALL0(CFStringRef, desc, err, "localizedDescription");
+        CFStringRef desc = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedDescription);
         return desc ? (CFStringRef)CFRetain(desc) : NULL;    // !!! It really should never return nil.
     }
     __CFAssertIsError(err);
@@ -392,8 +392,7 @@ CFStringRef CFErrorCopyDescription(CFErrorRef err) {
 
 CFStringRef CFErrorCopyFailureReason(CFErrorRef err) {
     if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
-        CFStringRef str;
-        CF_OBJC_CALL0(CFStringRef, str, err, "localizedFailureReason");
+        CFStringRef str = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedFailureReason);
         return str ? (CFStringRef)CFRetain(str) : NULL;    // It's possible for localizedFailureReason to return nil
     }
     __CFAssertIsError(err);
@@ -402,8 +401,7 @@ CFStringRef CFErrorCopyFailureReason(CFErrorRef err) {
 
 CFStringRef CFErrorCopyRecoverySuggestion(CFErrorRef err) {
     if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
-        CFStringRef str;
-        CF_OBJC_CALL0(CFStringRef, str, err, "localizedRecoverySuggestion");
+        CFStringRef str = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedRecoverySuggestion);
         return str ? (CFStringRef)CFRetain(str) : NULL;    // It's possible for localizedRecoverySuggestion to return nil
     }
     __CFAssertIsError(err);
@@ -435,26 +433,30 @@ static CFTypeRef _CFErrorPOSIXCallBack(CFErrorRef err, CFStringRef key) {
     CFArrayRef paths = CFCopySearchPathForDirectoriesInDomains(kCFLibraryDirectory, kCFSystemDomainMask, false);
     if (paths) {
 	if (CFArrayGetCount(paths) > 0) {
-	    CFStringRef path = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@/CoreServices/CoreTypes.bundle"), CFArrayGetValueAtIndex(paths, 0));
-	    CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, path, kCFURLPOSIXPathStyle, false /* not a directory */);
-	    if (url) {
-		CFBundleRef bundle = CFBundleCreate(kCFAllocatorSystemDefault, url);
-		if (bundle) {
-		    // We only want to return a result if there was a localization
-		    CFStringRef localizedErrStr = CFBundleCopyLocalizedString(bundle, errStr, errStr, CFSTR("ErrnoErrors"));
-		    if (localizedErrStr == errStr) {
-			CFRelease(localizedErrStr);
-			CFRelease(errStr);
-			errStr = NULL;
-		    } else {
-			CFRelease(errStr);
-			errStr = localizedErrStr;
-		    }
-		    CFRelease(bundle);
-		}
-		CFRelease(url);
-	    }
-	    CFRelease(path);
+            CFStringRef fileSystemPath = CFURLCopyFileSystemPath((CFURLRef)CFArrayGetValueAtIndex(paths, 0), kCFURLPOSIXPathStyle);
+            if (fileSystemPath) {
+                CFStringRef path = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@/CoreServices/CoreTypes.bundle"), fileSystemPath);
+                CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, path, kCFURLPOSIXPathStyle, false /* not a directory */);
+                CFRelease(fileSystemPath);
+                if (url) {
+                    CFBundleRef bundle = CFBundleCreate(kCFAllocatorSystemDefault, url);
+                    if (bundle) {
+                        // We only want to return a result if there was a localization
+                        CFStringRef localizedErrStr = CFBundleCopyLocalizedString(bundle, errStr, errStr, CFSTR("ErrnoErrors"));
+                        if (localizedErrStr == errStr) {
+                            CFRelease(localizedErrStr);
+                            CFRelease(errStr);
+                            errStr = NULL;
+                        } else {
+                            CFRelease(errStr);
+                            errStr = localizedErrStr;
+                        }
+                        CFRelease(bundle);
+                    }
+                    CFRelease(url);
+                }
+                CFRelease(path);
+            }
 	}
 	CFRelease(paths);
     }
@@ -500,7 +502,7 @@ void CFErrorSetCallBackForDomain(CFStringRef domainName, CFErrorUserInfoKeyCallB
     if (!_CFErrorCallBackTable) _CFErrorInitializeCallBackTable();
     __CFSpinLock(&_CFErrorSpinlock);
     if (callBack) {
-        CFDictionarySetValue(_CFErrorCallBackTable, domainName, callBack);
+        CFDictionarySetValue(_CFErrorCallBackTable, domainName, (void *)callBack);
     } else {
         CFDictionaryRemoveValue(_CFErrorCallBackTable, domainName);
     }

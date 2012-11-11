@@ -22,7 +22,7 @@
  */
 
 /*	CFBasicHash.m
-	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -32,10 +32,10 @@
 #import <Block.h>
 #import <math.h>
 
-#if DEPLOYMENT_TARGET_WINDOWS
-#define __SetLastAllocationEventName(A, B) do { } while (0)
-#else
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #define __SetLastAllocationEventName(A, B) do { if (__CFOASafe && (A)) __CFSetLastAllocationEventName(A, B); } while (0)
+#else
+#define __SetLastAllocationEventName(A, B) do { } while (0)
 #endif
 
 #define GCRETAIN(A, B) kCFTypeSetCallBacks.retain(A, B)
@@ -283,7 +283,16 @@ CF_INLINE void *__CFBasicHashAllocateMemory(CFConstBasicHashRef ht, CFIndex coun
     } else {
         new_mem = CFAllocatorAllocate(allocator, count * elem_size, 0);
     }
-    if (!new_mem) HALT;
+    return new_mem;
+}
+
+CF_INLINE void *__CFBasicHashAllocateMemory2(CFAllocatorRef allocator, CFIndex count, CFIndex elem_size, Boolean strong, Boolean compactable) {
+    void *new_mem = NULL;
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        new_mem = auto_zone_allocate_object(objc_collectableZone(), count * elem_size, strong ? (compactable ? AUTO_POINTERS_ONLY : AUTO_MEMORY_SCANNED) : AUTO_UNSCANNED, false, false);
+    } else {
+        new_mem = CFAllocatorAllocate(allocator, count * elem_size, 0);
+    }
     return new_mem;
 }
 
@@ -329,58 +338,58 @@ struct __CFBasicHash {
 };
 
 __private_extern__ Boolean CFBasicHashHasStrongValues(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.strong_values ? true : false;
+#else
+    return false;
 #endif
 }
 
 __private_extern__ Boolean CFBasicHashHasStrongKeys(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.strong_keys ? true : false;
+#else
+    return false;
 #endif
 }
 
 CF_INLINE Boolean __CFBasicHashHasCompactableKeys(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.compactable_keys ? true : false;
+#else
+    return false;
 #endif
 }
 
 CF_INLINE Boolean __CFBasicHashHasCompactableValues(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.compactable_values ? true : false;
+#else
+    return false;
 #endif
 }
 
 CF_INLINE Boolean __CFBasicHashHasWeakValues(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.weak_values ? true : false;
+#else
+    return false;
 #endif
 }
 
 CF_INLINE Boolean __CFBasicHashHasWeakKeys(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.weak_keys ? true : false;
+#else
+    return false;
 #endif
 }
 
 CF_INLINE Boolean __CFBasicHashHasHashCache(CFConstBasicHashRef ht) {
-#if defined(__arm__)
-    return false;
-#else
+#if DEPLOYMENT_TARGET_MACOSX
     return ht->bits.hashes_offset ? true : false;
+#else
+    return false;
 #endif
 }
 
@@ -525,6 +534,7 @@ CF_INLINE void __CFBasicHashBumpCounts(CFBasicHashRef ht) {
         ht->bits.counts_width = 1;
         CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
         uint16_t *counts16 = (uint16_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 2, false, false);
+        if (!counts16) HALT;
         __SetLastAllocationEventName(counts16, "CFBasicHash (count-store)");
         for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
             counts16[idx2] = counts08[idx2];
@@ -540,6 +550,7 @@ CF_INLINE void __CFBasicHashBumpCounts(CFBasicHashRef ht) {
         ht->bits.counts_width = 2;
         CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
         uint32_t *counts32 = (uint32_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 4, false, false);
+        if (!counts32) HALT;
         __SetLastAllocationEventName(counts32, "CFBasicHash (count-store)");
         for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
             counts32[idx2] = counts16[idx2];
@@ -555,6 +566,7 @@ CF_INLINE void __CFBasicHashBumpCounts(CFBasicHashRef ht) {
         ht->bits.counts_width = 3;
         CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
         uint64_t *counts64 = (uint64_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 8, false, false);
+        if (!counts64) HALT;
         __SetLastAllocationEventName(counts64, "CFBasicHash (count-store)");
         for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
             counts64[idx2] = counts32[idx2];
@@ -1110,20 +1122,24 @@ static void __CFBasicHashRehash(CFBasicHashRef ht, CFIndex newItemCount) {
 
     if (0 < new_num_buckets) {
         new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongValues(ht), __CFBasicHashHasCompactableValues(ht));
+        if (!new_values) HALT;
         __SetLastAllocationEventName(new_values, "CFBasicHash (value-store)");
         memset(new_values, 0, new_num_buckets * sizeof(CFBasicHashValue));
         if (ht->bits.keys_offset) {
             new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongKeys(ht), __CFBasicHashHasCompactableKeys(ht));
+            if (!new_keys) HALT;
             __SetLastAllocationEventName(new_keys, "CFBasicHash (key-store)");
             memset(new_keys, 0, new_num_buckets * sizeof(CFBasicHashValue));
         }
         if (ht->bits.counts_offset) {
             new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, (1 << ht->bits.counts_width), false, false);
+            if (!new_counts) HALT;
             __SetLastAllocationEventName(new_counts, "CFBasicHash (count-store)");
             memset(new_counts, 0, new_num_buckets * (1 << ht->bits.counts_width));
         }
         if (__CFBasicHashHasHashCache(ht)) {
             new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false, false);
+            if (!new_hashes) HALT;
             __SetLastAllocationEventName(new_hashes, "CFBasicHash (hash-store)");
             memset(new_hashes, 0, new_num_buckets * sizeof(uintptr_t));
         }
@@ -1541,7 +1557,7 @@ CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, 
     if (flags & kCFBasicHashHasCounts) size += sizeof(void *); // counts
     if (flags & kCFBasicHashHasHashCache) size += sizeof(uintptr_t *); // hashes
     CFBasicHashRef ht = (CFBasicHashRef)_CFRuntimeCreateInstance(allocator, CFBasicHashGetTypeID(), size, NULL);
-    if (NULL == ht) HALT;
+    if (NULL == ht) return NULL;
 
     ht->bits.finalized = 0;
     ht->bits.hash_style = (flags >> 13) & 0x3;
@@ -1579,7 +1595,7 @@ CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, 
     ht->bits.counts_offset = (flags & kCFBasicHashHasCounts) ? offset++ : 0;
     ht->bits.hashes_offset = (flags & kCFBasicHashHasHashCache) ? offset++ : 0;
 
-#if defined(__arm__)
+#if DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     ht->bits.hashes_offset = 0;
     ht->bits.strong_values = 0;
     ht->bits.strong_keys = 0;
@@ -1605,8 +1621,42 @@ CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, 
 
 CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFConstBasicHashRef src_ht) {
     size_t size = CFBasicHashGetSize(src_ht, false) - sizeof(CFRuntimeBase);
+    CFBasicHashCallbacks *newcb = src_ht->callbacks->copyCallbacks(src_ht, allocator, src_ht->callbacks);
+    if (NULL == newcb) {
+        return NULL;
+    }
+
+    CFIndex new_num_buckets = __CFBasicHashTableSizes[src_ht->bits.num_buckets_idx];
+    CFBasicHashValue *new_values = NULL, *new_keys = NULL;
+    void *new_counts = NULL;
+    uintptr_t *new_hashes = NULL;
+
+    if (0 < new_num_buckets) {
+        Boolean strongValues = CFBasicHashHasStrongValues(src_ht) && !(kCFUseCollectableAllocator && !CF_IS_COLLECTABLE_ALLOCATOR(allocator));
+        Boolean strongKeys = CFBasicHashHasStrongKeys(src_ht) && !(kCFUseCollectableAllocator && !CF_IS_COLLECTABLE_ALLOCATOR(allocator));
+        Boolean compactableValues = __CFBasicHashHasCompactableValues(src_ht) && !(kCFUseCollectableAllocator && !CF_IS_COLLECTABLE_ALLOCATOR(allocator));
+        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory2(allocator, new_num_buckets, sizeof(CFBasicHashValue), strongValues, compactableValues);
+        if (!new_values) return NULL; // in this unusual circumstance, leak previously allocated blocks for now
+        __SetLastAllocationEventName(new_values, "CFBasicHash (value-store)");
+        if (src_ht->bits.keys_offset) {
+            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory2(allocator, new_num_buckets, sizeof(CFBasicHashValue), strongKeys, false);
+            if (!new_keys) return NULL; // in this unusual circumstance, leak previously allocated blocks for now
+            __SetLastAllocationEventName(new_keys, "CFBasicHash (key-store)");
+        }
+        if (src_ht->bits.counts_offset) {
+            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory2(allocator, new_num_buckets, (1 << src_ht->bits.counts_width), false, false);
+            if (!new_counts) return NULL; // in this unusual circumstance, leak previously allocated blocks for now
+            __SetLastAllocationEventName(new_counts, "CFBasicHash (count-store)");
+        }
+        if (__CFBasicHashHasHashCache(src_ht)) {
+            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory2(allocator, new_num_buckets, sizeof(uintptr_t), false, false);
+            if (!new_hashes) return NULL; // in this unusual circumstance, leak previously allocated blocks for now
+            __SetLastAllocationEventName(new_hashes, "CFBasicHash (hash-store)");
+        }
+    }
+
     CFBasicHashRef ht = (CFBasicHashRef)_CFRuntimeCreateInstance(allocator, CFBasicHashGetTypeID(), size, NULL);
-    if (NULL == ht) HALT;
+    if (NULL == ht) return NULL; // in this unusual circumstance, leak previously allocated blocks for now
 
     memmove((uint8_t *)ht + sizeof(CFRuntimeBase), (uint8_t *)src_ht + sizeof(CFRuntimeBase), sizeof(ht->bits));
     if (kCFUseCollectableAllocator && !CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
@@ -1617,11 +1667,8 @@ CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFConstBasicHashR
     }
     ht->bits.finalized = 0;
     ht->bits.mutations = 1;
-    CFBasicHashCallbacks *newcb = src_ht->callbacks->copyCallbacks(src_ht, allocator, src_ht->callbacks);
-    if (NULL == newcb) HALT;
     __AssignWithWriteBarrier(&ht->callbacks, newcb);
 
-    CFIndex new_num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
     if (0 == new_num_buckets) {
 #if ENABLE_MEMORY_COUNTERS
         int64_t size_now = OSAtomicAdd64Barrier((int64_t) CFBasicHashGetSize(ht, true), & __CFBasicHashTotalSize);
@@ -1631,27 +1678,6 @@ CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFConstBasicHashR
         OSAtomicAdd32Barrier(1, &__CFBasicHashSizes[ht->bits.num_buckets_idx]);
 #endif
         return ht;
-    }
-
-    CFBasicHashValue *new_values = NULL, *new_keys = NULL;
-    void *new_counts = NULL;
-    uintptr_t *new_hashes = NULL;
-
-    if (0 < new_num_buckets) {
-        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongValues(ht), __CFBasicHashHasCompactableValues(ht));
-        __SetLastAllocationEventName(new_values, "CFBasicHash (value-store)");
-        if (ht->bits.keys_offset) {
-            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongKeys(ht), false);
-            __SetLastAllocationEventName(new_keys, "CFBasicHash (key-store)");
-        }
-        if (ht->bits.counts_offset) {
-            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, (1 << ht->bits.counts_width), false, false);
-            __SetLastAllocationEventName(new_counts, "CFBasicHash (count-store)");
-        }
-        if (__CFBasicHashHasHashCache(ht)) {
-            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false, false);
-            __SetLastAllocationEventName(new_hashes, "CFBasicHash (hash-store)");
-        }
     }
 
     CFBasicHashValue *old_values = NULL, *old_keys = NULL;

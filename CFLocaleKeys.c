@@ -22,11 +22,11 @@
  */
 
 /*	CFLocaleKeys.c
-	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
-#include <CoreFoundation/CFInternal.h>
+#include "CFInternal.h"
 
 CONST_STRING_DECL(kCFLocaleAlternateQuotationBeginDelimiterKey, "kCFLocaleAlternateQuotationBeginDelimiterKey");
 CONST_STRING_DECL(kCFLocaleAlternateQuotationEndDelimiterKey, "kCFLocaleAlternateQuotationEndDelimiterKey");
@@ -62,6 +62,7 @@ CONST_STRING_DECL(kCFDateFormatterIsLenientKey, "kCFDateFormatterIsLenientKey");
 CONST_STRING_DECL(kCFDateFormatterLongEraSymbolsKey, "kCFDateFormatterLongEraSymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterMonthSymbolsKey, "kCFDateFormatterMonthSymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterPMSymbolKey, "kCFDateFormatterPMSymbolKey");
+CONST_STRING_DECL(kCFDateFormatterAmbiguousYearStrategyKey, "kCFDateFormatterAmbiguousYearStrategyKey");
 CONST_STRING_DECL(kCFDateFormatterQuarterSymbolsKey, "kCFDateFormatterQuarterSymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterShortMonthSymbolsKey, "kCFDateFormatterShortMonthSymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterShortQuarterSymbolsKey, "kCFDateFormatterShortQuarterSymbolsKey");

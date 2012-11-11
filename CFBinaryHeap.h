@@ -22,7 +22,7 @@
  */
 
 /*	CFBinaryHeap.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 /*!
         @header CFBinaryHeap
@@ -36,6 +36,7 @@
 
 #include <CoreFoundation/CFBase.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 typedef struct {
@@ -305,6 +306,7 @@ CF_EXPORT void		CFBinaryHeapRemoveMinimumValue(CFBinaryHeapRef heap);
 CF_EXPORT void		CFBinaryHeapRemoveAllValues(CFBinaryHeapRef heap);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFBINARYHEAP__ */
 

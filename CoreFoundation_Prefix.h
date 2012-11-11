@@ -22,7 +22,7 @@
  */
 
 /*	CoreFoundation_Prefix.h
-	Copyright (c) 2005-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2012, Apple Inc. All rights reserved.
 */
 
 
@@ -53,11 +53,10 @@ typedef char * Class;
 #define nil NULL
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX && defined(__ppc__)
-#define SUPPORT_CFM 1
-#endif
+#define CRSetCrashLogMessage(A) do {} while (0)
+#define CRSetCrashLogMessage2(A) do {} while (0)
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #import <libkern/OSAtomic.h>
 #import <pthread.h>
 #endif
@@ -120,6 +119,7 @@ typedef int		boolean_t;
 #define strtod_l(a,b,locale) strtod(a,b)
 #define strtoul_l(a,b,c,locale) strtoul(a,b,c)
 #define strtol_l(a,b,c,locale) strtol(a,b,c)
+#define strtoll_l(a,b,c,locale) strtoll(a,b,c)
 #define strncasecmp_l(a, b, c, d) strncasecmp(a, b, c)
 
 #define fprintf_l(a,locale,b,...) fprintf(a, b, __VA_ARGS__)
@@ -209,6 +209,7 @@ CF_EXPORT int _NS_access(const char *name, int amode);
 #endif
 
 // The order of these includes is important
+#define FD_SETSIZE 1024
 #include <winsock2.h>
 #include <windows.h>
 #include <pthread.h>
@@ -261,11 +262,22 @@ CF_INLINE size_t malloc_size(void *memblock) {
     return _msize(memblock);
 }
 
-#define mach_absolute_time() ((uint64_t)(CFAbsoluteTimeGetCurrent() * 1000000000.0))
+CF_INLINE uint64_t mach_absolute_time() {
+    LARGE_INTEGER count;
+    QueryPerformanceCounter(&count);
+    // mach_absolute_time is unsigned, but this function returns a signed value.
+    return (uint64_t)count.QuadPart;
+}
+
+CF_INLINE long long llabs(long long v) {
+    if (v < 0) return -v;
+    return v;
+}
 
 #define strtod_l(a,b,locale) strtod(a,b)
 #define strtoul_l(a,b,c,locale) strtoul(a,b,c)
 #define strtol_l(a,b,c,locale) strtol(a,b,c)
+#define strtoll_l(a,b,c,locale) _strtoi64(a,b,c)
 #define strncasecmp_l(a, b, c, d) _strnicmp(a, b, c)
 #define snprintf _snprintf
 
@@ -451,36 +463,6 @@ CF_INLINE void objc_collect(unsigned long options) { }
     
 #endif
 
-// Need to use the _O_BINARY flag on Windows to get the correct behavior
-#if DEPLOYMENT_TARGET_WINDOWS
-    #define CF_OPENFLGS	(_O_BINARY|_O_NOINHERIT)
-#else
-    #define CF_OPENFLGS	(0)
-#endif
-
-#if DEPLOYMENT_TARGET_WINDOWS
-
-// These are replacements for pthread calls on Windows
-CF_EXPORT int _NS_pthread_main_np();
-CF_EXPORT int _NS_pthread_setspecific(pthread_key_t key, const void *val);
-CF_EXPORT void* _NS_pthread_getspecific(pthread_key_t key);
-CF_EXPORT int _NS_pthread_key_init_np(int key, void (*destructor)(void *));
-CF_EXPORT void _NS_pthread_setname_np(const char *name);
-    
-// map use of pthread_set/getspecific to internal API
-#define pthread_setspecific _NS_pthread_setspecific
-#define pthread_getspecific _NS_pthread_getspecific
-#define pthread_key_init_np _NS_pthread_key_init_np
-#define pthread_main_np _NS_pthread_main_np
-#define pthread_setname_np _NS_pthread_setname_np
-#endif
-
-#if DEPLOYMENT_TARGET_WINDOWS
-// replacement for DISPATCH_QUEUE_OVERCOMMIT until we get a bug fix in dispatch on Windows
-// <rdar://problem/7923891> dispatch on Windows: Need queue_private.h
-#define DISPATCH_QUEUE_OVERCOMMIT 2
-#endif
-    
 #if DEPLOYMENT_TARGET_WINDOWS && defined(__cplusplus)
 } // extern "C"
 #endif

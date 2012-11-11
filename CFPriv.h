@@ -22,7 +22,7 @@
  */
 
 /*	CFPriv.h
-	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
 */
 
 /*
@@ -39,6 +39,7 @@
 #include <CoreFoundation/CFURL.h>
 #include <CoreFoundation/CFLocale.h>
 #include <CoreFoundation/CFDate.h>
+#include <CoreFoundation/CFSet.h>
 #include <math.h>
 
 
@@ -64,11 +65,14 @@ CF_EXPORT const char **_CFGetProcessPath(void);
 CF_EXPORT const char **_CFGetProgname(void);
 
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX))
+CF_EXPORT void _CFRunLoopSetCurrent(CFRunLoopRef rl);
+#endif
+
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 CF_EXPORT CFRunLoopRef CFRunLoopGetMain(void);
 CF_EXPORT SInt32 CFRunLoopRunSpecific(CFRunLoopRef rl, CFStringRef modeName, CFTimeInterval seconds, Boolean returnAfterSourceHandled);
 
-CF_EXPORT void _CFRunLoopSetCurrent(CFRunLoopRef rl);
 
 CF_EXPORT void _CFRunLoopStopMode(CFRunLoopRef rl, CFStringRef modeName);
 
@@ -96,12 +100,11 @@ CFURLRef _CFCreateURLFromFSSpec(CFAllocatorRef alloc, const struct FSSpec *voids
 #endif
 #endif
 
-enum {
+typedef CF_ENUM(CFIndex, CFURLComponentDecomposition) {
 	kCFURLComponentDecompositionNonHierarchical,
 	kCFURLComponentDecompositionRFC1808, /* use this for RFC 1738 decompositions as well */
 	kCFURLComponentDecompositionRFC2396
 };
-typedef CFIndex CFURLComponentDecomposition;
 
 typedef struct {
 	CFStringRef scheme;
@@ -179,7 +182,7 @@ CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName);	/* Pass NULL for the 
 	directories!
 	??? On MacOS 8 this function currently returns an empty array.
 */
-enum {
+typedef CF_ENUM(CFIndex, CFSearchPathDirectory) {
     kCFApplicationDirectory = 1,	/* supported applications (Applications) */
     kCFDemoApplicationDirectory,	/* unsupported applications, demonstration versions (Demos) */
     kCFDeveloperApplicationDirectory,	/* developer applications (Developer/Applications) */
@@ -189,19 +192,32 @@ enum {
     kCFUserDirectory,			/* user home directories (Users) */
     kCFDocumentationDirectory,		/* documentation (Documentation) */
     kCFDocumentDirectory,		/* documents (Library/Documents) */
+
+    kCFCoreServiceDirectory = 10,            // location of CoreServices directory (System/Library/CoreServices)
+    kCFAutosavedInformationDirectory = 11,   // location of autosaved documents (Documents/Autosaved)
+    kCFDesktopDirectory = 12,                // location of user's desktop
+    kCFCachesDirectory = 13,                 // location of discardable cache files (Library/Caches)
+    kCFApplicationSupportDirectory = 14,     // location of application support files (plug-ins, etc) (Library/Application Support)
+    kCFDownloadsDirectory = 15,              // location of the user's "Downloads" directory
+    kCFInputMethodsDirectory = 16,           // input methods (Library/Input Methods)
+    kCFMoviesDirectory = 17,                 // location of user's Movies directory (~/Movies)
+    kCFMusicDirectory = 18,                  // location of user's Music directory (~/Music)
+    kCFPicturesDirectory = 19,               // location of user's Pictures directory (~/Pictures)
+    kCFPrinterDescriptionDirectory = 20,     // location of system's PPDs directory (Library/Printers/PPDs)
+    kCFSharedPublicDirectory = 21,           // location of user's Public sharing directory (~/Public)
+    kCFPreferencePanesDirectory = 22,        // location of the PreferencePanes directory for use with System Preferences (Library/PreferencePanes)
+
     kCFAllApplicationsDirectory = 100,	/* all directories where applications can occur (ie Applications, Demos, Administration, Developer/Applications) */
     kCFAllLibrariesDirectory = 101	/* all directories where resources can occur (Library, Developer) */
 };
-typedef CFIndex CFSearchPathDirectory;
 
-enum {
+typedef CF_OPTIONS(CFOptionFlags, CFSearchPathDomainMask) {
     kCFUserDomainMask = 1,	/* user's home directory --- place to install user's personal items (~) */
     kCFLocalDomainMask = 2,	/* local to the current machine --- place to install items available to everyone on this machine (/Local) */
     kCFNetworkDomainMask = 4, 	/* publically available location in the local area network --- place to install items available on the network (/Network) */
     kCFSystemDomainMask = 8,	/* provided by Apple, unmodifiable (/System) */
     kCFAllDomainsMask = 0x0ffff	/* all domains: all of the above and more, future items */
 };
-typedef CFOptionFlags CFSearchPathDomainMask;
 
 CF_EXPORT
 CFArrayRef CFCopySearchPathForDirectoriesInDomains(CFSearchPathDirectory directory, CFSearchPathDomainMask domainMask, Boolean expandTilde);
@@ -238,7 +254,7 @@ CF_EXPORT void CFQSortArray(void *list, CFIndex count, CFIndex elementSize, CFCo
 
   Note that for non-MACH this function always returns true.
 */
-enum {
+typedef CF_ENUM(CFIndex, CFSystemVersion) {
     CFSystemVersionCheetah = 0,         /* 10.0 */
     CFSystemVersionPuma = 1,            /* 10.1 */
     CFSystemVersionJaguar = 2,          /* 10.2 */
@@ -247,21 +263,20 @@ enum {
     CFSystemVersionLeopard = 5,         /* 10.5 */
     CFSystemVersionSnowLeopard = 6,	/* 10.6 */
     CFSystemVersionLion = 7,		/* 10.7 */
+    CFSystemVersionMountainLion = 8,    /* 10.8 */
     CFSystemVersionMax,                 /* This should bump up when new entries are added */
 
 };
-typedef CFIndex CFSystemVersion;
 
 CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version);
 
 
-enum {
+typedef CF_ENUM(CFIndex, CFStringCharacterClusterType) {
     kCFStringGraphemeCluster = 1, /* Unicode Grapheme Cluster */
     kCFStringComposedCharacterCluster = 2, /* Compose all non-base (including spacing marks) */
     kCFStringCursorMovementCluster = 3, /* Cluster suitable for cursor movements */
     kCFStringBackwardDeletionCluster = 4 /* Cluster suitable for backward deletion */
 };
-typedef CFIndex CFStringCharacterClusterType;
 
 CF_EXPORT CFRange CFStringGetRangeOfCharacterClusterAtIndex(CFStringRef string, CFIndex charIndex, CFStringCharacterClusterType type);
 
@@ -492,8 +507,19 @@ CF_INLINE struct timespec _CFFileTimeSpecFromAbsoluteTime(CFAbsoluteTime at) {
    return ts;
 }
 
+// The 'filtered' function below is preferred to this older one
 CF_EXPORT bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFStringRef keyPath, CFPropertyListRef *value, CFErrorRef *error);
 
+// Returns a subset of the property list, only including the keyPaths in the CFSet. If the top level object is not a dictionary, you will get back an empty dictionary as the result.
+CF_EXPORT bool _CFPropertyListCreateFiltered(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFSetRef keyPaths, CFPropertyListRef *value, CFErrorRef *error) CF_AVAILABLE(10_8, 6_0);
+
+// Returns a subset of a bundle's Info.plist. The keyPaths follow the same rules as above CFPropertyList function. This function takes platform and product keys into account.
+typedef CF_OPTIONS(CFOptionFlags, _CFBundleFilteredPlistOptions) {
+    _CFBundleFilteredPlistMemoryMapped = 1
+} CF_ENUM_AVAILABLE(10_8, 6_0);
+
+CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, _CFBundleFilteredPlistOptions options) CF_AVAILABLE(10_8, 6_0);
+CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredLocalizedInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, CFStringRef localizationName, _CFBundleFilteredPlistOptions options) CF_AVAILABLE(10_8, 6_0);
 
 #if TARGET_OS_WIN32
 #include <CoreFoundation/CFNotificationCenter.h>
@@ -520,6 +546,11 @@ CF_EXPORT void _CFRunLoopSetWindowsMessageQueueHandler(CFRunLoopRef rl, CFString
 
 
 CF_EXPORT CFArrayRef CFDateFormatterCreateDateFormatsFromTemplates(CFAllocatorRef allocator, CFArrayRef tmplates, CFOptionFlags options, CFLocaleRef locale);
+
+#if (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+// Available for internal use on embedded
+CF_EXPORT CFNotificationCenterRef CFNotificationCenterGetDistributedCenter(void);
+#endif
 
 
 CF_EXTERN_C_END

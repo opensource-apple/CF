@@ -22,7 +22,7 @@
  */
 
 /*	CFCharacterSet.h
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 */
 
 /*!
@@ -57,6 +57,7 @@
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFData.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 /*!
@@ -76,7 +77,7 @@ typedef struct __CFCharacterSet * CFMutableCharacterSetRef;
         Type of the predefined CFCharacterSet selector values.
 */
    
-enum {
+typedef CF_ENUM(CFIndex, CFCharacterSetPredefinedSet) {
     kCFCharacterSetControl = 1, /* Control character set (Unicode General Category Cc and Cf) */
     kCFCharacterSetWhitespace, /* Whitespace character set (Unicode General Category Zs and U0009 CHARACTER TABULATION) */
     kCFCharacterSetWhitespaceAndNewline,  /* Whitespace and Newline character set (Unicode General Category Z*, U000A ~ U000D, and U0085) */
@@ -90,12 +91,9 @@ enum {
     kCFCharacterSetPunctuation, /* Punctuation character set (Unicode General Category P*) */
     kCFCharacterSetCapitalizedLetter = 13, /* Titlecase character set (Unicode General Category Lt) */
     kCFCharacterSetSymbol = 14, /* Symbol character set (Unicode General Category S*) */
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
-    kCFCharacterSetNewline = 15, /* Newline character set (U000A ~ U000D, U0085, U2028, and U2029) */
-#endif
+    kCFCharacterSetNewline CF_ENUM_AVAILABLE(10_5, 2_0) = 15, /* Newline character set (U000A ~ U000D, U0085, U2028, and U2029) */
     kCFCharacterSetIllegal = 12/* Illegal character set */
 };
-typedef CFIndex CFCharacterSetPredefinedSet;
 
 /*!
 	@function CFCharacterSetGetTypeID
@@ -401,6 +399,7 @@ CF_EXPORT
 void CFCharacterSetInvert(CFMutableCharacterSetRef theSet);
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFCHARACTERSET__ */
 

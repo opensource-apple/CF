@@ -22,13 +22,13 @@
  */
 
 /*	CFPlatform.c
-	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
 #include "CFInternal.h"
 #include <CoreFoundation/CFPriv.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     #include <stdlib.h>
     #include <sys/stat.h>
     #include <string.h>
@@ -48,15 +48,15 @@
 
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
 #define kCFPlatformInterfaceStringEncoding	kCFStringEncodingUTF8
 #else
 #define kCFPlatformInterfaceStringEncoding	CFStringGetSystemEncoding()
 #endif
 
-static CFStringRef _CFUserName(void);
+extern void __CFGetUGIDs(uid_t *euid, gid_t *egid);
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 // CoreGraphics and LaunchServices are only projects (1 Dec 2006) that use these
 char **_CFArgv(void) { return *_NSGetArgv(); }
 int _CFArgc(void) { return *_NSGetArgc(); }
@@ -66,22 +66,6 @@ int _CFArgc(void) { return *_NSGetArgc(); }
 __private_extern__ Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
     return getcwd(path, maxlen) != NULL;
 }
-
-#if SUPPORT_CFM
-static Boolean __CFIsCFM = false;
-
-// If called super early, we just return false
-__private_extern__ Boolean _CFIsCFM(void) {
-    return __CFIsCFM;
-}
-#endif
-
-#if DEPLOYMENT_TARGET_WINDOWS
-#define PATH_SEP '\\'
-#else
-#define PATH_SEP '/'
-#endif
-
 
 #if DEPLOYMENT_TARGET_WINDOWS
 // Returns the path to the CF DLL, which we can then use to find resources like char sets
@@ -155,7 +139,7 @@ const char *_CFProcessPath(void) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 const char *_CFProcessPath(void) {
     if (__CFProcessPath) return __CFProcessPath;
 #if DEPLOYMENT_TARGET_MACOSX
@@ -172,20 +156,6 @@ const char *_CFProcessPath(void) {
     uint32_t size = CFMaxPathSize;
     char buffer[size];
     if (0 == _NSGetExecutablePath(buffer, &size)) {
-#if SUPPORT_CFM
-	size_t len = strlen(buffer);
-	if (12 <= len && 0 == strcmp("LaunchCFMApp", buffer + len - 12)) {
-	    struct stat exec, lcfm;
-	    const char *launchcfm = "/System/Library/Frameworks/Carbon.framework/Versions/Current/Support/LaunchCFMApp";
-	    if (0 == stat(launchcfm, &lcfm) && 0 == stat(buffer, &exec) && (lcfm.st_dev == exec.st_dev) && (lcfm.st_ino == exec.st_ino)) {
-		// Executable is LaunchCFMApp, take special action
-		__CFIsCFM = true;
-		if ((*_NSGetArgv())[1] && '/' == *((*_NSGetArgv())[1])) {
-		    strlcpy(buffer, (*_NSGetArgv())[1], sizeof(buffer));
-		}
-	    }
-	}
-#endif
 	__CFProcessPath = strdup(buffer);
 	__CFprogname = strrchr(__CFProcessPath, PATH_SEP);
 	__CFprogname = (__CFprogname ? __CFprogname + 1 : __CFProcessPath);
@@ -233,177 +203,30 @@ __private_extern__ CFStringRef _CFProcessNameString(void) {
     return __CFProcessNameString;
 }
 
-static CFStringRef __CFUserName = NULL;
-static CFSpinLock_t __CFPlatformCacheLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
 
 #include <pwd.h>
+#include <sys/param.h>
 
-static CFURLRef __CFHomeDirectory = NULL;
-static uint32_t __CFEUID = -1;
-static uint32_t __CFUID = -1;
-
-static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd) { // __CFPlatformCacheLock must be locked on entry and will be on exit
+// Set the fallBackToHome parameter to true if we should fall back to the HOME environment variable if all else fails. Otherwise return NULL.
+static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd, bool fallBackToHome) {
+    const char *fixedHomePath = issetugid() ? NULL : __CFgetenv("CFFIXED_USER_HOME");
+    const char *homePath = NULL;
+    
+    // Calculate the home directory we will use
+    // First try CFFIXED_USER_HOME (only if not setugid), then fall back to the upwd, then fall back to HOME environment variable
     CFURLRef home = NULL;
-    if (!issetugid()) {
-	const char *path = __CFgetenv("CFFIXED_USER_HOME");
-	if (path) {
-	    home = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)path, strlen(path), true);
-	}
-    }
-    if (!home) {
-        if (upwd && upwd->pw_dir) {
-            home = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)upwd->pw_dir, strlen(upwd->pw_dir), true);
-	}
-    }
+    if (!issetugid() && fixedHomePath) home = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)fixedHomePath, strlen(fixedHomePath), true);
+    if (!home && upwd && upwd->pw_dir) home = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)upwd->pw_dir, strlen(upwd->pw_dir), true);
+    if (fallBackToHome && !home) homePath = __CFgetenv("HOME");
+    if (fallBackToHome && !home && homePath) home = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)homePath, strlen(homePath), true);
+    
     return home;
 }
 
-static void _CFUpdateUserInfo(void) { // __CFPlatformCacheLock must be locked on entry and will be on exit
-    struct passwd *upwd;
-
-    __CFEUID = geteuid();
-    __CFUID = getuid();
-    if (__CFHomeDirectory)  CFRelease(__CFHomeDirectory);
-    __CFHomeDirectory = NULL;
-    if (__CFUserName) CFRelease(__CFUserName);
-    __CFUserName = NULL;
-
-    upwd = getpwuid(__CFEUID ? __CFEUID : __CFUID);
-    __CFHomeDirectory = _CFCopyHomeDirURLForUser(upwd);
-    if (!__CFHomeDirectory) {
-        const char *cpath = __CFgetenv("HOME");
-        if (cpath) {
-            __CFHomeDirectory = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)cpath, strlen(cpath), true);
-        }
-    }
-
-    // This implies that UserManager stores directory info in CString
-    // rather than FileSystemRep.  Perhaps this is wrong & we should
-    // expect NeXTSTEP encodings.  A great test of our localized system would
-    // be to have a user "O-umlat z e r".  XXX
-    if (upwd && upwd->pw_name) {
-        __CFUserName = CFStringCreateWithCString(kCFAllocatorSystemDefault, upwd->pw_name, kCFPlatformInterfaceStringEncoding);
-    } else {
-        const char *cuser = __CFgetenv("USER");
-        if (cuser)
-            __CFUserName = CFStringCreateWithCString(kCFAllocatorSystemDefault, cuser, kCFPlatformInterfaceStringEncoding);
-    }
-}
 #endif
 
-static CFURLRef _CFCreateHomeDirectoryURLForUser(CFStringRef uName) { // __CFPlatformCacheLock must be locked on entry and will be on exit
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    if (!uName) {
-        if (geteuid() != __CFEUID || getuid() != __CFUID || !__CFHomeDirectory)
-            _CFUpdateUserInfo();
-        if (__CFHomeDirectory) CFRetain(__CFHomeDirectory);
-        return __CFHomeDirectory;
-    } else {
-        struct passwd *upwd = NULL;
-        char buf[128], *user;
-        SInt32 len = CFStringGetLength(uName), size = CFStringGetMaximumSizeForEncoding(len, kCFPlatformInterfaceStringEncoding);
-        CFIndex usedSize;
-        if (size < 127) {
-            user = buf;
-        } else {
-            user = CFAllocatorAllocate(kCFAllocatorSystemDefault, size+1, 0);
-            if (__CFOASafe) __CFSetLastAllocationEventName(user, "CFUtilities (temp)");
-        }
-        if (CFStringGetBytes(uName, CFRangeMake(0, len), kCFPlatformInterfaceStringEncoding, 0, true, (uint8_t *)user, size, &usedSize) == len) {
-            user[usedSize] = '\0';
-            upwd = getpwnam(user);
-        }
-        if (buf != user) {
-            CFAllocatorDeallocate(kCFAllocatorSystemDefault, user);
-        }
-        return _CFCopyHomeDirURLForUser(upwd);
-    }
-#elif DEPLOYMENT_TARGET_WINDOWS
-    // This code can only get the directory for the current user
-    if (uName && !CFEqual(uName, _CFUserName())) {
-        CFLog(kCFLogLevelError, CFSTR("CFCopyHomeDirectoryURLForUser(): Unable to get home directory for other user"));
-        return NULL;
-    }
-    
-    CFURLRef retVal = NULL;
-    CFIndex len = 0;
-    CFStringRef str = NULL;
-    
-    UniChar pathChars[MAX_PATH];
-    if (S_OK == SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, (wchar_t *)pathChars)) {
-        len = (CFIndex)wcslen((wchar_t *)pathChars);
-        str = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathChars, len);
-        retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
-        CFRelease(str);
-    }
-    
-    if (!retVal) {
-        // Fall back to environment variable, but this will not be unicode compatible
-        const char *cpath = __CFgetenv("HOMEPATH");
-        const char *cdrive = __CFgetenv("HOMEDRIVE");
-        if (cdrive && cpath) {
-            char fullPath[CFMaxPathSize];
-            strlcpy(fullPath, cdrive, sizeof(fullPath));
-            strlcat(fullPath, cpath, sizeof(fullPath));
-            str = CFStringCreateWithCString(kCFAllocatorSystemDefault, fullPath, kCFPlatformInterfaceStringEncoding);
-            retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
-            CFRelease(str);
-        }
-    }
-    
-    if (!retVal) {
-        // Last resort: We have to get "some" directory location, so fall-back to the processes current directory.
-        UniChar currDir[MAX_PATH];
-        DWORD dwChars = GetCurrentDirectoryW(MAX_PATH + 1, (wchar_t *)currDir);
-        if (dwChars > 0) {
-            len = (CFIndex)wcslen((wchar_t *)currDir);
-            str = CFStringCreateWithCharacters(kCFAllocatorDefault, currDir, len);
-            retVal = CFURLCreateWithFileSystemPath(NULL, str, kCFURLWindowsPathStyle, true);
-            CFRelease(str);
-        }
-    }
-    
-    // We could do more here (as in KB Article Q101507). If that article is to be believed, we should only run into this case on Win95, or through user error.
-    CFStringRef testPath = CFURLCopyFileSystemPath(retVal, kCFURLWindowsPathStyle);
-    if (CFStringGetLength(testPath) == 0) {
-        CFRelease(retVal);
-        retVal = NULL;
-    }
-    if (testPath) CFRelease(testPath);
-    
-    return retVal;
-#else
-#error Dont know how to compute users home directories on this platform
-#endif
-}
-
-static CFStringRef _CFUserName(void) { // __CFPlatformCacheLock must be locked on entry and will be on exit
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    if (geteuid() != __CFEUID || getuid() != __CFUID)
-	_CFUpdateUserInfo();
-#elif DEPLOYMENT_TARGET_WINDOWS
-    if (!__CFUserName) {
-	wchar_t username[1040];
-	DWORD size = 1040;
-	username[0] = 0;
-	if (GetUserNameW(username, &size)) {
-	    // discount the extra NULL by decrementing the size
-	    __CFUserName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)username, size - 1);
-	} else {
-	    const char *cname = __CFgetenv("USERNAME");
-	    if (cname)
-                __CFUserName = CFStringCreateWithCString(kCFAllocatorSystemDefault, cname, kCFPlatformInterfaceStringEncoding);
-	}
-    }
-#else
-#error Dont know how to compute user name on this platform
-#endif
-    if (!__CFUserName)
-        __CFUserName = (CFStringRef)CFRetain(CFSTR(""));
-    return __CFUserName;
-}
 
 #define CFMaxHostNameLength	256
 #define CFMaxHostNameSize	(CFMaxHostNameLength+1)
@@ -420,28 +243,144 @@ __private_extern__ CFStringRef _CFStringCreateHostName(void) {
    These can return NULL.
 */
 CF_EXPORT CFStringRef CFGetUserName(void) {
-    CFStringRef result = NULL;
-    __CFSpinLock(&__CFPlatformCacheLock);
-    result = CFStringCreateCopy(kCFAllocatorSystemDefault, _CFUserName());
-    __CFSpinUnlock(&__CFPlatformCacheLock);
-    return result;
+    return CFCopyUserName();
 }
 
 CF_EXPORT CFStringRef CFCopyUserName(void) {
     CFStringRef result = NULL;
-    __CFSpinLock(&__CFPlatformCacheLock);
-    result = CFStringCreateCopy(kCFAllocatorSystemDefault, _CFUserName());
-    __CFSpinUnlock(&__CFPlatformCacheLock);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+    uid_t euid;
+    __CFGetUGIDs(&euid, NULL);
+    struct passwd *upwd = getpwuid(euid ? euid : getuid());
+    if (upwd && upwd->pw_name) {
+        result = CFStringCreateWithCString(kCFAllocatorSystemDefault, upwd->pw_name, kCFPlatformInterfaceStringEncoding);
+    } else {
+        const char *cuser = __CFgetenv("USER");
+        if (cuser) {
+            result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cuser, kCFPlatformInterfaceStringEncoding);
+        }
+    }
+#elif DEPLOYMENT_TARGET_WINDOWS
+	wchar_t username[1040];
+	DWORD size = 1040;
+	username[0] = 0;
+	if (GetUserNameW(username, &size)) {
+	    // discount the extra NULL by decrementing the size
+	    result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)username, size - 1);
+	} else {
+	    const char *cname = __CFgetenv("USERNAME");
+	    if (cname) {
+                result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cname, kCFPlatformInterfaceStringEncoding);
+            }
+	}
+#else
+#error Dont know how to compute user name on this platform
+#endif
+    if (!result)
+        result = (CFStringRef)CFRetain(CFSTR(""));
     return result;
 }
 
-CF_EXPORT CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName) {
-    CFURLRef result = NULL;
-    __CFSpinLock(&__CFPlatformCacheLock);
-    result = _CFCreateHomeDirectoryURLForUser(uName);
-    __CFSpinUnlock(&__CFPlatformCacheLock);
-    return result;
+CFURLRef CFCopyHomeDirectoryURL(void) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+    uid_t euid;
+    __CFGetUGIDs(&euid, NULL);
+    struct passwd *upwd = getpwuid(euid ? euid : getuid());
+    return _CFCopyHomeDirURLForUser(upwd, true);
+#elif DEPLOYMENT_TARGET_WINDOWS
+    CFURLRef retVal = NULL;
+    CFIndex len = 0;
+    CFStringRef str = NULL;
+   
+    UniChar pathChars[MAX_PATH];
+    if (S_OK == SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, (wchar_t *)pathChars)) {
+        len = (CFIndex)wcslen((wchar_t *)pathChars);
+        str = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathChars, len);
+        retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
+        CFRelease(str);
+    }
+
+    if (!retVal) {
+        // Fall back to environment variable, but this will not be unicode compatible
+        const char *cpath = __CFgetenv("HOMEPATH");
+        const char *cdrive = __CFgetenv("HOMEDRIVE");
+        if (cdrive && cpath) {
+            char fullPath[CFMaxPathSize];
+            strlcpy(fullPath, cdrive, sizeof(fullPath));
+            strlcat(fullPath, cpath, sizeof(fullPath));
+            str = CFStringCreateWithCString(kCFAllocatorSystemDefault, fullPath, kCFPlatformInterfaceStringEncoding);
+            retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
+            CFRelease(str);
+        }
+    }
+
+    if (!retVal) {
+        // Last resort: We have to get "some" directory location, so fall-back to the processes current directory.
+        UniChar currDir[MAX_PATH];
+        DWORD dwChars = GetCurrentDirectoryW(MAX_PATH + 1, (wchar_t *)currDir);
+        if (dwChars > 0) {
+            len = (CFIndex)wcslen((wchar_t *)currDir);
+            str = CFStringCreateWithCharacters(kCFAllocatorDefault, currDir, len);
+            retVal = CFURLCreateWithFileSystemPath(NULL, str, kCFURLWindowsPathStyle, true);
+            CFRelease(str);
+        }
+    }
+
+    // We could do more here (as in KB Article Q101507). If that article is to be believed, we should only run into this case on Win95, or through user error.
+    CFStringRef testPath = CFURLCopyFileSystemPath(retVal, kCFURLWindowsPathStyle);
+    if (CFStringGetLength(testPath) == 0) {
+        CFRelease(retVal);
+        retVal = NULL;
+    }
+    if (testPath) CFRelease(testPath);
+
+    return retVal;
+#else
+#error Dont know how to compute users home directories on this platform
+#endif
 }
+
+CF_EXPORT CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+    if (!uName) {
+        uid_t euid;
+        __CFGetUGIDs(&euid, NULL);
+        struct passwd *upwd = getpwuid(euid ? euid : getuid());
+        return _CFCopyHomeDirURLForUser(upwd, true);
+    } else {
+        struct passwd *upwd = NULL;
+        char buf[128], *user;
+        SInt32 len = CFStringGetLength(uName), size = CFStringGetMaximumSizeForEncoding(len, kCFPlatformInterfaceStringEncoding);
+        CFIndex usedSize;
+        if (size < 127) {
+            user = buf;
+        } else {
+            user = CFAllocatorAllocate(kCFAllocatorSystemDefault, size+1, 0);
+        }
+        if (CFStringGetBytes(uName, CFRangeMake(0, len), kCFPlatformInterfaceStringEncoding, 0, true, (uint8_t *)user, size, &usedSize) == len) {
+            user[usedSize] = '\0';
+            upwd = getpwnam(user);
+        }
+        if (buf != user) {
+            CFAllocatorDeallocate(kCFAllocatorSystemDefault, user);
+        }
+        return _CFCopyHomeDirURLForUser(upwd, false);
+    }
+#elif DEPLOYMENT_TARGET_WINDOWS
+    // This code can only get the directory for the current user
+    CFStringRef userName = uName ? CFCopyUserName() : NULL;
+    if (uName && !CFEqual(uName, userName)) {
+        CFLog(kCFLogLevelError, CFSTR("CFCopyHomeDirectoryURLForUser(): Unable to get home directory for other user"));
+        if (userName) CFRelease(userName);
+        return NULL;
+    }
+    if (userName) CFRelease(userName);
+    return CFCopyHomeDirectoryURL();
+#else
+#error Dont know how to compute users home directories on this platform
+#endif
+}
+
 
 #undef CFMaxHostNameLength
 #undef CFMaxHostNameSize
@@ -570,7 +509,7 @@ CF_EXPORT int _NS_pthread_main_np() {
 // If thread data has been torn down, these functions should crash on CF_TSD_BAD_PTR + slot address.
 #define CF_TSD_MAX_SLOTS 70
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #define CF_TSD_KEY 55
 #endif
 
@@ -627,7 +566,7 @@ __private_extern__ void __CFTSDLinuxInitialize() {
 #endif
 
 static void __CFTSDSetSpecific(void *arg) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     pthread_setspecific(CF_TSD_KEY, arg);
 #elif DEPLOYMENT_TARGET_LINUX
     pthread_setspecific(__CFTSDIndexKey, arg);
@@ -637,7 +576,7 @@ static void __CFTSDSetSpecific(void *arg) {
 }
 
 static void *__CFTSDGetSpecific() {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return pthread_getspecific(CF_TSD_KEY);
 #elif DEPLOYMENT_TARGET_LINUX
     return pthread_getspecific(__CFTSDIndexKey);
@@ -647,7 +586,7 @@ static void *__CFTSDGetSpecific() {
 }
 
 static void __CFTSDFinalize(void *arg) {
-    // Set our TSD so we're called again by pthreads. It will call the destructor 5 times as long as a value is set in the thread specific data. We handle each case below.
+    // Set our TSD so we're called again by pthreads. It will call the destructor PTHREAD_DESTRUCTOR_ITERATIONS times as long as a value is set in the thread specific data. We handle each case below.
     __CFTSDSetSpecific(arg);
 
     if (!arg || arg == CF_TSD_BAD_PTR) {
@@ -658,12 +597,9 @@ static void __CFTSDFinalize(void *arg) {
     __CFTSDTable *table = (__CFTSDTable *)arg;
     table->destructorCount++;
         
-    // On 1st, 2nd, 3rd, 4th calls, invoke destructor
+    // On first calls invoke destructor. Later we destroy the data.
     // Note that invocation of the destructor may cause a value to be set again in the per-thread data slots. The destructor count and destructors are preserved.  
     // This logic is basically the same as what pthreads does. We just skip the 'created' flag.
-#if COCOA_ARR0
-    uintptr_t pool = _CFAutoreleasePoolPush();
-#endif
     for (int32_t i = 0; i < CF_TSD_MAX_SLOTS; i++) {
         if (table->data[i] && table->destructors[i]) {
             uintptr_t old = table->data[i];
@@ -671,11 +607,8 @@ static void __CFTSDFinalize(void *arg) {
             table->destructors[i]((void *)(old));
         }
     }
-#if COCOA_ARR0
-    _CFAutoreleasePoolPop(pool);
-#endif
     
-    if (table->destructorCount == PTHREAD_DESTRUCTOR_ITERATIONS - 1) {    // On 4th call, destroy our data
+    if (table->destructorCount == PTHREAD_DESTRUCTOR_ITERATIONS - 1) {    // On PTHREAD_DESTRUCTOR_ITERATIONS-1 call, destroy our data
         free(table);
         
         // Now if the destructor is called again we will take the shortcut at the beginning of this function.
@@ -684,7 +617,7 @@ static void __CFTSDFinalize(void *arg) {
     }
 }
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 extern int pthread_key_init_np(int, void (*)(void *));
 #endif
 
@@ -700,7 +633,7 @@ static __CFTSDTable *__CFTSDGetTable() {
         // This memory is freed in the finalize function
         table = (__CFTSDTable *)calloc(1, sizeof(__CFTSDTable));
         // Windows and Linux have created the table already, we need to initialize it here for other platforms. On Windows, the cleanup function is called by DllMain when a thread exits. On Linux the destructor is set at init time.
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
         pthread_key_init_np(CF_TSD_KEY, __CFTSDFinalize);
 #endif
         __CFTSDSetSpecific(table);
@@ -746,6 +679,7 @@ CF_EXPORT void *_CFSetTSD(uint32_t slot, void *newVal, tsdDestructor destructor)
     
     return oldVal;
 }
+
 
 #pragma mark -
 #pragma mark Windows Wide to UTF8 and UTF8 to Wide
@@ -952,9 +886,7 @@ CF_EXPORT int _NS_mkstemp(char *name, int bufSize) {
     return fd;    
 }
 
-#endif
 
-#if DEPLOYMENT_TARGET_WINDOWS
 // Utilities to convert from a volume name to a drive letter
 
 Boolean _isAFloppy(char driveLetter)
@@ -1086,6 +1018,35 @@ extern CFStringRef CFCreateWindowsDrivePathFromVolumeName(CFStringRef volNameStr
     return drivePathResult;
 }
 
+struct timezone {
+    int	tz_minuteswest;	/* minutes west of Greenwich */
+    int	tz_dsttime;	/* type of dst correction */
+};
+
+__private_extern__ int _NS_gettimeofday(struct timeval *tv, struct timezone *tz) {
+    if (tv) {
+        FILETIME ft;
+        GetSystemTimeAsFileTime(&ft);
+        unsigned __int64 t = 0;
+        t |= ft.dwHighDateTime;
+        t <<= 32;
+        t |= ft.dwLowDateTime;
+        
+        // Convert to microseconds
+        t /= 10;
+        
+        // Difference between 1/1/1970 and 1/1/1601
+        t -= 11644473600000000Ui64;
+        
+        // Convert microseconds to seconds
+        tv->tv_sec = (long)(t / 1000000UL);
+        tv->tv_usec = (long)(t % 1000000UL);
+    }
+    
+    // We don't support tz
+    return 0;
+}
+
 #endif // DEPLOYMENT_TARGET_WINDOWS
 
 #pragma mark -
@@ -1175,3 +1136,4 @@ __private_extern__ int asprintf(char **ret, const char *format, ...) {
 }
 
 #endif
+

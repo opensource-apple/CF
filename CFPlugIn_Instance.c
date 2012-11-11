@@ -22,8 +22,8 @@
  */
 
 /*	CFPlugIn_Instance.c
-	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
-        Responsibility: David Smith
+	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Responsibility: Tony Parker
 */
 
 #include "CFBundle_Internal.h"
@@ -34,7 +34,7 @@ static CFTypeID __kCFPlugInInstanceTypeID = _kCFRuntimeNotATypeID;
 struct __CFPlugInInstance {
     CFRuntimeBase _base;
     
-    _CFPFactory *factory;
+    _CFPFactoryRef factory;
     
     CFPlugInInstanceGetInterfaceFunction getInterfaceFunction;
     CFPlugInInstanceDeallocateInstanceDataFunction deallocateInstanceDataFunction;
@@ -115,7 +115,9 @@ CF_EXPORT Boolean CFPlugInInstanceGetInterfaceFunctionTable(CFPlugInInstanceRef 
 }
 
 CF_EXPORT CFStringRef CFPlugInInstanceGetFactoryName(CFPlugInInstanceRef instance) {
-    return (CFStringRef)_CFPFactoryGetFactoryID(instance->factory);
+    // This function leaks, but it's the only safe way to access the factory name
+    CFUUIDRef factoryId = _CFPFactoryCopyFactoryID(instance->factory);
+    return (CFStringRef)factoryId;
 }
 
 CF_EXPORT void *CFPlugInInstanceGetInstanceData(CFPlugInInstanceRef instance) {

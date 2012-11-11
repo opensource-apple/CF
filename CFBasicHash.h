@@ -22,7 +22,7 @@
  */
 
 /*	CFBasicHash.h
-	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
 */
 
 #include <CoreFoundation/CFBase.h>
