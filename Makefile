@@ -22,7 +22,7 @@
 #	OTHER_LFLAGS	other flags to be passed to the link stage
 #
 
-CURRENT_PROJECT_VERSION = 299.3
+CURRENT_PROJECT_VERSION = 299.31
 
 # First figure out the platform if not specified, so we can use it in the
 # rest of this file.  Currently defined values: Darwin, Linux, FreeBSD, WIN32

@@ -312,7 +312,6 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
     CFStringRef outstr;
     
     buffLen = CFStringGetLength(str);
-    if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
     CFStringGetCharacters(str, CFRangeMake(0, buffLen), buff);
     buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);  // Remove exe name
 
@@ -365,7 +364,6 @@ static CFURLRef _CFBundleCopyResolvedURLForExecutableURL(CFURLRef url) {
     if (str) {
         UniChar buff[CFMaxPathSize];
         CFIndex buffLen = CFStringGetLength(str), len1;
-        if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
         CFStringGetCharacters(str, CFRangeMake(0, buffLen), buff);
         len1 = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
         if (len1 > 0 && len1 + 1 < buffLen) {
@@ -1421,7 +1419,6 @@ static CFStringRef _CFBundleCopyExecutableName(CFAllocatorRef alloc, CFBundleRef
         CFIndex startOfBundleName, endOfBundleName;
 
         CFRelease(absoluteURL);
-        if (len > CFMaxPathSize) len = CFMaxPathSize;
         CFStringGetCharacters(bundlePath, CFRangeMake(0, len), buff);
         startOfBundleName = _CFStartOfLastPathComponent(buff, len);
         endOfBundleName = _CFLengthAfterDeletingPathExtension(buff, len);
@@ -2404,7 +2401,6 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
     CFURLRef bundleURL = NULL;
 
     length = CFStringGetLength(executablePath);
-    if (length > CFMaxPathSize) length = CFMaxPathSize;
     CFStringGetCharacters(executablePath, CFRangeMake(0, length), pathBuff);
 
     // Save the name in nameBuff
