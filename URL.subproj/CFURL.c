@@ -1405,24 +1405,24 @@ static void computeSanitizedString(CFURLRef url) {
         if (!scanCharacters(alloc, & sanitizedString, &(((struct __CFURL *)url)->_flags), cstring, ustring, useCString, base, string_length, &mark, 0, url->_encoding)) {
             ((struct __CFURL *)url)->_flags |= ORIGINAL_AND_URL_STRINGS_MATCH;
         }
-		if ( sanitizedString )
-			_setSanitizedString( (struct __CFURL*) url, sanitizedString );
+        if ( sanitizedString ) {
+            _setSanitizedString( (struct __CFURL*) url, sanitizedString );
+        }
     } else {
         // Go component by component
         CFIndex currentComponent = HAS_USER;
         mark = 0;
+        CFMutableStringRef sanitizedString = NULL;
         while (currentComponent < (HAS_FRAGMENT << 1)) {
             CFRange componentRange = _rangeForComponent(url->_flags, url->ranges, currentComponent);
             if (componentRange.location != kCFNotFound) {
-				CFMutableStringRef	sanitizedString = NULL;
                 scanCharacters(alloc, & sanitizedString, &(((struct __CFURL *)url)->_flags), cstring, ustring, useCString, componentRange.location, componentRange.location + componentRange.length, &mark, currentComponent, url->_encoding);
-				
-				if ( sanitizedString )
-					_setSanitizedString( (struct __CFURL*) url, sanitizedString );
             }
             currentComponent = currentComponent << 1;
         }
-        if (!_getSanitizedString(url)) {
+        if (sanitizedString) {
+            _setSanitizedString((struct __CFURL *)url, sanitizedString);
+        } else {
             ((struct __CFURL *)url)->_flags |= ORIGINAL_AND_URL_STRINGS_MATCH;
         }
     }
