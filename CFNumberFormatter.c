@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,11 +22,12 @@
  */
 
 /*	CFNumberFormatter.c
-	Copyright (c) 2002-2009, Apple Inc. All rights reserved.
-	Responsibility: Christopher Kane
+	Copyright (c) 2002-2011, Apple Inc. All rights reserved.
+	Responsibility: David Smith
 */
 
 #include <CoreFoundation/CFNumberFormatter.h>
+#include <CoreFoundation/ForFoundationOnly.h>
 #include "CFInternal.h"
 #include "CFLocaleInternal.h"
 #include <unicode/unum.h>
@@ -122,6 +123,8 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     case kCFNumberFormatterPercentStyle: ustyle = UNUM_PERCENT; break;
     case kCFNumberFormatterScientificStyle: ustyle = UNUM_SCIENTIFIC; break;
     case kCFNumberFormatterSpellOutStyle: ustyle = UNUM_SPELLOUT; break;
+    case kCFNumberFormatterOrdinalStyle: ustyle = UNUM_ORDINAL; break;
+    case kCFNumberFormatterDurationStyle: ustyle = UNUM_DURATION; break;
     default:
 	CFAssert2(0, __kCFLogAssertion, "%s(): unknown style %d", __PRETTY_FUNCTION__, style);
 	ustyle = UNUM_DECIMAL;
@@ -155,7 +158,7 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     }
     memory->_locale = locale ? CFLocaleCreateCopy(allocator, locale) : CFLocaleGetSystem();
     __CFNumberFormatterCustomize(memory);
-    if (kCFNumberFormatterSpellOutStyle != memory->_style) {
+    if (kCFNumberFormatterSpellOutStyle != memory->_style && kCFNumberFormatterOrdinalStyle != memory->_style && kCFNumberFormatterDurationStyle != memory->_style) {
 	UChar ubuffer[BUFFER_SIZE];
 	status = U_ZERO_ERROR;
 	int32_t ret = unum_toPattern(memory->_nf, false, ubuffer, BUFFER_SIZE, &status);
@@ -165,7 +168,7 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     }
     memory->_defformat = memory->_format ? (CFStringRef)CFRetain(memory->_format) : NULL;
     memory->_compformat = memory->_format ? __CFNumberFormatterCreateCompressedString(memory->_format, true, NULL) : NULL;
-    if (kCFNumberFormatterSpellOutStyle != memory->_style) {
+    if (kCFNumberFormatterSpellOutStyle != memory->_style && kCFNumberFormatterOrdinalStyle != memory->_style && kCFNumberFormatterDurationStyle != memory->_style) {
 	int32_t n = unum_getAttribute(memory->_nf, UNUM_MULTIPLIER);
 	if (1 != n) {
 	    memory->_multiplier = CFNumberCreate(allocator, kCFNumberSInt32Type, &n);
@@ -181,6 +184,8 @@ extern CFDictionaryRef __CFLocaleGetPrefs(CFLocaleRef locale);
 static void __substituteFormatStringFromPrefsNF(CFNumberFormatterRef formatter) {
     CFIndex formatStyle = formatter->_style;
     if (kCFNumberFormatterSpellOutStyle == formatStyle) return;
+    if (kCFNumberFormatterOrdinalStyle == formatStyle) return;
+    if (kCFNumberFormatterDurationStyle == formatStyle) return;
     CFStringRef prefName = CFSTR("AppleICUNumberFormatStrings");
     if (kCFNumberFormatterNoStyle != formatStyle) {
 	CFStringRef pref = NULL;
@@ -194,6 +199,8 @@ static void __substituteFormatStringFromPrefsNF(CFNumberFormatterRef formatter) 
 	    case kCFNumberFormatterPercentStyle: key = CFSTR("3"); break;
 	    case kCFNumberFormatterScientificStyle: key = CFSTR("4"); break;
 	    case kCFNumberFormatterSpellOutStyle: key = CFSTR("5"); break;
+	    case kCFNumberFormatterOrdinalStyle: key = CFSTR("6"); break;
+	    case kCFNumberFormatterDurationStyle: key = CFSTR("7"); break;
 	    default: key = CFSTR("0"); break;
 	    }
 	    pref = (CFStringRef)CFDictionaryGetValue((CFDictionaryRef)metapref, key);
@@ -206,6 +213,8 @@ static void __substituteFormatStringFromPrefsNF(CFNumberFormatterRef formatter) 
 	    case kCFNumberFormatterPercentStyle: icustyle = UNUM_PERCENT; break;
 	    case kCFNumberFormatterScientificStyle: icustyle = UNUM_SCIENTIFIC; break;
 	    case kCFNumberFormatterSpellOutStyle: icustyle = UNUM_SPELLOUT; break;
+	    case kCFNumberFormatterOrdinalStyle: icustyle = UNUM_ORDINAL; break;
+	    case kCFNumberFormatterDurationStyle: icustyle = UNUM_DURATION; break;
 	    }
 	    CFStringRef localeName = CFLocaleGetIdentifier(formatter->_locale);
 	    char buffer[BUFFER_SIZE];
@@ -276,6 +285,7 @@ static CFStringRef __CFNumberFormatterCreateCompressedString(CFStringRef inStrin
     return outString;
 }
 
+// Should not be called for rule-based ICU formatters; not supported
 static void __CFNumberFormatterApplySymbolPrefs(const void *key, const void *value, void *context) {
     if (CFGetTypeID(key) == CFStringGetTypeID() && CFGetTypeID(value) == CFStringGetTypeID()) {
 	CFNumberFormatterRef formatter = (CFNumberFormatterRef)context;
@@ -293,7 +303,11 @@ static void __CFNumberFormatterApplySymbolPrefs(const void *key, const void *val
    }
 }
 
+// Should not be called for rule-based ICU formatters
 static UErrorCode __CFNumberFormatterApplyPattern(CFNumberFormatterRef formatter, CFStringRef pattern) {
+    if (kCFNumberFormatterSpellOutStyle == formatter->_style) return U_UNSUPPORTED_ERROR;
+    if (kCFNumberFormatterOrdinalStyle == formatter->_style) return U_UNSUPPORTED_ERROR;
+    if (kCFNumberFormatterDurationStyle == formatter->_style) return U_UNSUPPORTED_ERROR;
     CFIndex cnt = CFStringGetLength(pattern);
     STACK_BUFFER_DECL(UChar, ubuffer, cnt);
     const UChar *ustr = (const UChar *)CFStringGetCharactersPtr(pattern);
@@ -344,6 +358,8 @@ CFNumberFormatterStyle CFNumberFormatterGetStyle(CFNumberFormatterRef formatter)
 CFStringRef CFNumberFormatterGetFormat(CFNumberFormatterRef formatter) {
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     if (kCFNumberFormatterSpellOutStyle == formatter->_style) return NULL;
+    if (kCFNumberFormatterOrdinalStyle == formatter->_style) return NULL;
+    if (kCFNumberFormatterDurationStyle == formatter->_style) return NULL;
     UChar ubuffer[BUFFER_SIZE];
     CFStringRef newString = NULL;
     UErrorCode status = U_ZERO_ERROR;
@@ -370,6 +386,8 @@ void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef form
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(formatString, CFStringGetTypeID());
     if (kCFNumberFormatterSpellOutStyle == formatter->_style) return;
+    if (kCFNumberFormatterOrdinalStyle == formatter->_style) return;
+    if (kCFNumberFormatterDurationStyle == formatter->_style) return;
     CFIndex cnt = CFStringGetLength(formatString);
     CFAssert1(cnt <= 1024, __kCFLogAssertion, "%s(): format string too long", __PRETTY_FUNCTION__);
     if ((!formatter->_format || !CFEqual(formatter->_format, formatString)) && cnt <= 1024) {
@@ -522,10 +540,10 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
     case kCFNumberSInt32Type: case kCFNumberIntType:
     case kCFNumberLongType: case kCFNumberCFIndexType:
     case kCFNumberSInt64Type: case kCFNumberLongLongType:
-	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 1);
+	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 1); // ignored by ICU for rule-based formatters
 	break;
     default:
-	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 0);
+	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 0); // ignored by ICU for rule-based formatters
 	integerOnly = 0;
 	break;
     }
@@ -622,6 +640,10 @@ void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef ke
     CFIndex cnt;
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(key, CFStringGetTypeID());
+    // rule-based formatters don't do attributes and symbols, except for one
+    if (kCFNumberFormatterSpellOutStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
+    if (kCFNumberFormatterOrdinalStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
+    if (kCFNumberFormatterDurationStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
     if (kCFNumberFormatterCurrencyCodeKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
@@ -829,6 +851,10 @@ CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFString
     CFIndex cnt;
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(key, CFStringGetTypeID());
+    // rule-based formatters don't do attributes and symbols, except for one
+    if (kCFNumberFormatterSpellOutStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
+    if (kCFNumberFormatterOrdinalStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
+    if (kCFNumberFormatterDurationStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
     if (kCFNumberFormatterCurrencyCodeKey == key) {
 	cnt = unum_getTextAttribute(formatter->_nf, UNUM_CURRENCY_CODE, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt == 0) {

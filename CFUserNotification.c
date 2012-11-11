@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,9 @@
  */
 
 /*	CFUserNotification.c
-	Copyright (c) 2000-2009, Apple Inc.  All rights reserved.
-	Responsibility: Doug Davidson
+	Copyright (c) 2000-2011, Apple Inc.  All rights reserved.
+	Original Author: Doug Davidson
+	Responsibility: Kevin Perry
 */
 
 #include <CoreFoundation/CFUserNotification.h>
@@ -41,7 +42,6 @@
 #include <limits.h>
 #include <errno.h>
 #include <pthread.h>
-
 
 #define CFUserNotificationLog(alertHeader, alertMessage) CFLog(3, CFSTR("%@:  %@"), alertHeader, alertMessage);
 
@@ -228,7 +228,7 @@ static SInt32 _CFUserNotificationSendRequest(CFAllocatorRef allocator, CFStringR
             data = CFPropertyListCreateXMLData(allocator, modifiedDictionary);
             if (data) {
                 size = sizeof(mach_msg_base_t) + ((CFDataGetLength(data) + 3) & (~0x3));
-                msg = (mach_msg_base_t *)CFAllocatorAllocate(allocator, size, 0);
+                msg = (mach_msg_base_t *)CFAllocatorAllocate(kCFAllocatorSystemDefault, size, 0);
                 if (__CFOASafe) __CFSetLastAllocationEventName(msg, "CFUserNotification (temp)");
                 if (msg) {
                     memset(msg, 0, size);
@@ -241,7 +241,7 @@ static SInt32 _CFUserNotificationSendRequest(CFAllocatorRef allocator, CFStringR
                     CFDataGetBytes(data, CFRangeMake(0, CFDataGetLength(data)), (uint8_t *)msg + sizeof(mach_msg_base_t));
                     //CFShow(CFStringCreateWithBytes(kCFAllocatorSystemDefault, (UInt8 *)msg + sizeof(mach_msg_base_t), CFDataGetLength(data), kCFStringEncodingUTF8, false));
                     retval = mach_msg((mach_msg_header_t *)msg, MACH_SEND_MSG|MACH_SEND_TIMEOUT, size, 0, MACH_PORT_NULL, MESSAGE_TIMEOUT, MACH_PORT_NULL);
-                    CFAllocatorDeallocate(allocator, msg);
+                    CFAllocatorDeallocate(kCFAllocatorSystemDefault, msg);
                 } else {
                     retval = unix_err(ENOMEM);
                 }
@@ -321,7 +321,7 @@ SInt32 CFUserNotificationReceiveResponse(CFUserNotificationRef userNotification,
     CFDataRef responseData;
     
     if (userNotification && MACH_PORT_NULL != userNotification->_replyPort) {
-        msg = (mach_msg_base_t *)CFAllocatorAllocate(CFGetAllocator(userNotification), size, 0);
+        msg = (mach_msg_base_t *)CFAllocatorAllocate(kCFAllocatorSystemDefault, size, 0);
         if (__CFOASafe) __CFSetLastAllocationEventName(msg, "CFUserNotification (temp)");
         if (msg) {
             memset(msg, 0, size);
@@ -348,7 +348,7 @@ SInt32 CFUserNotificationReceiveResponse(CFUserNotificationRef userNotification,
                 mach_port_destroy(mach_task_self(), userNotification->_replyPort);
                 userNotification->_replyPort = MACH_PORT_NULL;
             }
-            CFAllocatorDeallocate(CFGetAllocator(userNotification), msg);
+            CFAllocatorDeallocate(kCFAllocatorSystemDefault, msg);
         } else {
             retval = unix_err(ENOMEM);
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFSet.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 /*!
         @header CFSet
@@ -319,7 +319,7 @@ CFIndex CFSetGetCount(CFSetRef theSet);
 	@function CFSetGetCountOfValue
 	Counts the number of times the given value occurs in the set. Since 
         sets by definition contain only one instance of a value, this function
-        is synomous to SFSetContainsValue.
+        is synonymous to CFSetContainsValue.
 	@param theSet The set to be searched. If this parameter is not a
 		valid CFSet, the behavior is undefined.
 	@param value The value for which to find matches in the set. The
@@ -365,7 +365,7 @@ CF_EXPORT
 const void *CFSetGetValue(CFSetRef theSet, const void *value);
 
 /*!
-	@function CFSetGetValue
+	@function CFSetGetValueIfPresent
 	Retrieves a value in the set which hashes the same as the specified value,
         if present.
 	@param theSet The set to be queried. If this parameter is not a

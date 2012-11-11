@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFRuntime.h
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFRUNTIME__)
@@ -34,44 +34,122 @@
 
 CF_EXTERN_C_BEGIN
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE))
+
 // GC: until we link against ObjC must use indirect functions.  Overridden in CFSetupFoundationBridging
 CF_EXPORT bool kCFUseCollectableAllocator;
 CF_EXPORT bool (*__CFObjCIsCollectable)(void *);
 
-// GC: primitives.
+// Only CoreFoundation and Foundation should use these *GCRefZero constants;
+// do not listen to anyone who tells you otherwise.
+
+CF_EXPORT
+const CFAllocatorRef kCFAllocatorSystemDefaultGCRefZero; // DO NOT USE THIS
+CF_EXPORT
+const CFAllocatorRef kCFAllocatorDefaultGCRefZero; // DO NOT USE THIS
+
+CF_INLINE CFAllocatorRef _CFConvertAllocatorToNonGCRefZeroEquivalent(CFAllocatorRef allocator) {
+    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
+        allocator = kCFAllocatorSystemDefault;
+    } else if (kCFAllocatorDefaultGCRefZero == allocator || NULL == allocator || kCFAllocatorDefault == allocator) {
+        allocator = CFAllocatorGetDefault();
+    }
+    return allocator;
+}
+
+CF_INLINE CFAllocatorRef _CFConvertAllocatorToGCRefZeroEquivalent(CFAllocatorRef allocator) { // DO NOT USE THIS
+    if (!kCFUseCollectableAllocator) return allocator;
+    if (kCFAllocatorDefault == allocator || NULL == allocator) {
+        allocator = CFAllocatorGetDefault();
+    }
+    if (kCFAllocatorSystemDefault == allocator) {
+        allocator = kCFAllocatorSystemDefaultGCRefZero;
+    } else if (CFAllocatorGetDefault() == allocator) {
+        allocator = kCFAllocatorDefaultGCRefZero;
+    }
+    return allocator;
+}
+
+CF_INLINE Boolean _CFAllocatorIsSystemDefault(CFAllocatorRef allocator) {
+    if (allocator == kCFAllocatorSystemDefaultGCRefZero || allocator == kCFAllocatorSystemDefault) return true;
+    if (kCFAllocatorDefaultGCRefZero == allocator || NULL == allocator || kCFAllocatorDefault == allocator) {
+        return (kCFAllocatorSystemDefault == CFAllocatorGetDefault());
+    }
+    return false;
+}
+
+CF_INLINE Boolean _CFAllocatorIsGCRefZero(CFAllocatorRef allocator) {
+    // not intended as a literal test, but as a behavioral test
+    if (!kCFUseCollectableAllocator) return false;
+    return (kCFAllocatorSystemDefaultGCRefZero == allocator || kCFAllocatorDefaultGCRefZero == allocator);
+}
+
 // is GC on?
 #define CF_USING_COLLECTABLE_MEMORY (kCFUseCollectableAllocator)
 // is GC on and is this the GC allocator?
-#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) (kCFUseCollectableAllocator && (NULL == (allocator) || kCFAllocatorSystemDefault == (allocator)))
+#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) (kCFUseCollectableAllocator && (NULL == (allocator) || kCFAllocatorSystemDefault == (allocator) || _CFAllocatorIsGCRefZero(allocator)))
 // is this allocated by the collector?
 #define CF_IS_COLLECTABLE(obj) (__CFObjCIsCollectable ? __CFObjCIsCollectable((void*)obj) : false)
 
+#else
+
+#define kCFUseCollectableAllocator 0
+#define __CFObjCIsCollectable 0
+#define kCFAllocatorSystemDefaultGCRefZero kCFAllocatorSystemDefault
+#define kCFAllocatorDefaultGCRefZero kCFAllocatorDefault
+
+#define _CFConvertAllocatorToNonGCRefZeroEquivalent(A) (A)
+#define _CFConvertAllocatorToGCRefZeroEquivalent(A) (A)
+
+CF_INLINE Boolean _CFAllocatorIsSystemDefault(CFAllocatorRef allocator) {
+    if (allocator == kCFAllocatorSystemDefault) return true;
+    if (NULL == allocator || kCFAllocatorDefault == allocator) {
+        return (kCFAllocatorSystemDefault == CFAllocatorGetDefault());
+    }
+    return false;
+}
+
+#define _CFAllocatorIsGCRefZero(A) (0)
+#define CF_USING_COLLECTABLE_MEMORY 0
+#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) 0
+#define CF_IS_COLLECTABLE(obj) 0
+#endif
 
 enum {
-    _kCFRuntimeNotATypeID =                0,
-    _kCFRuntimeScannedObject =       (1UL << 0),
-    /* _kCFRuntimeUncollectableObject = (1UL << 1),  No longer used; obsolete. */
-    _kCFRuntimeResourcefulObject =   (1UL << 2)
+    _kCFRuntimeNotATypeID = 0
 };
 
-typedef struct __CFRuntimeClass {	// Version 0 struct
+enum { // Version field constants
+    _kCFRuntimeScannedObject =     (1UL << 0),
+    _kCFRuntimeResourcefulObject = (1UL << 2),  // tells CFRuntime to make use of the reclaim field
+    _kCFRuntimeCustomRefCount =    (1UL << 3),  // tells CFRuntime to make use of the refcount field
+};
+
+typedef struct __CFRuntimeClass {
     CFIndex version;
-    const char *className;
+    const char *className; // must be a pure ASCII string, nul-terminated
     void (*init)(CFTypeRef cf);
     CFTypeRef (*copy)(CFAllocatorRef allocator, CFTypeRef cf);
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
     void (*finalize)(CFTypeRef cf);
-#else
-    void (*dealloc)(CFTypeRef cf);
-#endif
     Boolean (*equal)(CFTypeRef cf1, CFTypeRef cf2);
     CFHashCode (*hash)(CFTypeRef cf);
-    CFStringRef (*copyFormattingDesc)(CFTypeRef cf, CFDictionaryRef formatOptions);	// str with retain
-    CFStringRef (*copyDebugDesc)(CFTypeRef cf);	// str with retain
-#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
+    CFStringRef (*copyFormattingDesc)(CFTypeRef cf, CFDictionaryRef formatOptions);	// return str with retain
+    CFStringRef (*copyDebugDesc)(CFTypeRef cf);	// return str with retain
+
 #define CF_RECLAIM_AVAILABLE 1
-    void (*reclaim)(CFTypeRef cf);
-#endif
+    void (*reclaim)(CFTypeRef cf); // Set _kCFRuntimeResourcefulObject in the .version to indicate this field should be used
+
+#define CF_REFCOUNT_AVAILABLE 1
+    uint32_t (*refcount)(intptr_t op, CFTypeRef cf); // Set _kCFRuntimeCustomRefCount in the .version to indicate this field should be used
+        // this field must be non-NULL when _kCFRuntimeCustomRefCount is in the .version field
+        // - if the callback is passed 1 in 'op' it should increment the 'cf's reference count and return 0
+        // - if the callback is passed 0 in 'op' it should return the 'cf's reference count, up to 32 bits
+        // - if the callback is passed -1 in 'op' it should decrement the 'cf's reference count; if it is now zero, 'cf' should be cleaned up and deallocated (the finalize callback above will NOT be called unless the process is running under GC, and CF does not deallocate the memory for you; if running under GC, finalize should do the object tear-down and free the object memory); then return 0
+        // remember to use saturation arithmetic logic and stop incrementing and decrementing when the ref count hits UINT32_MAX, or you will have a security bug
+        // remember that reference count incrementing/decrementing must be done thread-safely/atomically
+        // objects should be created/initialized with a custom ref-count of 1 by the class creation functions
+        // do not attempt to use any bits within the CFRuntimeBase for your reference count; store that in some additional field in your CF object
+
 } CFRuntimeClass;
 
 #define RADAR_5115468_FIXED 1
@@ -212,7 +290,9 @@ CF_EXPORT void _CFRuntimeSetInstanceTypeID(CFTypeRef cf, CFTypeID typeID);
 	 * If the specified CFTypeID is unknown to the CF runtime,
 	 * this function does nothing.  This function CANNOT be used
 	 * to initialize an instance.  It is for advanced usages such
-	 * as faulting.
+	 * as faulting. You cannot change the CFTypeID of an object
+	 * of a _kCFRuntimeCustomRefCount class, or to a 
+         * _kCFRuntimeCustomRefCount class.
 	 */
 
 CF_EXPORT void _CFRuntimeInitStaticInstance(void *memory, CFTypeID typeID);
@@ -224,7 +304,8 @@ CF_EXPORT void _CFRuntimeInitStaticInstance(void *memory, CFTypeID typeID);
 	 * least as large as sizeof(CFRuntimeBase) on the platform
 	 * the code is being compiled for.  The init function of the
 	 * CFRuntimeClass is invoked on the memory as well, if the
-	 * class has one.
+	 * class has one. Static instances cannot be initialized to
+	 * _kCFRuntimeCustomRefCount classes.
 	 */
 #define CF_HAS_INIT_STATIC_INSTANCE 1
 

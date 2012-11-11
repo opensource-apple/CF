@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFError.c
-	Copyright 2006-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2006-2011, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -31,11 +31,7 @@
 #include "CFInternal.h"
 #include <CoreFoundation/CFPriv.h>
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#include <objc/runtime.h>
 #include <mach/mach_error.h>
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 /* Pre-defined userInfo keys
@@ -46,6 +42,8 @@ CONST_STRING_DECL(kCFErrorLocalizedRecoverySuggestionKey,   "NSLocalizedRecovery
 CONST_STRING_DECL(kCFErrorDescriptionKey,                   "NSDescription");
 CONST_STRING_DECL(kCFErrorDebugDescriptionKey,              "NSDebugDescription");
 CONST_STRING_DECL(kCFErrorUnderlyingErrorKey,               "NSUnderlyingError");
+CONST_STRING_DECL(kCFErrorURLKey,               	    "NSURL");
+CONST_STRING_DECL(kCFErrorFilePathKey,                      "NSFilePath");
 
 /* Pre-defined error domains
 */
@@ -178,7 +176,7 @@ CFTypeID CFErrorGetTypeID(void) {
 */
 static CFDictionaryRef _CFErrorCreateEmptyDictionary(CFAllocatorRef allocator) {
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
-    if (allocator == kCFAllocatorSystemDefault) {
+    if (_CFAllocatorIsSystemDefault(allocator)) {
         static CFDictionaryRef emptyErrorDictionary = NULL;
         if (emptyErrorDictionary == NULL) {
             CFDictionaryRef tmp = CFDictionaryCreate(allocator, NULL, NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -229,10 +227,13 @@ CFStringRef _CFErrorCreateLocalizedDescription(CFErrorRef err) {
     CFStringRef localizedDesc = _CFErrorCopyUserInfoKey(err, kCFErrorLocalizedDescriptionKey);
     if (localizedDesc) return localizedDesc;
 
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     // Cache the CF bundle since we will be using it for localized strings.
     CFBundleRef cfBundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.CoreFoundation"));
-
+    
     if (!cfBundle) {	// This should be rare, but has been observed in the wild, due to running out of file descriptors. Normally we might not go to such extremes, but since we want to be able to present reasonable errors even in the case of errors such as running out of file descriptors, why not. This is CFError after all. !!! Be sure to have the same logic here as below for going through various options for fetching the strings.
+#endif
     
 	CFStringRef result = NULL, reasonOrDesc;
 
@@ -245,8 +246,11 @@ CFStringRef _CFErrorCreateLocalizedDescription(CFErrorRef err) {
 	}
 	if (reasonOrDesc) CFRelease(reasonOrDesc);
 	return result;
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     }
+#endif
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     // Then look for kCFErrorLocalizedFailureReasonKey; if there, create a full sentence from that.
     CFStringRef reason = _CFErrorCopyUserInfoKey(err, kCFErrorLocalizedFailureReasonKey);
     if (reason) {
@@ -273,6 +277,7 @@ CFStringRef _CFErrorCreateLocalizedDescription(CFErrorRef err) {
     }
     CFRelease(localizedDomain);
     return result;
+#endif
 }
 
 /* The real guts of the failure reason creation functionality. This function can take a CF or NSError. It's called by NSError for the localizedFailureReason computation.
@@ -291,23 +296,29 @@ CFStringRef _CFErrorCreateLocalizedRecoverySuggestion(CFErrorRef err) {
 
 /* The "debug" description, used by CFCopyDescription and -[NSObject description].
 */
+static void userInfoKeyValueShow(const void *key, const void *value, void *context) {
+    CFStringRef desc;
+    if (CFEqual(key, kCFErrorUnderlyingErrorKey) && (desc = CFErrorCopyDescription((CFErrorRef)value))) {	// We check desc, see <rdar://problem/8415727>
+	CFStringAppendFormat((CFMutableStringRef)context, NULL, CFSTR("%@=%p \"%@\", "), key, value, desc); 
+	CFRelease(desc);
+    } else {
+	CFStringAppendFormat((CFMutableStringRef)context, NULL, CFSTR("%@=%@, "), key, value); 
+    }
+}
+
 CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err) {
     CFStringRef desc = CFErrorCopyDescription(err);
     CFStringRef debugDesc = _CFErrorCopyUserInfoKey(err, kCFErrorDebugDescriptionKey);
     CFDictionaryRef userInfo = _CFErrorGetUserInfo(err);
-    CFErrorRef underlyingError = NULL;    
     CFMutableStringRef result = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
     CFStringAppendFormat(result, NULL, CFSTR("Error Domain=%@ Code=%d"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
-    if (userInfo) {
-        CFStringAppendFormat(result, NULL, CFSTR(" UserInfo=%p"), userInfo);
-        underlyingError = (CFErrorRef)CFDictionaryGetValue(userInfo, kCFErrorUnderlyingErrorKey);
-    }
     CFStringAppendFormat(result, NULL, CFSTR(" \"%@\""), desc);
     if (debugDesc && CFStringGetLength(debugDesc) > 0) CFStringAppendFormat(result, NULL, CFSTR(" (%@)"), debugDesc);
-    if (underlyingError) {
-        CFStringRef underlyingErrorDesc = _CFErrorCreateDebugDescription(underlyingError);
-        CFStringAppendFormat(result, NULL, CFSTR(" Underlying Error=(%@)"), underlyingErrorDesc);
-        CFRelease(underlyingErrorDesc);
+    if (userInfo) {
+        CFStringAppendFormat(result, NULL, CFSTR(" UserInfo=%p {"), userInfo);
+	CFDictionaryApplyFunction(userInfo, userInfoKeyValueShow, (void *)result);
+	CFIndex commaLength = (CFStringHasSuffix(result, CFSTR(", "))) ? 2 : 0;
+	CFStringReplace(result, CFRangeMake(CFStringGetLength(result)-commaLength, commaLength), CFSTR("}"));
     }
     if (debugDesc) CFRelease(debugDesc);
     if (desc) CFRelease(desc);
@@ -418,6 +429,7 @@ static CFTypeRef _CFErrorPOSIXCallBack(CFErrorRef err, CFStringRef key) {
     if (!errStr) return NULL;
     if (CFEqual(key, kCFErrorDescriptionKey)) return errStr;	// If all we wanted was the non-localized description, we're done
     
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     // We need a kCFErrorLocalizedFailureReasonKey, so look up a possible localization for the error message
     // Look for the bundle in /System/Library/CoreServices/CoreTypes.bundle
     CFArrayRef paths = CFCopySearchPathForDirectoriesInDomains(kCFLibraryDirectory, kCFSystemDomainMask, false);
@@ -446,6 +458,7 @@ static CFTypeRef _CFErrorPOSIXCallBack(CFErrorRef err, CFStringRef key) {
 	}
 	CFRelease(paths);
     }
+#endif
     
     return errStr;
 }
@@ -460,9 +473,6 @@ static CFTypeRef _CFErrorMachCallBack(CFErrorRef err, CFStringRef key) {
     }
     return NULL;
 }
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 
@@ -483,9 +493,6 @@ static void _CFErrorInitializeCallBackTable(void) {
     CFErrorSetCallBackForDomain(kCFErrorDomainPOSIX, _CFErrorPOSIXCallBack);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED    
     CFErrorSetCallBackForDomain(kCFErrorDomainMach, _CFErrorMachCallBack);
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 }
 

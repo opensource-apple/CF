@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,14 +22,13 @@
  */
 
 /*	CFBundle_BinaryTypes.h
-	Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_BINARYTYPES__)
 #define __COREFOUNDATION_CFBUNDLE_BINARYTYPES__ 1
 
 CF_EXTERN_C_BEGIN
-
 
 #if DEPLOYMENT_TARGET_MACOSX
 #define BINARY_SUPPORT_DYLD 1

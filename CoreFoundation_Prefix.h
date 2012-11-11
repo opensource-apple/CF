@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CoreFoundation_Prefix.h
-	Copyright (c) 2005-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2011, Apple Inc. All rights reserved.
 */
 
 
@@ -38,20 +38,29 @@
 #if DEPLOYMENT_TARGET_WINDOWS && defined(__cplusplus)
 extern "C" {
 #endif
+
+#define SystemIntegrityCheck(A, B)	do {} while (0)
+
     
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if INCLUDE_OBJC
 #include <objc/objc.h>
+#else
+typedef signed char	BOOL; 
+typedef char * id;
+typedef char * Class;
+#define YES (BOOL)1
+#define NO (BOOL)0
+#define nil NULL
 #endif
 
-#if DEPLOYMENT_TARGET_WINDOWS
-#define DISPATCH_HELPER_FUNCTIONS(PREFIX, QNAME)                        
+#if DEPLOYMENT_TARGET_MACOSX && defined(__ppc__)
+#define SUPPORT_CFM 1
 #endif
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-
-#import <dispatch/dispatch.h>
 #import <libkern/OSAtomic.h>
 #import <pthread.h>
+#endif
 
 /* This macro creates 3 helper functions which are useful in dealing with libdispatch:
  *  __ PREFIX SyncDispatchIsSafe  -- returns bool indicating whether calling dispatch_sync() would be safe from self-deadlock
@@ -79,7 +88,6 @@ static dispatch_queue_t __ ## PREFIX ## Queue(void) {			\
     return __ ## PREFIX ## dq;						\
 }									\
 
-#endif
 
 #define LIBAUTO_STUB	1
 
@@ -103,15 +111,48 @@ typedef int		boolean_t;
 #endif
 #endif
 
-#if DEPLOYMENT_TARGET_WINDOWS
-
-#define MAXPATHLEN MAX_PATH
-#undef MAX_PATH
-#undef INVALID_HANDLE_VALUE
-
-// Define MIN/MAX macros from NSObjCRuntime.h, which are only defined for GNUC
-#if !defined(__GNUC__)
+#if DEPLOYMENT_TARGET_LINUX
     
+#define __private_extern__
+#define __strong
+#define __weak
+
+#define strtod_l(a,b,locale) strtod(a,b)
+#define strtoul_l(a,b,c,locale) strtoul(a,b,c)
+#define strtol_l(a,b,c,locale) strtol(a,b,c)
+#define strncasecmp_l(a, b, c, d) strncasecmp(a, b, c)
+
+#define fprintf_l(a,locale,b,...) fprintf(a, b, __VA_ARGS__)
+    
+#define strlcat(a,b,c) strncat(a,b,c)
+#define strlcpy(a,b,c) strncpy(a,b,c)
+
+#define issetugid() 0
+    
+// Implemented in CFPlatform.c 
+bool OSAtomicCompareAndSwapPtr(void *oldp, void *newp, void *volatile *dst);
+bool OSAtomicCompareAndSwapLong(long oldl, long newl, long volatile *dst);
+bool OSAtomicCompareAndSwapPtrBarrier(void *oldp, void *newp, void *volatile *dst);
+
+int32_t OSAtomicDecrement32Barrier(volatile int32_t *dst);
+int32_t OSAtomicIncrement32Barrier(volatile int32_t *dst);
+int32_t OSAtomicIncrement32(volatile int32_t *theValue);
+int32_t OSAtomicDecrement32(volatile int32_t *theValue);
+
+int32_t OSAtomicAdd32( int32_t theAmount, volatile int32_t *theValue );
+int32_t OSAtomicAdd32Barrier( int32_t theAmount, volatile int32_t *theValue );
+bool OSAtomicCompareAndSwap32Barrier( int32_t oldValue, int32_t newValue, volatile int32_t *theValue );
+    
+void OSMemoryBarrier();
+
+#include <malloc.h>
+CF_INLINE size_t malloc_size(void *memblock) {
+    return malloc_usable_size(memblock);
+}
+
+#endif
+
+#if DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX    
 #if !defined(MIN)
 #define MIN(A,B)	((A) < (B) ? (A) : (B))
 #endif
@@ -122,9 +163,14 @@ typedef int		boolean_t;
     
 #if !defined(ABS)
 #define ABS(A)	((A) < 0 ? (-(A)) : (A))
+#endif    
 #endif
-    
-#endif
+
+#if DEPLOYMENT_TARGET_WINDOWS
+
+#define MAXPATHLEN MAX_PATH
+#undef MAX_PATH
+#undef INVALID_HANDLE_VALUE
 
 // Defined for source compatibility
 #define ino_t _ino_t
@@ -165,6 +211,7 @@ CF_EXPORT int _NS_access(const char *name, int amode);
 // The order of these includes is important
 #include <winsock2.h>
 #include <windows.h>
+#include <pthread.h>
 
 #undef BOOL
 
@@ -181,6 +228,7 @@ struct timespec {
 #define malloc_default_zone() (void *)0
 #define malloc_zone_from_ptr(a) (void *)0
 #define malloc_zone_malloc(zone,size) malloc(size)
+#define malloc_zone_memalign(zone,align,size) malloc(size)
 #define malloc_zone_calloc(zone,count,size) calloc(count,size)
 #define bcopy(b1,b2,len) memmove(b2, b1, (size_t)(len))
 typedef int malloc_zone_t;
@@ -206,25 +254,27 @@ typedef int32_t OSSpinLock;
 
 #include <stdint.h>
 #include <stdbool.h>
-//#include <search.h>
 #include <stdio.h>
-#include <stdarg.h>
 #include <malloc.h>
+
 CF_INLINE size_t malloc_size(void *memblock) {
     return _msize(memblock);
 }
 
 #define mach_absolute_time() ((uint64_t)(CFAbsoluteTimeGetCurrent() * 1000000000.0))
 
-extern int pthread_main_np();
-
 #define strtod_l(a,b,locale) strtod(a,b)
 #define strtoul_l(a,b,c,locale) strtoul(a,b,c)
 #define strtol_l(a,b,c,locale) strtol(a,b,c)
+#define strncasecmp_l(a, b, c, d) _strnicmp(a, b, c)
+#define snprintf _snprintf
 
-#define _fprintf_l(a,b,locale,...) fprintf(a, b, __VA_ARGS__)
+#define fprintf_l(a,locale,b,...) fprintf(a, b, __VA_ARGS__)
 
 #define strlcat(a,b,c) strncat(a,b,c)
+#define strlcpy(a,b,c) strncpy(a,b,c)
+    
+#define sleep(x) Sleep(1000*x)
 
 #define issetugid() 0
 
@@ -238,6 +288,7 @@ CF_EXPORT int32_t OSAtomicIncrement32Barrier(volatile int32_t *dst);
 CF_EXPORT int32_t OSAtomicIncrement32(volatile int32_t *theValue);
 CF_EXPORT int32_t OSAtomicDecrement32(volatile int32_t *theValue);
     
+CF_EXPORT int32_t OSAtomicAdd32( int32_t theAmount, volatile int32_t *theValue );
 CF_EXPORT int32_t OSAtomicAdd32Barrier( int32_t theAmount, volatile int32_t *theValue );
 CF_EXPORT bool OSAtomicCompareAndSwap32Barrier( int32_t oldValue, int32_t newValue, volatile int32_t *theValue );
 
@@ -248,10 +299,7 @@ CF_EXPORT bool OSAtomicCompareAndSwap64Barrier( int64_t __oldValue, int64_t __ne
 CF_EXPORT int64_t OSAtomicAdd64( int64_t __theAmount, volatile int64_t *__theValue );
 CF_EXPORT int64_t OSAtomicAdd64Barrier( int64_t __theAmount, volatile int64_t *__theValue );
 */
-    
-#define sleep(x) Sleep(1000*x)
-#define strlcpy strncpy
-    
+
 //#ifndef NTDDI_VERSION
 //#define NTDDI_VERSION NTDDI_WINXP
 //#endif
@@ -259,44 +307,35 @@ CF_EXPORT int64_t OSAtomicAdd64Barrier( int64_t __theAmount, volatile int64_t *_
 #include <io.h>
 #include <fcntl.h>
 #include <errno.h>
-
-static __inline int flsl( long mask ) {
-    int idx = 0;
-	while (mask != 0) mask = (unsigned long)mask >> 1, idx++;
-	return idx;
-}
-
-static __inline int asprintf(char **ret, const char *format, ...) {
-    va_list args;
-    size_t sz = 1024;
-    *ret = (char *) malloc(sz * sizeof(char));
-    if (!*ret) return -1;
-    va_start(args, format);
-    int cnt = vsnprintf(*ret, sz, format, args);
-    va_end(args);
-    if (cnt < sz - 1) return cnt;
-    sz = cnt + 8;
-    char *oldret = *ret;
-    *ret = (char *) realloc(*ret, sz * sizeof(char));
-    if (!*ret && oldret) free(oldret);
-    if (!*ret) return -1;
-    va_start(args, format);
-    cnt = vsnprintf(*ret, sz, format, args);
-    va_end(args);
-    if (cnt < sz - 1) return cnt;
-    free(*ret);
-    *ret = NULL;
-    return -1;
-}
-
-#define __unused
-
-#define __weak
-#define __strong
     
 #endif
 
+#if DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_WINDOWS
+
+#include <stdarg.h>
+
+CF_INLINE int flsl( long mask ) {
+    int idx = 0;
+    while (mask != 0) mask = (unsigned long)mask >> 1, idx++;
+    return idx;
+}
+    
+CF_INLINE int popcountll(long long x) {
+    int count = 0;
+    while (x) {
+        count++;
+        x &= x - 1; // reset LS1B
+    }
+    return count;
+}
+
+__private_extern__ int asprintf(char **ret, const char *format, ...);
+
+#endif
+
 #ifdef LIBAUTO_STUB
+
+#include <stddef.h>
 
 /* Stubs for functions in libauto. */
 
@@ -312,7 +351,19 @@ enum {
 };
 
     
-enum { AUTO_TYPE_UNKNOWN = -1, AUTO_UNSCANNED = 1, AUTO_OBJECT = 2, AUTO_MEMORY_SCANNED = 0, AUTO_MEMORY_UNSCANNED = AUTO_UNSCANNED, AUTO_OBJECT_SCANNED = AUTO_OBJECT, AUTO_OBJECT_UNSCANNED = AUTO_OBJECT | AUTO_UNSCANNED };
+enum {
+    AUTO_TYPE_UNKNOWN = -1,
+    AUTO_UNSCANNED = (1 << 0),
+    AUTO_OBJECT = (1 << 1),
+    AUTO_POINTERS_ONLY = (1 << 2),
+    AUTO_MEMORY_SCANNED = !AUTO_UNSCANNED,
+    AUTO_MEMORY_UNSCANNED = AUTO_UNSCANNED,
+    AUTO_MEMORY_ALL_POINTERS = AUTO_POINTERS_ONLY,
+    AUTO_MEMORY_ALL_WEAK_POINTERS = (AUTO_UNSCANNED | AUTO_POINTERS_ONLY),
+    AUTO_OBJECT_SCANNED = AUTO_OBJECT,
+    AUTO_OBJECT_UNSCANNED = AUTO_OBJECT | AUTO_UNSCANNED, 
+    AUTO_OBJECT_ALL_POINTERS = AUTO_OBJECT | AUTO_POINTERS_ONLY
+};
 typedef unsigned long auto_memory_type_t;
 typedef struct _auto_zone_t auto_zone_t;
 typedef struct auto_weak_callback_block {
@@ -323,76 +374,80 @@ typedef struct auto_weak_callback_block {
 } auto_weak_callback_block_t;
 
 CF_INLINE void *objc_memmove_collectable(void *a, const void *b, size_t c) { return memmove(a, b, c); }
+CF_INLINE void *objc_collectableZone(void) { return 0; }
 
-CF_INLINE auto_zone_t *auto_zone(void) { return 0; }
 CF_INLINE void *auto_zone_allocate_object(void *zone, size_t size, auto_memory_type_t type, int rc, int clear) { return 0; }
 CF_INLINE const void *auto_zone_base_pointer(void *zone, const void *ptr) { return 0; }
+CF_INLINE void auto_zone_set_scan_exactly(void *zone, void *ptr) {}
 CF_INLINE void auto_zone_retain(void *zone, void *ptr) {}
 CF_INLINE unsigned int auto_zone_release(void *zone, void *ptr) { return 0; }
 CF_INLINE unsigned int auto_zone_retain_count(void *zone, const void *ptr) { return 0; }
-CF_INLINE void auto_zone_set_unscanned(auto_zone_t *zone, void *ptr) {}
-CF_INLINE void auto_zone_set_nofinalize(auto_zone_t *zone, void *ptr) {}
+CF_INLINE void auto_zone_set_unscanned(void *zone, void *ptr) {}
+CF_INLINE void auto_zone_set_nofinalize(void *zone, void *ptr) {}
 CF_INLINE int auto_zone_is_finalized(void *zone, const void *ptr) { return 0; }
 CF_INLINE size_t auto_zone_size(void *zone, const void *ptr) { return 0; }
 CF_INLINE void auto_register_weak_reference(void *zone, const void *referent, void **referrer, uintptr_t *counter, void **listHead, void **listElement) {}
 CF_INLINE void auto_unregister_weak_reference(void *zone, const void *referent, void **referrer) {}
-CF_INLINE void auto_zone_register_thread(void *zone) {}
-CF_INLINE void auto_zone_unregister_thread(void *zone) {}
 CF_INLINE int auto_zone_is_valid_pointer(void *zone, const void *ptr) { return 0; }
 CF_INLINE BOOL objc_isAuto(id object) { return 0; }
 CF_INLINE void* auto_read_weak_reference(void *zone, void **referrer) { void *result = *referrer; return result; }
-CF_INLINE void auto_assign_weak_reference(void *zone, const void *referent, void **referrer, auto_weak_callback_block_t *block) { *referrer = (void *)referent; }
+CF_INLINE void auto_assign_weak_reference(void *zone, const void *value, const void **location, auto_weak_callback_block_t *block) { *location = (void *)value; }
 CF_INLINE auto_memory_type_t auto_zone_get_layout_type(void *zone, void *ptr) { return AUTO_UNSCANNED; }
-CF_INLINE boolean_t auto_zone_set_write_barrier(auto_zone_t *zone, const void *dest, const void *new_value) { return false; }
+CF_INLINE int auto_zone_set_write_barrier(void *zone, const void *dest, const void *new_value) { return false; }
 
 CF_INLINE void objc_assertRegisteredThreadWithCollector(void) {}
+CF_INLINE void objc_registerThreadWithCollector(void) {}
 
+CF_INLINE uintptr_t _object_getExternalHash(id obj) {
+    return (uintptr_t)obj;
+}
+    
 // from objc-auto.h
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapPtr(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapPtr(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapPtrBarrier(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapPtrBarrier(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation) 
+CF_INLINE BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation) 
 { return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation); }
 
-static OBJC_INLINE id objc_assign_strongCast(id val, id *dest) 
+CF_INLINE id objc_assign_strongCast(id val, id *dest) 
 { return (*dest = val); }
 
-static OBJC_INLINE id objc_assign_global(id val, id *dest) 
+CF_INLINE id objc_assign_global(id val, id *dest) 
 { return (*dest = val); }
 
-static OBJC_INLINE id objc_assign_ivar(id val, id dest, ptrdiff_t offset) 
+CF_INLINE id objc_assign_ivar(id val, id dest, ptrdiff_t offset) 
 { return (*(id*)((char *)dest+offset) = val); }
 
-//static OBJC_INLINE void *objc_memmove_collectable(void *dst, const void *src, size_t size) { return memmove(dst, src, size); }
+//CF_INLINE void *objc_memmove_collectable(void *dst, const void *src, size_t size) { return memmove(dst, src, size); }
 
-static OBJC_INLINE id objc_read_weak(id *location) 
+CF_INLINE id objc_read_weak(id *location) 
 { return *location; }
 
-static OBJC_INLINE id objc_assign_weak(id value, id *location) 
+CF_INLINE id objc_assign_weak(id value, id *location) 
 { return (*location = value); }
 
 
-static OBJC_INLINE void objc_finalizeOnMainThread(Class cls) { }
-static OBJC_INLINE BOOL objc_is_finalized(void *ptr) { return NO; }
-static OBJC_INLINE void objc_clear_stack(unsigned long options) { }
+CF_INLINE void objc_finalizeOnMainThread(Class cls) { }
+CF_INLINE BOOL objc_is_finalized(void *ptr) { return NO; }
+CF_INLINE void objc_clear_stack(unsigned long options) { }
 
-static OBJC_INLINE BOOL objc_collectingEnabled(void) { return NO; }
-static OBJC_INLINE void objc_start_collector_thread(void) { }
+CF_INLINE BOOL objc_collectingEnabled(void) { return NO; }
+CF_INLINE void objc_start_collector_thread(void) { }
 
-static OBJC_INLINE void objc_collect(unsigned long options) { }
+CF_INLINE void objc_collect(unsigned long options) { }
     
 #endif
 
@@ -403,7 +458,29 @@ static OBJC_INLINE void objc_collect(unsigned long options) { }
     #define CF_OPENFLGS	(0)
 #endif
 
+#if DEPLOYMENT_TARGET_WINDOWS
 
+// These are replacements for pthread calls on Windows
+CF_EXPORT int _NS_pthread_main_np();
+CF_EXPORT int _NS_pthread_setspecific(pthread_key_t key, const void *val);
+CF_EXPORT void* _NS_pthread_getspecific(pthread_key_t key);
+CF_EXPORT int _NS_pthread_key_init_np(int key, void (*destructor)(void *));
+CF_EXPORT void _NS_pthread_setname_np(const char *name);
+    
+// map use of pthread_set/getspecific to internal API
+#define pthread_setspecific _NS_pthread_setspecific
+#define pthread_getspecific _NS_pthread_getspecific
+#define pthread_key_init_np _NS_pthread_key_init_np
+#define pthread_main_np _NS_pthread_main_np
+#define pthread_setname_np _NS_pthread_setname_np
+#endif
+
+#if DEPLOYMENT_TARGET_WINDOWS
+// replacement for DISPATCH_QUEUE_OVERCOMMIT until we get a bug fix in dispatch on Windows
+// <rdar://problem/7923891> dispatch on Windows: Need queue_private.h
+#define DISPATCH_QUEUE_OVERCOMMIT 2
+#endif
+    
 #if DEPLOYMENT_TARGET_WINDOWS && defined(__cplusplus)
 } // extern "C"
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*	CFPreferences.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
-	Responsibility: Chris Parker
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Responsibility: David Smith
 */
 
 #include <CoreFoundation/CFPreferences.h>
@@ -32,9 +32,10 @@
 #include <CoreFoundation/CFUserNotification.h>
 #endif
 #include <CoreFoundation/CFPropertyList.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <CoreFoundation/CFBundle.h>
+#endif
 #include <CoreFoundation/CFNumber.h>
-#include <CoreFoundation/CFPriv.h>
 #include <CoreFoundation/CFPriv.h>
 #include "CFInternal.h"
 #include <sys/stat.h>
@@ -435,8 +436,9 @@ static CFStringRef  _CFPreferencesCachePrefixForUserHost(CFStringRef  userName, 
     }
     CFMutableStringRef result = CFStringCreateMutable(__CFPreferencesAllocator(), 0);
     if (userName == kCFPreferencesCurrentUser) {
-        userName = CFGetUserName();
+        userName = CFCopyUserName();
         CFStringAppend(result, userName);
+        CFRelease(userName);
         CFStringAppend(result, CFSTR("/"));
     } else if (userName == kCFPreferencesAnyUser) {
         CFStringAppend(result, CFSTR("*/"));

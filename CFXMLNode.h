@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,13 +22,12 @@
  */
 
 /*	CFXMLNode.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
-/*  CFXMLParser (and thus CFXMLNode) will be officially deprecated in a future release of Mac OS X.
-    Clients should be aware of the fact that CFXMLParser has some serious deficiencies in terms of both
-    performance and standards compliance and should migrate their XML parsing to NSXMLParser, NSXMLDocument, or
-    other XML parsing technologies that will suit their needs better than CFXMLParser.
+/*  CFXMLParser (and thus CFXMLNode) are deprecated. Clients should be aware of the fact that CFXMLParser has 
+    some serious deficiencies in terms of both performance and standards compliance and should migrate their 
+    XML parsing to NSXMLParser, NSXMLDocument, or other XML parsing technologies.
  */
 
 #if !defined(__COREFOUNDATION_CFXMLNODE__)

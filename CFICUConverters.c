@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,28 +21,20 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-/*
- *  CFICUConverters.c
- *  CoreFoundation
- *
- *  Created by Aki Inoue on 07/12/04.
- *  Copyright 2007-2009, Apple Inc. All rights reserved.
- *
- */
+/*	CFICUConverters.c
+	Copyright (c) 2004-2011, Apple Inc. All rights reserved.
+	Responsibility: Aki Inoue
+*/
 
 #include "CFStringEncodingDatabase.h"
 #include "CFStringEncodingConverterPriv.h"
 #include "CFICUConverters.h"
 #include <CoreFoundation/CFStringEncodingExt.h>
+#include <CoreFoundation/CFUniChar.h>
 #include <unicode/ucnv.h>
 #include <unicode/uversion.h>
 #include "CFInternal.h"
 #include <stdio.h>
-
-#if DEPLOYMENT_TARGET_WINDOWS
-#define strncasecmp_l(a, b, c, d) _strnicmp(a, b, c)
-#define snprintf _snprintf
-#endif
 
 // Thread data support
 typedef struct {
@@ -68,39 +60,19 @@ static void __CFICUThreadDataDestructor(void *context) {
     CFAllocatorDeallocate(NULL, data);
 }
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#import <pthread.h>
-
 CF_INLINE __CFICUThreadData *__CFStringEncodingICUGetThreadData() {
     __CFICUThreadData * data;
 
-    pthread_key_init_np(__CFTSDKeyICUConverter, __CFICUThreadDataDestructor);
-    data = (__CFICUThreadData *)pthread_getspecific(__CFTSDKeyICUConverter);
+    data = (__CFICUThreadData *)_CFGetTSD(__CFTSDKeyICUConverter);
 
     if (NULL == data) {
         data = (__CFICUThreadData *)CFAllocatorAllocate(NULL, sizeof(__CFICUThreadData), 0);
         memset(data, 0, sizeof(__CFICUThreadData));
-        pthread_setspecific(__CFTSDKeyICUConverter, (const void *)data);
+        _CFSetTSD(__CFTSDKeyICUConverter, (void *)data, __CFICUThreadDataDestructor);
     }
 
     return data;
 }
-#elif DEPLOYMENT_TARGET_WINDOWS
-__private_extern__ void __CFStringEncodingICUThreadDataCleaner(void *context) { __CFICUThreadDataDestructor(context); }
-
-CF_INLINE __CFICUThreadData *__CFStringEncodingICUGetThreadData() {
-    __CFThreadSpecificData *threadData = __CFGetThreadSpecificData_inline();
-
-    if (NULL == threadData->_icuThreadData) {
-        threadData->_icuThreadData = (__CFICUThreadData *)CFAllocatorAllocate(NULL, sizeof(__CFICUThreadData), 0);
-        memset(threadData->_icuThreadData, 0, sizeof(__CFICUThreadData));
-    }
-
-    return (__CFICUThreadData *)threadData->_icuThreadData;
-}
-#else
-#error Need implementation for thread data
-#endif
 
 __private_extern__ const char *__CFStringEncodingGetICUName(CFStringEncoding encoding) {
 #define STACK_BUFFER_SIZE (60)
@@ -265,8 +237,10 @@ static CFIndex __CFStringEncodingConverterReleaseICUConverter(UConverter *conver
 
 #define MAX_BUFFER_SIZE (1000)
 
-#if (U_ICU_VERSION_MAJOR_NUM > 4) || ((U_ICU_VERSION_MAJOR_NUM == 4) && (U_ICU_VERSION_MINOR_NUM > 0))
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if (U_ICU_VERSION_MAJOR_NUM > 4) || ((U_ICU_VERSION_MAJOR_NUM == 4) && (U_ICU_VERSION_MINOR_NUM > 6))
 #warning Unknown ICU version. Check binary compatibility issues for rdar://problem/6024743
+#endif
 #endif
 #define HAS_ICU_BUG_6024743 (1)
 #define HAS_ICU_BUG_6025527 (1)
@@ -301,7 +275,43 @@ __private_extern__ CFIndex __CFStringEncodingICUToBytes(const char *icuName, uin
         if (NULL != usedByteLen) *usedByteLen = totalLength;
     } else {
         ucnv_fromUnicode(converter, &destination, destinationLimit, (const UChar **)&source, (const UChar *)sourceLimit, NULL, flush, &errorCode);
-        
+
+#if HAS_ICU_BUG_6024743
+/* Another critical ICU design issue. Similar to conversion error, source pointer returned from U_BUFFER_OVERFLOW_ERROR is already beyond the last valid character position. It renders the returned value from source entirely unusable. We have to manually back up until succeeding <rdar://problem/7183045> Intrestingly, this issue doesn't apply to ucnv_toUnicode. The asynmmetric nature makes this more dangerous */
+        if (U_BUFFER_OVERFLOW_ERROR == errorCode) {
+            const uint8_t *bitmap = CFUniCharGetBitmapPtrForPlane(kCFUniCharNonBaseCharacterSet, 0);
+            const uint8_t *nonBase;
+            UTF32Char character;
+
+            do {
+                // Since the output buffer is filled, we can assume no invalid chars (including stray surrogates)
+                do {
+                    sourceLimit = (source - 1);
+                    character = *sourceLimit;
+                    nonBase = bitmap;
+
+                    if (CFUniCharIsSurrogateLowCharacter(character)) {
+                        --sourceLimit;
+                        character = CFUniCharGetLongCharacterForSurrogatePair(*sourceLimit, character);
+                        nonBase = CFUniCharGetBitmapPtrForPlane(kCFUniCharNonBaseCharacterSet, (character >> 16) & 0x000F);
+                        character &= 0xFFFF;
+                    }
+                } while ((sourceLimit > characters) && CFUniCharIsMemberOfBitmap(character, nonBase));
+
+                if (sourceLimit > characters) {
+                    source = characters;
+                    destination = (char *)bytes;
+                    errorCode = U_ZERO_ERROR;
+
+                    ucnv_resetFromUnicode(converter);
+
+                    ucnv_fromUnicode(converter, &destination, destinationLimit, (const UChar **)&source, (const UChar *)sourceLimit, NULL, flush, &errorCode);
+                }
+            } while (U_BUFFER_OVERFLOW_ERROR == errorCode);
+
+            errorCode = U_BUFFER_OVERFLOW_ERROR;
+        }
+#endif
         if (NULL != usedByteLen) *usedByteLen = destination - (const char *)bytes;
     }
 

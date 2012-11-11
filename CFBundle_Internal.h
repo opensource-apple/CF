@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBundle_Internal.h
-	Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_INTERNAL__)
@@ -84,11 +84,10 @@ extern Boolean _CFIsResourceAtPath(CFStringRef path, Boolean *isDir);
 extern Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, UInt8 *version);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectory(CFAllocatorRef alloc, CFURLRef url, UInt8 *version);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVersion(CFAllocatorRef alloc, CFURLRef url, UInt8 version);
-extern CFURLRef _CFBundleCopySupportFilesDirectoryURLInDirectory(CFAllocatorRef alloc, CFURLRef bundleURL, UInt8 version);
-extern CFURLRef _CFBundleCopyResourcesDirectoryURLInDirectory(CFAllocatorRef alloc, CFURLRef bundleURL, UInt8 version);
+extern CFURLRef _CFBundleCopySupportFilesDirectoryURLInDirectory(CFURLRef bundleURL, UInt8 version);
+extern CFURLRef _CFBundleCopyResourcesDirectoryURLInDirectory(CFURLRef bundleURL, UInt8 version);
 
 extern Boolean _CFBundleCouldBeBundle(CFURLRef url);
-extern CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocatorRef alloc, CFStringRef executablePath);
 extern CFURLRef _CFBundleCopyResourceForkURLMayBeLocal(CFBundleRef bundle, Boolean mayBeLocal);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInResourceForkWithAllocator(CFAllocatorRef alloc, CFURLRef url);
 extern CFStringRef _CFBundleCopyBundleDevelopmentRegionFromVersResource(CFBundleRef bundle);
@@ -134,7 +133,6 @@ extern void _CFBundleDlfcnUnload(CFBundleRef bundle);
 extern void *_CFBundleDlfcnGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName);
 #endif /* BINARY_SUPPORT_DLFCN */
 
-
 #if defined(BINARY_SUPPORT_DLL)
 extern Boolean _CFBundleDLLLoad(CFBundleRef bundle, CFErrorRef *error);
 extern void _CFBundleDLLUnload(CFBundleRef bundle);
@@ -170,6 +168,9 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory);
 #define _CFBundleResourcesURLFromBase0 CFSTR("Resources/")
 #define _CFBundleResourcesURLFromBase1 CFSTR("Support%20Files/Resources/")
 #define _CFBundleResourcesURLFromBase2 CFSTR("Contents/Resources/")
+#define _CFBundleAppStoreReceiptURLFromBase0 CFSTR("_MASReceipt/receipt")
+#define _CFBundleAppStoreReceiptURLFromBase1 CFSTR("Support%20Files/_MASReceipt/receipt")
+#define _CFBundleAppStoreReceiptURLFromBase2 CFSTR("Contents/_MASReceipt/receipt")
 #define _CFBundleExecutablesURLFromBase1 CFSTR("Support%20Files/Executables/")
 #define _CFBundleExecutablesURLFromBase2 CFSTR("Contents/")
 #define _CFBundleInfoURLFromBase0 CFSTR("Resources/Info.plist")
@@ -207,6 +208,7 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory);
 
 #define _CFBundleMacOSXPlatformName CFSTR("macos")
 #define _CFBundleAlternateMacOSXPlatformName CFSTR("macosx")
+#define _CFBundleiPhoneOSPlatformName CFSTR("iphoneos")
 #define _CFBundleMacOS8PlatformName CFSTR("macosclassic")
 #define _CFBundleAlternateMacOS8PlatformName CFSTR("macos8")
 #define _CFBundleWindowsPlatformName CFSTR("windows")
@@ -217,6 +219,7 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory);
 
 #define _CFBundleDefaultStringTableName CFSTR("Localizable")
 #define _CFBundleStringTableType CFSTR("strings")
+#define _CFBundleStringDictTableType CFSTR("stringsdict")
 
 #define _CFBundleUserLanguagesPreferenceName CFSTR("AppleLanguages")
 #define _CFBundleOldUserLanguagesPreferenceName CFSTR("NSLanguages")

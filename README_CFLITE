@@ -1,0 +1,74 @@
+What is CFLite?
+**** **** **** **** ****
+
+CFLite is an open source version of the CoreFoundation framework found on Mac OS X and iOS. It is designed to be simple and portable. For example, it can be used on other platforms to read and write property lists that may come from Mac OS X or iOS.
+
+It is important to note that this version is not the exact same version as is used on Mac OS X or iOS, but they do share a significant amount of code.
+
+How to Contact the CFLite Team
+**** **** **** **** ****
+
+If you have patches, or enhancement requests, please file a bug report here:
+	https://bugreport.apple.com
+	
+Please include as much detail as possible in your bug report, including platform, compiler, CFLite version, and a test case if appropriate. Mention that the bug should be sent to CoreFoundation in your descriptioon.
+
+
+Building and Installing CFLite
+**** **** **** **** ****
+
+On Mac OS X / Darwin
+---- ---- ---- ---- ----
+
+Use the default Makefile:
+
+% make
+
+This will create a CoreFoundation.framework, containing the shared library, header files, and resources. You can link to this library and use it at runtime by setting the DYLD_FRAMEWORK_PATH environment variable. 'man dyld' will give more information about this.
+
+An application must not link both this version of CFLite and the installed version of CoreFoundation. They are not compatible. CFLite will also not work with Foundation or any higher-level Cocoa framework that depends on the installed CoreFoundation.
+
+On Linux
+---- ---- ---- ---- ----
+
+First, you will need to fetch a few dependencies of CoreFoundation.
+
+* clang compiler 2.8 or later
+   http://clang.llvm.org/
+
+  CoreFoundation use the clang compiler to support modern features like Blocks.
+
+* libBlocksRuntime
+   http://compiler-rt.llvm.org/
+  
+  This small shared library supports Blocks at runtime. You will need the 'cmake' utility (http://www.cmake.org/) to build this. It is recommended to install this library in /usr/local/lib and put the headers in /usr/local/include.
+
+* ICU 4.4 or later (ICU4C, the C version, not ICU4J, the Java version)
+   http://site.icu-project.org/download
+
+  ICU is used for locales, time zones, calendars, and unicode support in CoreFoundation. Again, it is recommended to install this library in /usr/local/lib.
+
+Once you have the dependencies in place, build CFLite using the Linux Makefile:
+
+% sudo make -f MakefileLinux install
+
+This will create and install these files:
+
+/usr/local/lib/libCoreFoundation.so
+/usr/local/include/CoreFoundation/<header files>
+/usr/local/include/TargetConditionals.h
+/usr/local/share/CoreFoundation/<resource files>
+
+Make sure to set LD_LIBRARY_PATH environment variable to include /usr/local/lib when using an executable that has linked CFLite.
+
+On Windows
+---- ---- ---- ---- ----
+
+CFLite does not yet fully support Windows. The primary missing dependency is a version of clang that can build a dynamically linked library (.DLL) that supports the Windows executable format.
+
+Using CFLite
+**** **** **** **** ****
+
+The Mac OS X version of CFLite supports most of the functionality of the full CoreFoundation. The Linux version of CFLite focuses on strings, dates, collections, and other property-list related items.
+
+There is an example of using CFLite on linux to process property lists in the 'plconvert.c' file.

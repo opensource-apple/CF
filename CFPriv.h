@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPriv.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 /*
@@ -37,19 +37,20 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFURL.h>
-#include <CoreFoundation/CFBundlePriv.h>
-#include <pthread.h>
+#include <CoreFoundation/CFLocale.h>
+#include <CoreFoundation/CFDate.h>
 #include <math.h>
 
 
 
-#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 #include <CoreFoundation/CFMachPort.h>
 #endif
 
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || TARGET_OS_WIN32
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFSocket.h>
+#include <CoreFoundation/CFBundlePriv.h>
 #endif
 
 CF_EXTERN_C_BEGIN
@@ -63,15 +64,12 @@ CF_EXPORT const char **_CFGetProcessPath(void);
 CF_EXPORT const char **_CFGetProgname(void);
 
 
-#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 CF_EXPORT CFRunLoopRef CFRunLoopGetMain(void);
 CF_EXPORT SInt32 CFRunLoopRunSpecific(CFRunLoopRef rl, CFStringRef modeName, CFTimeInterval seconds, Boolean returnAfterSourceHandled);
 
 CF_EXPORT void _CFRunLoopSetCurrent(CFRunLoopRef rl);
 
-CF_EXPORT Boolean _CFRunLoopModeContainsMode(CFRunLoopRef rl, CFStringRef modeName, CFStringRef candidateContainedName);
-CF_EXPORT void _CFRunLoopAddModeToMode(CFRunLoopRef rl, CFStringRef modeName, CFStringRef toModeName);
-CF_EXPORT void _CFRunLoopRemoveModeFromMode(CFRunLoopRef rl, CFStringRef modeName, CFStringRef fromModeName);
 CF_EXPORT void _CFRunLoopStopMode(CFRunLoopRef rl, CFStringRef modeName);
 
 CF_EXPORT CFIndex CFMachPortGetQueuedMessageCount(CFMachPortRef mp);
@@ -98,7 +96,6 @@ CFURLRef _CFCreateURLFromFSSpec(CFAllocatorRef alloc, const struct FSSpec *voids
 #endif
 #endif
 
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 enum {
 	kCFURLComponentDecompositionNonHierarchical,
 	kCFURLComponentDecompositionRFC1808, /* use this for RFC 1738 decompositions as well */
@@ -147,7 +144,7 @@ CF_EXPORT
 CFURLRef _CFURLCreateFromComponents(CFAllocatorRef alloc, CFURLComponentDecomposition decompositionType, const void *components);
 #define CFURLCopyComponents _CFURLCopyComponents
 #define CFURLCreateFromComponents _CFURLCreateFromComponents
-#endif
+
 
 
 CF_EXPORT Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, UInt8 *buffer, CFIndex maxBufLen);
@@ -156,8 +153,13 @@ CF_EXPORT Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, UInt8
 CF_EXPORT CFStringRef _CFStringCreateWithBytesNoCopy(CFAllocatorRef alloc, const UInt8 *bytes, CFIndex numBytes, CFStringEncoding encoding, Boolean externalFormat, CFAllocatorRef contentsDeallocator);
 
 /* These return NULL on MacOS 8 */
+// This one leaks the returned string in order to be thread-safe.
+// CF cannot help you in this matter if you continue to use this SPI.
 CF_EXPORT
 CFStringRef CFGetUserName(void);
+
+CF_EXPORT
+CFStringRef CFCopyUserName(void);
 
 CF_EXPORT
 CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName);	/* Pass NULL for the current user's home directory */
@@ -168,7 +170,7 @@ CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName);	/* Pass NULL for the 
 	standard system directories where apps, resources, etc get
 	installed. Because queries can return multiple directories,
 	you get back a CFArray (which you should free when done) of
-	CFStrings. The directories are returned in search path order;
+	CFURLs. The directories are returned in search path order;
 	that is, the first place to look is returned first. This API
 	may return directories that do not exist yet. If NSUserDomain
 	is included in a query, then the results will contain "~" to
@@ -241,12 +243,10 @@ enum {
     CFSystemVersionPuma = 1,            /* 10.1 */
     CFSystemVersionJaguar = 2,          /* 10.2 */
     CFSystemVersionPanther = 3,         /* 10.3 */
-    CFSystemVersionPinot = 3,           /* Deprecated name for Panther */
     CFSystemVersionTiger = 4,           /* 10.4 */
-    CFSystemVersionMerlot = 4,          /* Deprecated name for Tiger */
     CFSystemVersionLeopard = 5,         /* 10.5 */
-    CFSystemVersionChablis = 5,         /* Deprecated name for Leopard */
     CFSystemVersionSnowLeopard = 6,	/* 10.6 */
+    CFSystemVersionLion = 7,		/* 10.7 */
     CFSystemVersionMax,                 /* This should bump up when new entries are added */
 
 };
@@ -445,19 +445,33 @@ CF_EXPORT CFMessagePortRef	CFMessagePortCreateUber(CFAllocatorRef allocator, CFS
 CF_EXPORT void CFMessagePortSetCloneCallout(CFMessagePortRef ms, CFMessagePortCallBack cloneCallout);
 #endif
 
-#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 #include <CoreFoundation/CFMessagePort.h>
 
-CFMessagePortRef CFMessagePortCreatePerProcessLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo);
-CFMessagePortRef CFMessagePortCreatePerProcessRemote(CFAllocatorRef allocator, CFStringRef name, CFIndex pid);
+CF_EXPORT CFMessagePortRef CFMessagePortCreatePerProcessLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo);
+CF_EXPORT CFMessagePortRef CFMessagePortCreatePerProcessRemote(CFAllocatorRef allocator, CFStringRef name, CFIndex pid);
+
+
+typedef CFDataRef (*CFMessagePortCallBackEx)(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info, void *trailer, uintptr_t);
+
+CF_EXPORT CFMessagePortRef _CFMessagePortCreateLocalEx(CFAllocatorRef allocator, CFStringRef name, Boolean perPID, uintptr_t unused, CFMessagePortCallBackEx callout2, CFMessagePortContext *context, Boolean *shouldFreeInfo);
+
 #endif
 
+#if TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX
+#include <pthread.h>
+#else
+// Avoid including the pthread header
+#ifndef HAVE_STRUCT_TIMESPEC
+#define HAVE_STRUCT_TIMESPEC 1
+struct timespec { long tv_sec; long tv_nsec; };
+#endif
+#endif
 
 CF_INLINE CFAbsoluteTime _CFAbsoluteTimeFromFileTimeSpec(struct timespec ts) {
     return (CFAbsoluteTime)((CFTimeInterval)ts.tv_sec - kCFAbsoluteTimeIntervalSince1970) + (1.0e-9 * (CFTimeInterval)ts.tv_nsec);
 }
 
-#if 0
 CF_INLINE struct timespec _CFFileTimeSpecFromAbsoluteTime(CFAbsoluteTime at) {
    struct timespec ts;
    double sec = 0.0;
@@ -466,17 +480,44 @@ CF_INLINE struct timespec _CFFileTimeSpecFromAbsoluteTime(CFAbsoluteTime at) {
        frac += 1.0;
        sec -= 1.0;
    }
+#if TARGET_OS_WIN32
+   ts.tv_sec = (long)(sec + kCFAbsoluteTimeIntervalSince1970);
+#else
    ts.tv_sec = (time_t)(sec + kCFAbsoluteTimeIntervalSince1970);
-   ts.tv_nsec = (long)(NSEC_PER_SEC * frac + 0.5);
+#endif
+   ts.tv_nsec = (long)(1000000000UL * frac + 0.5);
    return ts;
 }
-#endif
+
+CF_EXPORT bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFStringRef keyPath, CFPropertyListRef *value, CFErrorRef *error);
+
 
 #if TARGET_OS_WIN32
+#include <CoreFoundation/CFNotificationCenter.h>
+
 CF_EXPORT CFStringRef _CFGetWindowsAppleAppDataDirectory(void);
 CF_EXPORT CFArrayRef _CFGetWindowsBinaryDirectories(void);
 CF_EXPORT CFStringRef _CFGetWindowsAppleSystemLibraryDirectory(void);
+
+// If your Windows application does not use a CFRunLoop on the main thread (perhaps because it is reserved for handling UI events via Windows API), then call this function to make distributed notifications arrive using a different run loop.
+CF_EXPORT void _CFNotificationCenterSetRunLoop(CFNotificationCenterRef nc, CFRunLoopRef rl);
+
+CF_EXPORT uint32_t /*DWORD*/ _CFRunLoopGetWindowsMessageQueueMask(CFRunLoopRef rl, CFStringRef modeName);
+CF_EXPORT void _CFRunLoopSetWindowsMessageQueueMask(CFRunLoopRef rl, uint32_t /*DWORD*/ mask, CFStringRef modeName);
+
+CF_EXPORT uint32_t /*DWORD*/ _CFRunLoopGetWindowsThreadID(CFRunLoopRef rl);
+
+typedef void (*CFWindowsMessageQueueHandler)(void);
+
+// Run Loop parameter must be the current thread's run loop for the next two functions; you cannot use another thread's run loop
+CF_EXPORT CFWindowsMessageQueueHandler _CFRunLoopGetWindowsMessageQueueHandler(CFRunLoopRef rl, CFStringRef modeName);
+CF_EXPORT void _CFRunLoopSetWindowsMessageQueueHandler(CFRunLoopRef rl, CFStringRef modeName, CFWindowsMessageQueueHandler func);
+
 #endif
+
+
+CF_EXPORT CFArrayRef CFDateFormatterCreateDateFormatsFromTemplates(CFAllocatorRef allocator, CFArrayRef tmplates, CFOptionFlags options, CFLocaleRef locale);
+
 
 CF_EXTERN_C_END
 

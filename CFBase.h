@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBase.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBASE__)
@@ -54,18 +54,78 @@
 #error Both __BIG_ENDIAN__ and __LITTLE_ENDIAN__ cannot be true
 #endif
 
-#if TARGET_OS_WIN32
-#include <stdint.h>
-#include <stdbool.h>
-#elif defined(__GNUC__)
-#include <stdint.h>
-#include <stdbool.h>
+// Some compilers provide the capability to test if certain features are available. This macro provides a compatibility path for other compilers.
+#ifndef __has_feature
+#define __has_feature(x) 0
 #endif
-#include <AvailabilityMacros.h>
 
-#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
-#include <libkern/OSTypes.h>
+#if defined(__GNUC__) || TARGET_OS_WIN32
+#include <stdint.h>
+#include <stdbool.h>
 #endif
+
+#if __BLOCKS__
+#include <Block.h>
+#endif
+
+// The arguments to these availability macros is a version number, e.g. 10_6, 3_0
+#if TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <AvailabilityMacros.h>
+#include <Availability.h>
+
+// Available on MacOS and iOS
+#define CF_AVAILABLE(_mac, _ios) AVAILABLE_MAC_OS_X_VERSION_##_mac##_AND_LATER
+
+// Available on MacOS only
+#define CF_AVAILABLE_MAC(_mac) AVAILABLE_MAC_OS_X_VERSION_##_mac##_AND_LATER
+
+// Available on iOS only
+#define CF_AVAILABLE_IOS(_ios) __OSX_AVAILABLE_STARTING(__MAC_NA, __IPHONE_##_ios)
+
+// Deprecated on either MacOS or iOS, or deprecated on both (check version numbers for details)
+#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) AVAILABLE_MAC_OS_X_VERSION_##_macIntro##_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_##_macDep
+
+// Deprecated on MacOS, unavailable on iOS
+#define CF_DEPRECATED_MAC(_macIntro, _macDep) AVAILABLE_MAC_OS_X_VERSION_##_macIntro##_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_##_macDep
+
+// Unavailable on MacOS, deprecated on iOS
+#define CF_DEPRECATED_IOS(_iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_NA, __MAC_NA, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
+
+#elif (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <AvailabilityMacros.h>
+#include <Availability.h>
+
+#define CF_AVAILABLE(_mac, _ios) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_##_ios)
+#define CF_AVAILABLE_MAC(_mac) __OSX_AVAILABLE_STARTING(__MAC_##_mac, __IPHONE_NA)
+#define CF_AVAILABLE_IOS(_ios) __OSX_AVAILABLE_STARTING(__MAC_NA, __IPHONE_##_ios)
+#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
+#define CF_DEPRECATED_MAC(_macIntro, _macDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_##_macIntro, __MAC_##_macDep, __IPHONE_NA, __IPHONE_NA)
+#define CF_DEPRECATED_IOS(_iosIntro, _iosDep) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_NA, __MAC_NA, __IPHONE_##_iosIntro, __IPHONE_##_iosDep)
+
+#else
+
+#if TARGET_OS_WIN32
+#include <AvailabilityMacros.h>
+#include <Availability.h>
+#endif
+
+#define CF_AVAILABLE(_mac, _ios)
+#define CF_AVAILABLE_MAC(_mac)
+#define CF_AVAILABLE_IOS(_ios)
+#define CF_DEPRECATED(_macIntro, _macDep, _iosIntro, _iosDep)
+#define CF_DEPRECATED_MAC(_macIntro, _macDep)
+#define CF_DEPRECATED_IOS(_iosIntro, _iosDep)
+
+#endif
+
+
+// Older versions of these macro; use IOS versions instead
+#define CF_AVAILABLE_IPHONE(_ios) CF_AVAILABLE_IOS(_ios)
+#define CF_DEPRECATED_IPHONE(_iosIntro, _iosDep) CF_DEPRECATED_IOS(_iosIntro, _iosDep)
+
+  #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+    #include <libkern/OSTypes.h>
+  #endif
 
 #if !defined(__MACTYPES__)
 #if !defined(_OS_OSTYPES_H)
@@ -113,14 +173,20 @@
 #endif
 #endif
 
-#if TARGET_OS_WIN32 && defined(CF_BUILDING_CF) && defined(__cplusplus)
+#if TARGET_OS_WIN32
+
+#if !defined(CF_EXPORT)
+#if defined(CF_BUILDING_CF) && defined(__cplusplus)
 #define CF_EXPORT extern "C" __declspec(dllexport) 
-#elif TARGET_OS_WIN32 && defined(CF_BUILDING_CF) && !defined(__cplusplus)
+#elif defined(CF_BUILDING_CF) && !defined(__cplusplus)
 #define CF_EXPORT extern __declspec(dllexport) 
-#elif TARGET_OS_WIN32 && defined(__cplusplus)
+#elif defined(__cplusplus)
 #define CF_EXPORT extern "C" __declspec(dllimport) 
-#elif TARGET_OS_WIN32
+#else
 #define CF_EXPORT extern __declspec(dllimport) 
+#endif
+#endif
+
 #else
 #define CF_EXPORT extern
 #endif
@@ -159,13 +225,28 @@ CF_EXTERN_C_BEGIN
     #endif
 #endif
 
-// Marks functions which return a CF type that needs to be released by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is the rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed.
-#if defined(__clang__)
+// Marks functions which return a CF type that needs to be released by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is to rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed.
+// This macro is ONLY to be used in exceptional circumstances, not to annotate functions which conform to the CoreFoundation naming rules.
+#if __has_feature(attribute_cf_returns_retained)
 #define CF_RETURNS_RETAINED __attribute__((cf_returns_retained))
 #else
 #define CF_RETURNS_RETAINED
 #endif
 
+// Marks functions which return a CF type that may need to be retained by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is to rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed. 
+// This macro is ONLY to be used in exceptional circumstances, not to annotate functions which conform to the CoreFoundation naming rules.
+#if __has_feature(attribute_cf_returns_not_retained)
+#define CF_RETURNS_NOT_RETAINED __attribute__((cf_returns_not_retained))
+#else
+#define CF_RETURNS_NOT_RETAINED
+#endif
+
+// Marks functions which cannot be used when compiling in automatic reference counting mode.
+#if __has_feature(objc_arc)
+#define CF_AUTOMATED_REFCOUNT_UNAVAILABLE __attribute__((unavailable("not available in automatic reference counting mode")))
+#else
+#define CF_AUTOMATED_REFCOUNT_UNAVAILABLE
+#endif
 
 CF_EXPORT double kCFCoreFoundationVersionNumber;
 
@@ -225,6 +306,8 @@ CF_EXPORT double kCFCoreFoundationVersionNumber;
 #define kCFCoreFoundationVersionNumber10_6_1	550.00
 #define kCFCoreFoundationVersionNumber10_6_2	550.13
 #define kCFCoreFoundationVersionNumber10_6_3	550.19
+#define kCFCoreFoundationVersionNumber10_6_4	550.29
+#define kCFCoreFoundationVersionNumber10_6_5	550.42
 #endif
 
 #if TARGET_OS_IPHONE
@@ -234,6 +317,9 @@ CF_EXPORT double kCFCoreFoundationVersionNumber;
 #define kCFCoreFoundationVersionNumber_iPhoneOS_3_0 478.47
 #define kCFCoreFoundationVersionNumber_iPhoneOS_3_1 478.52
 #define kCFCoreFoundationVersionNumber_iPhoneOS_3_2 478.61
+#define kCFCoreFoundationVersionNumber_iOS_4_0 550.32
+#define kCFCoreFoundationVersionNumber_iOS_4_1 550.38
+#define kCFCoreFoundationVersionNumber_iOS_4_2 550.52
 #endif
 
 typedef unsigned long CFTypeID;
@@ -294,7 +380,6 @@ CF_EXPORT
 CFRange __CFRangeMake(CFIndex loc, CFIndex len);
 
 
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 /* Null representant */
 
 typedef const struct __CFNull * CFNullRef;
@@ -304,8 +389,6 @@ CFTypeID CFNullGetTypeID(void);
 
 CF_EXPORT
 const CFNullRef kCFNull;	// the singleton null instance
-
-#endif
 
 
 /* Allocator API
@@ -341,7 +424,7 @@ const CFAllocatorRef kCFAllocatorMalloc;
    safe to be allocated in non-scanned memory.
  */
 CF_EXPORT
-const CFAllocatorRef kCFAllocatorMallocZone AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+const CFAllocatorRef kCFAllocatorMallocZone;
 
 /* Null allocator which does nothing and allocates no memory. This allocator
    is useful as the "bytesDeallocator" in CFData or "contentsDeallocator"
@@ -444,8 +527,9 @@ void CFRelease(CFTypeRef cf);
 CF_EXPORT
 CFIndex CFGetRetainCount(CFTypeRef cf);
 
+// This function is unavailable in ARC mode. Use CFBridgingRelease instead.
 CF_EXPORT
-CFTypeRef CFMakeCollectable(CFTypeRef cf) AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CFTypeRef CFMakeCollectable(CFTypeRef cf) CF_AUTOMATED_REFCOUNT_UNAVAILABLE;
 
 CF_EXPORT
 Boolean CFEqual(CFTypeRef cf1, CFTypeRef cf2);

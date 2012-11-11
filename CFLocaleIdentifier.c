@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,8 +23,8 @@
 
 /*
     CFLocaleIdentifier.c
-	Copyright (c) 2002-2009, Apple Inc. All rights reserved.
-    Responsibility: Christopher Kane
+	Copyright (c) 2002-2011, Apple Inc. All rights reserved.
+    Responsibility: David Smith
     
     CFLocaleIdentifier.c defines
     - enum value kLocaleIdentifierCStringMax
@@ -71,9 +71,11 @@
 */
 
 #include <CoreFoundation/CFString.h>
+#include <CoreFoundation/CFCalendar.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <unicode/uloc.h>
 #include "CFInternal.h"
 #include "CFLocaleInternal.h"
@@ -1921,7 +1923,20 @@ CFStringRef CFLocaleCreateLocaleIdentifierFromComponents(CFAllocatorRef allocato
     for (CFIndex idx = 0; idx < cnt; idx++) {
 	if (keys[idx]) {
 	    char *key = __CStringFromString(keys[idx]);
-	    char *value = __CStringFromString(values[idx]);
+	    char *value;
+            if (0 == strcmp(key, "kCFLocaleCalendarKey")) {
+                // For interchangeability convenience, we alternatively allow a
+                // calendar object to be passed in, with the alternate key, and
+                // we'll extract the identifier.
+                CFCalendarRef cal = (CFCalendarRef)values[idx];
+                CFStringRef ident = CFCalendarGetIdentifier(cal);
+                value = __CStringFromString(ident);
+                char *oldkey = key;
+                key = strdup("calendar");
+                free(oldkey);
+            } else {
+                value = __CStringFromString(values[idx]);
+            }
 	    UErrorCode status = U_ZERO_ERROR;
 	    uloc_setKeywordValue(key, value, cLocaleID, sizeof(cLocaleID), &status);
 	    free(key);

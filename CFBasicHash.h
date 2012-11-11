@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBasicHash.h
-	Copyright (c) 2008-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
 */
 
 #include <CoreFoundation/CFBase.h>
@@ -45,23 +45,29 @@ enum {
 };
 
 enum {
-    kCFBasicHashHasValues2 = (1UL << 2),
-    kCFBasicHashHasKeys = (1UL << 3),
-    kCFBasicHashHasKeys2 = (1UL << 4),
-    kCFBasicHashHasCounts = (1UL << 5),
-    kCFBasicHashHasOrder = (1UL << 6),
-    kCFBasicHashHasHashCache = (1UL << 7),
+    kCFBasicHashHasKeys = (1UL << 0),
+    kCFBasicHashHasCounts = (1UL << 1),
+    kCFBasicHashHasHashCache = (1UL << 2),
 
-    kCFBasicHashStrongValues = (1UL << 9),
-    kCFBasicHashStrongValues2 = (1UL << 10),
-    kCFBasicHashStrongKeys = (1UL << 11),
-    kCFBasicHashStrongKeys2 = (1UL << 12),
+    kCFBasicHashIntegerValues = (1UL << 6),
+    kCFBasicHashIntegerKeys = (1UL << 7),
+
+    kCFBasicHashStrongValues = (1UL << 8),
+    kCFBasicHashStrongKeys = (1UL << 9),
+
+    kCFBasicHashWeakValues = (1UL << 10),
+    kCFBasicHashWeakKeys = (1UL << 11),
+
+    kCFBasicHashIndirectKeys = (1UL << 12),
 
     kCFBasicHashLinearHashing = (__kCFBasicHashLinearHashingValue << 13), // bits 13-14
     kCFBasicHashDoubleHashing = (__kCFBasicHashDoubleHashingValue << 13),
     kCFBasicHashExponentialHashing = (__kCFBasicHashExponentialHashingValue << 13),
 
     kCFBasicHashAggressiveGrowth = (1UL << 15),
+    
+    kCFBasicHashCompactableValues = (1UL << 16),
+    kCFBasicHashCompactableKeys = (1UL << 17),
 };
 
 // Note that for a hash table without keys, the value is treated as the key,
@@ -70,19 +76,18 @@ enum {
 typedef struct {
     CFIndex idx;
     uintptr_t weak_key;
-    uintptr_t weak_key2;
     uintptr_t weak_value;
-    uintptr_t weak_value2;
     uintptr_t count;
-    uintptr_t order;
 } CFBasicHashBucket;
 
 typedef struct __CFBasicHash *CFBasicHashRef;
+typedef const struct __CFBasicHash *CFConstBasicHashRef;
 
 // Bit 6 in the CF_INFO_BITS of the CFRuntimeBase inside the CFBasicHashRef is the "is immutable" bit
-CF_INLINE Boolean CFBasicHashIsMutable(CFBasicHashRef ht) {
+CF_INLINE Boolean CFBasicHashIsMutable(CFConstBasicHashRef ht) {
     return __CFBitfieldGetValue(((CFRuntimeBase *)ht)->_cfinfo[CF_INFO_BITS], 6, 6) ? false : true;
 }
+
 CF_INLINE void CFBasicHashMakeImmutable(CFBasicHashRef ht) {
     __CFBitfieldSetValue(((CFRuntimeBase *)ht)->_cfinfo[CF_INFO_BITS], 6, 6, 1);
 }
@@ -90,64 +95,57 @@ CF_INLINE void CFBasicHashMakeImmutable(CFBasicHashRef ht) {
 
 typedef struct __CFBasicHashCallbacks CFBasicHashCallbacks;
 
-typedef uintptr_t (*CFBasicHashCallbackType)(CFBasicHashRef ht, uint8_t op, uintptr_t a1, uintptr_t a2, const CFBasicHashCallbacks *cb);
-
-enum {
-    kCFBasicHashCallbackOpCopyCallbacks = 8,	// Return new value; REQUIRED
-    kCFBasicHashCallbackOpFreeCallbacks = 9,	// Return 0; REQUIRED
-
-    kCFBasicHashCallbackOpRetainValue = 10,	// Return first arg or new value; REQUIRED
-    kCFBasicHashCallbackOpRetainValue2 = 11,	// Return first arg or new value
-    kCFBasicHashCallbackOpRetainKey = 12,	// Return first arg or new key; REQUIRED
-    kCFBasicHashCallbackOpRetainKey2 = 13,	// Return first arg or new key
-    kCFBasicHashCallbackOpReleaseValue = 14,	// Return 0; REQUIRED
-    kCFBasicHashCallbackOpReleaseValue2 = 15,	// Return 0
-    kCFBasicHashCallbackOpReleaseKey = 16,	// Return 0; REQUIRED
-    kCFBasicHashCallbackOpReleaseKey2 = 17,	// Return 0
-    kCFBasicHashCallbackOpValueEqual = 18,	// Return 0 or 1; REQUIRED
-    kCFBasicHashCallbackOpValue2Equal = 19,	// Return 0 or 1
-    kCFBasicHashCallbackOpKeyEqual = 20,	// Return 0 or 1; REQUIRED
-    kCFBasicHashCallbackOpKey2Equal = 21,	// Return 0 or 1
-    kCFBasicHashCallbackOpHashKey = 22,		// Return hash code; REQUIRED
-    kCFBasicHashCallbackOpHashKey2 = 23,	// Return hash code
-    kCFBasicHashCallbackOpDescribeValue = 24,	// Return retained CFStringRef; REQUIRED
-    kCFBasicHashCallbackOpDescribeValue2 = 25,	// Return retained CFStringRef
-    kCFBasicHashCallbackOpDescribeKey = 26,	// Return retained CFStringRef; REQUIRED
-    kCFBasicHashCallbackOpDescribeKey2 = 27,	// Return retained CFStringRef
-};
-
 struct __CFBasicHashCallbacks {
-    CFBasicHashCallbackType func; // must not be NULL
+    CFBasicHashCallbacks *(*copyCallbacks)(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb);	// Return new value
+    void (*freeCallbacks)(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb);
+    uintptr_t (*retainValue)(CFConstBasicHashRef ht, uintptr_t stack_value);	// Return 2nd arg or new value
+    uintptr_t (*retainKey)(CFConstBasicHashRef ht, uintptr_t stack_key);	// Return 2nd arg or new key
+    void (*releaseValue)(CFConstBasicHashRef ht, uintptr_t stack_value);
+    void (*releaseKey)(CFConstBasicHashRef ht, uintptr_t stack_key);
+    Boolean (*equateValues)(CFConstBasicHashRef ht, uintptr_t coll_value1, uintptr_t stack_value2); // 2nd arg is in-collection value, 3rd arg is probe parameter OR in-collection value for a second collection
+    Boolean (*equateKeys)(CFConstBasicHashRef ht, uintptr_t coll_key1, uintptr_t stack_key2); // 2nd arg is in-collection key, 3rd arg is probe parameter
+    uintptr_t (*hashKey)(CFConstBasicHashRef ht, uintptr_t stack_key);
+    uintptr_t (*getIndirectKey)(CFConstBasicHashRef ht, uintptr_t coll_value);	// Return key; 2nd arg is in-collection value
+    CFStringRef (*copyValueDescription)(CFConstBasicHashRef ht, uintptr_t stack_value);
+    CFStringRef (*copyKeyDescription)(CFConstBasicHashRef ht, uintptr_t stack_key);
     uintptr_t context[0]; // variable size; any pointers in here must remain valid as long as the CFBasicHash
 };
 
-extern const CFBasicHashCallbacks CFBasicHashNullCallbacks;
-extern const CFBasicHashCallbacks CFBasicHashStandardCallbacks;
+Boolean CFBasicHashHasStrongValues(CFConstBasicHashRef ht);
+Boolean CFBasicHashHasStrongKeys(CFConstBasicHashRef ht);
 
+uint16_t CFBasicHashGetSpecialBits(CFConstBasicHashRef ht);
+uint16_t CFBasicHashSetSpecialBits(CFBasicHashRef ht, uint16_t bits);
 
-CFOptionFlags CFBasicHashGetFlags(CFBasicHashRef ht);
-CFIndex CFBasicHashGetNumBuckets(CFBasicHashRef ht);
-CFIndex CFBasicHashGetCapacity(CFBasicHashRef ht);
+CFOptionFlags CFBasicHashGetFlags(CFConstBasicHashRef ht);
+CFIndex CFBasicHashGetNumBuckets(CFConstBasicHashRef ht);
+CFIndex CFBasicHashGetCapacity(CFConstBasicHashRef ht);
 void CFBasicHashSetCapacity(CFBasicHashRef ht, CFIndex capacity);
 
-CFIndex CFBasicHashGetCount(CFBasicHashRef ht);
-CFBasicHashBucket CFBasicHashGetBucket(CFBasicHashRef ht, CFIndex idx);
-CFBasicHashBucket CFBasicHashFindBucket(CFBasicHashRef ht, uintptr_t stack_key);
-CFIndex CFBasicHashGetCountOfKey(CFBasicHashRef ht, uintptr_t stack_key);
-CFIndex CFBasicHashGetCountOfValue(CFBasicHashRef ht, uintptr_t stack_value);
-Boolean CFBasicHashesAreEqual(CFBasicHashRef ht1, CFBasicHashRef ht2);
-void CFBasicHashApply(CFBasicHashRef ht, Boolean (^block)(CFBasicHashBucket));
-void CFBasicHashGetElements(CFBasicHashRef ht, CFIndex bufferslen, uintptr_t *weak_values, uintptr_t *weak_values2, uintptr_t *weak_keys, uintptr_t *weak_keys2);
+const CFBasicHashCallbacks *CFBasicHashGetCallbacks(CFConstBasicHashRef ht);
+CFIndex CFBasicHashGetCount(CFConstBasicHashRef ht);
+CFBasicHashBucket CFBasicHashGetBucket(CFConstBasicHashRef ht, CFIndex idx);
+CFBasicHashBucket CFBasicHashFindBucket(CFConstBasicHashRef ht, uintptr_t stack_key);
+CFIndex CFBasicHashGetCountOfKey(CFConstBasicHashRef ht, uintptr_t stack_key);
+CFIndex CFBasicHashGetCountOfValue(CFConstBasicHashRef ht, uintptr_t stack_value);
+Boolean CFBasicHashesAreEqual(CFConstBasicHashRef ht1, CFConstBasicHashRef ht2);
+void CFBasicHashApply(CFConstBasicHashRef ht, Boolean (^block)(CFBasicHashBucket));
+void CFBasicHashApplyIndexed(CFConstBasicHashRef ht, CFRange range, Boolean (^block)(CFBasicHashBucket));
+void CFBasicHashGetElements(CFConstBasicHashRef ht, CFIndex bufferslen, uintptr_t *weak_values, uintptr_t *weak_keys);
 
-void CFBasicHashAddValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value);
+Boolean CFBasicHashAddValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value);
 void CFBasicHashReplaceValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value);
 void CFBasicHashSetValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value);
 CFIndex CFBasicHashRemoveValue(CFBasicHashRef ht, uintptr_t stack_key);
+CFIndex CFBasicHashRemoveValueAtIndex(CFBasicHashRef ht, CFIndex idx);
 void CFBasicHashRemoveAllValues(CFBasicHashRef ht);
 
-size_t CFBasicHashGetSize(CFBasicHashRef ht, Boolean total);
+Boolean CFBasicHashAddIntValueAndInc(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t int_value);
+void CFBasicHashRemoveIntValueAndDec(CFBasicHashRef ht, uintptr_t int_value);
 
-CFStringRef CFBasicHashCopyDescription(CFBasicHashRef ht, Boolean detailed, CFStringRef linePrefix, CFStringRef entryLinePrefix, Boolean describeElements);
+size_t CFBasicHashGetSize(CFConstBasicHashRef ht, Boolean total);
+
+CFStringRef CFBasicHashCopyDescription(CFConstBasicHashRef ht, Boolean detailed, CFStringRef linePrefix, CFStringRef entryLinePrefix, Boolean describeElements);
 
 CFTypeID CFBasicHashGetTypeID(void);
 
@@ -155,11 +153,12 @@ extern Boolean __CFBasicHashEqual(CFTypeRef cf1, CFTypeRef cf2);
 extern CFHashCode __CFBasicHashHash(CFTypeRef cf);
 extern CFStringRef __CFBasicHashCopyDescription(CFTypeRef cf);
 extern void __CFBasicHashDeallocate(CFTypeRef cf);
-extern unsigned long __CFBasicHashFastEnumeration(CFBasicHashRef ht, struct __objcFastEnumerationStateEquivalent2 *state, void *stackbuffer, unsigned long count);
+extern unsigned long __CFBasicHashFastEnumeration(CFConstBasicHashRef ht, struct __objcFastEnumerationStateEquivalent2 *state, void *stackbuffer, unsigned long count);
 
 // creation functions create mutable CFBasicHashRefs
 CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, const CFBasicHashCallbacks *cb);
-CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFBasicHashRef ht);
+CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFConstBasicHashRef ht);
+void __CFBasicHashSetCallbacks(CFBasicHashRef ht, const CFBasicHashCallbacks *cb);
 
 
 CF_EXTERN_C_END

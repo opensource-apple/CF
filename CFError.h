@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFError.h
-	Copyright (c) 2006-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2006-2011, Apple Inc. All rights reserved.
 */
 
 /*!
@@ -69,25 +69,27 @@ typedef struct __CFError * CFErrorRef;
 	    Returns the type identifier of all CFError instances.
 */
 CF_EXPORT
-CFTypeID CFErrorGetTypeID(void) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFTypeID CFErrorGetTypeID(void) CF_AVAILABLE(10_5, 2_0);
 
 
 // Predefined domains; value of "code" will correspond to preexisting values in these domains.
-CF_EXPORT const CFStringRef kCFErrorDomainPOSIX		    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
-CF_EXPORT const CFStringRef kCFErrorDomainOSStatus	    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
-CF_EXPORT const CFStringRef kCFErrorDomainMach		    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
-CF_EXPORT const CFStringRef kCFErrorDomainCocoa		    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CF_EXPORT const CFStringRef kCFErrorDomainPOSIX		    CF_AVAILABLE(10_5, 2_0);
+CF_EXPORT const CFStringRef kCFErrorDomainOSStatus	    CF_AVAILABLE(10_5, 2_0);
+CF_EXPORT const CFStringRef kCFErrorDomainMach		    CF_AVAILABLE(10_5, 2_0);
+CF_EXPORT const CFStringRef kCFErrorDomainCocoa		    CF_AVAILABLE(10_5, 2_0);
 
 // Keys in userInfo for localizable, end-user presentable error messages. At minimum provide one of first two; ideally provide all three.
-CF_EXPORT const CFStringRef kCFErrorLocalizedDescriptionKey         AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // Key to identify the end user-presentable description in userInfo.
-CF_EXPORT const CFStringRef kCFErrorLocalizedFailureReasonKey       AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // Key to identify the end user-presentable failure reason in userInfo.
-CF_EXPORT const CFStringRef kCFErrorLocalizedRecoverySuggestionKey  AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // Key to identify the end user-presentable recovery suggestion in userInfo.
+CF_EXPORT const CFStringRef kCFErrorLocalizedDescriptionKey         CF_AVAILABLE(10_5, 2_0);   // Key to identify the end user-presentable description in userInfo.
+CF_EXPORT const CFStringRef kCFErrorLocalizedFailureReasonKey       CF_AVAILABLE(10_5, 2_0);   // Key to identify the end user-presentable failure reason in userInfo.
+CF_EXPORT const CFStringRef kCFErrorLocalizedRecoverySuggestionKey  CF_AVAILABLE(10_5, 2_0);   // Key to identify the end user-presentable recovery suggestion in userInfo.
 
 // If you do not have localizable error strings, you can provide a value for this key instead.
-CF_EXPORT const CFStringRef kCFErrorDescriptionKey                  AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // Key to identify the description in the userInfo dictionary. Should be a complete sentence if possible. Should not contain domain name or error code.
+CF_EXPORT const CFStringRef kCFErrorDescriptionKey                  CF_AVAILABLE(10_5, 2_0);   // Key to identify the description in the userInfo dictionary. Should be a complete sentence if possible. Should not contain domain name or error code.
 
 // Other keys in userInfo.
-CF_EXPORT const CFStringRef kCFErrorUnderlyingErrorKey              AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // Key to identify the underlying error in userInfo.
+CF_EXPORT const CFStringRef kCFErrorUnderlyingErrorKey              CF_AVAILABLE(10_5, 2_0);   // Key to identify the underlying error in userInfo.
+CF_EXPORT const CFStringRef kCFErrorURLKey                          CF_AVAILABLE(10_7, 5_0);    // Key to identify associated URL in userInfo.  Typically one of this or kCFErrorFilePathKey is provided.
+CF_EXPORT const CFStringRef kCFErrorFilePathKey                     CF_AVAILABLE(10_7, 5_0);    // Key to identify associated file path in userInfo.    Typically one of this or kCFErrorURLKey is provided.
 
 
 /*!
@@ -102,7 +104,7 @@ CF_EXPORT const CFStringRef kCFErrorUnderlyingErrorKey              AVAILABLE_MA
 	@result A reference to the new CFError.
 */
 CF_EXPORT
-CFErrorRef CFErrorCreate(CFAllocatorRef allocator, CFStringRef domain, CFIndex code, CFDictionaryRef userInfo) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFErrorRef CFErrorCreate(CFAllocatorRef allocator, CFStringRef domain, CFIndex code, CFDictionaryRef userInfo) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorCreateWithUserInfoKeysAndValues
@@ -117,7 +119,7 @@ CFErrorRef CFErrorCreate(CFAllocatorRef allocator, CFStringRef domain, CFIndex c
 	@result A reference to the new CFError. numUserInfoValues CF types are gathered from each of userInfoKeys and userInfoValues to create the userInfo dictionary.
 */
 CF_EXPORT
-CFErrorRef CFErrorCreateWithUserInfoKeysAndValues(CFAllocatorRef allocator, CFStringRef domain, CFIndex code, const void *const *userInfoKeys, const void *const *userInfoValues, CFIndex numUserInfoValues) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFErrorRef CFErrorCreateWithUserInfoKeysAndValues(CFAllocatorRef allocator, CFStringRef domain, CFIndex code, const void *const *userInfoKeys, const void *const *userInfoValues, CFIndex numUserInfoValues) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorGetDomain
@@ -126,7 +128,7 @@ CFErrorRef CFErrorCreateWithUserInfoKeysAndValues(CFAllocatorRef allocator, CFSt
 	@result The error domain of the CFError. Since this is a "Get" function, the caller shouldn't CFRelease the return value.
 */
 CF_EXPORT
-CFStringRef CFErrorGetDomain(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFStringRef CFErrorGetDomain(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorGetCode
@@ -135,7 +137,7 @@ CFStringRef CFErrorGetDomain(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND
 	@result The error code of the CFError (not an error return for the current call).
 */
 CF_EXPORT
-CFIndex CFErrorGetCode(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFIndex CFErrorGetCode(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorCopyUserInfo
@@ -145,7 +147,7 @@ CFIndex CFErrorGetCode(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER
 	@result The user info of the CFError.
 */
 CF_EXPORT
-CFDictionaryRef CFErrorCopyUserInfo(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFDictionaryRef CFErrorCopyUserInfo(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorCopyDescription
@@ -159,7 +161,7 @@ CFDictionaryRef CFErrorCopyUserInfo(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_1
 	@result A CFString with human-presentable description of the CFError. Never NULL.
 */
 CF_EXPORT
-CFStringRef CFErrorCopyDescription(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFStringRef CFErrorCopyDescription(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorCopyFailureReason
@@ -171,7 +173,7 @@ CFStringRef CFErrorCopyDescription(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10
 	@result A CFString with the localized, end-user presentable failure reason of the CFError, or NULL. 
 */
 CF_EXPORT
-CFStringRef CFErrorCopyFailureReason(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFStringRef CFErrorCopyFailureReason(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 /*!
 	@function CFErrorCopyRecoverySuggestion
@@ -183,7 +185,7 @@ CFStringRef CFErrorCopyFailureReason(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_
 	@result A CFString with the localized, end-user presentable recovery suggestion of the CFError, or NULL. 
 */
 CF_EXPORT
-CFStringRef CFErrorCopyRecoverySuggestion(CFErrorRef err) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFStringRef CFErrorCopyRecoverySuggestion(CFErrorRef err) CF_AVAILABLE(10_5, 2_0);
 
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,10 +22,9 @@
  */
 
 /*	CFCalendar.c
-	Copyright 2004-2004, Apple Computer, Inc. All rights reserved.
+	Copyright (c) 2004-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
-
 
 
 #include <CoreFoundation/CFCalendar.h>
@@ -84,7 +83,7 @@ static const CFRuntimeClass __CFCalendarClass = {
     __CFCalendarCopyDescription
 };
 
-static void __CFCalendarInitialize(void) {
+__private_extern__ void __CFCalendarInitialize(void) {
     __kCFCalendarTypeID = _CFRuntimeRegisterClass(&__CFCalendarClass);
 }
 
@@ -120,7 +119,7 @@ __private_extern__ UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID
     CFStringGetCharacters(tznam, CFRangeMake(0, cnt), (UniChar *)ubuffer);
 
     UErrorCode status = U_ZERO_ERROR;
-    UCalendar *cal = ucal_open(ubuffer, cnt, cstr, UCAL_TRADITIONAL, &status);
+    UCalendar *cal = ucal_open(ubuffer, cnt, cstr, UCAL_DEFAULT, &status);
     if (calendarID) CFRelease(localeID);
     return cal;
 }
@@ -298,6 +297,9 @@ static UCalendarDateFields __CFCalendarGetICUFieldCode(CFCalendarUnit unit) {
     case kCFCalendarUnitMinute: return UCAL_MINUTE;
     case kCFCalendarUnitSecond: return UCAL_SECOND;
     case kCFCalendarUnitWeek: return UCAL_WEEK_OF_YEAR;
+    case kCFCalendarUnitWeekOfYear: return UCAL_WEEK_OF_YEAR;
+    case kCFCalendarUnitWeekOfMonth: return UCAL_WEEK_OF_MONTH;
+    case kCFCalendarUnitYearForWeekOfYear: return UCAL_YEAR_WOY;
     case kCFCalendarUnitWeekday: return UCAL_DAY_OF_WEEK;
     case kCFCalendarUnitWeekdayOrdinal: return UCAL_DAY_OF_WEEK_IN_MONTH;
     }
@@ -317,6 +319,7 @@ static UCalendarDateFields __CFCalendarGetICUFieldCodeFromChar(char ch) {
     case 'S': return UCAL_MILLISECOND;
     case 'w': return UCAL_WEEK_OF_YEAR;
     case 'W': return UCAL_WEEK_OF_MONTH;
+    case 'Y': return UCAL_YEAR_WOY;
     case 'E': return UCAL_DAY_OF_WEEK;
     case 'D': return UCAL_DAY_OF_YEAR;
     case 'F': return UCAL_DAY_OF_WEEK_IN_MONTH;
@@ -326,18 +329,20 @@ static UCalendarDateFields __CFCalendarGetICUFieldCodeFromChar(char ch) {
     return (UCalendarDateFields)-1;
 }
 
-static UCalendarDateFields __CFCalendarGetCalendarUnitFromChar(char ch) {
+static CFCalendarUnit __CFCalendarGetCalendarUnitFromChar(char ch) {
     switch (ch) {
-    case 'G': return (UCalendarDateFields)kCFCalendarUnitEra;
-    case 'y': return (UCalendarDateFields)kCFCalendarUnitYear;
-    case 'M': return (UCalendarDateFields)kCFCalendarUnitMonth;
-    case 'd': return (UCalendarDateFields)kCFCalendarUnitDay;
-    case 'H': return (UCalendarDateFields)kCFCalendarUnitHour;
-    case 'm': return (UCalendarDateFields)kCFCalendarUnitMinute;
-    case 's': return (UCalendarDateFields)kCFCalendarUnitSecond;
-    case 'w': return (UCalendarDateFields)kCFCalendarUnitWeek;
-    case 'E': return (UCalendarDateFields)kCFCalendarUnitWeekday;
-    case 'F': return (UCalendarDateFields)kCFCalendarUnitWeekdayOrdinal;
+    case 'G': return kCFCalendarUnitEra;
+    case 'y': return kCFCalendarUnitYear;
+    case 'M': return kCFCalendarUnitMonth;
+    case 'd': return kCFCalendarUnitDay;
+    case 'H': return kCFCalendarUnitHour;
+    case 'm': return kCFCalendarUnitMinute;
+    case 's': return kCFCalendarUnitSecond;
+    case 'w': return kCFCalendarUnitWeekOfYear;
+    case 'W': return kCFCalendarUnitWeekOfMonth;
+    case 'Y': return kCFCalendarUnitYearForWeekOfYear;
+    case 'E': return kCFCalendarUnitWeekday;
+    case 'F': return kCFCalendarUnitWeekdayOrdinal;
     }
     return (UCalendarDateFields)-1;
 }
@@ -383,7 +388,11 @@ static void __CFCalendarSetToFirstInstant(CFCalendarRef calendar, CFCalendarUnit
     ucal_setMillis(calendar->_cal, udate, &status);
     int target_era = INT_MIN;
     switch (unit) { // largest to smallest, we set the fields to their minimum value
+    case kCFCalendarUnitYearForWeekOfYear:;
+        ucal_set(calendar->_cal, UCAL_WEEK_OF_YEAR, ucal_getLimit(calendar->_cal, UCAL_WEEK_OF_YEAR, UCAL_ACTUAL_MINIMUM, &status));
     case kCFCalendarUnitWeek:
+    case kCFCalendarUnitWeekOfMonth:;
+    case kCFCalendarUnitWeekOfYear:;
 	{
 	// reduce to first day of week, then reduce the rest of the day
         int32_t goal = ucal_getAttribute(calendar->_cal, UCAL_FIRST_DAY_OF_WEEK);
@@ -451,9 +460,11 @@ static Boolean __validUnits(CFCalendarUnit smaller, CFCalendarUnit bigger) {
 	if (kCFCalendarUnitMinute == smaller) return false;	// this causes CFIndex overflow in range.length
 	if (kCFCalendarUnitSecond == smaller) return false;	// this causes CFIndex overflow in range.length
 	return true;
+    case kCFCalendarUnitYearForWeekOfYear:
     case kCFCalendarUnitYear:
 	if (kCFCalendarUnitEra == smaller) return false;
 	if (kCFCalendarUnitYear == smaller) return false;
+        if (kCFCalendarUnitYearForWeekOfYear == smaller) return false;
 	if (kCFCalendarUnitWeekday == smaller) return false;
 	return true;
     case kCFCalendarUnitMonth:
@@ -475,6 +486,8 @@ static Boolean __validUnits(CFCalendarUnit smaller, CFCalendarUnit bigger) {
 	if (kCFCalendarUnitSecond == smaller) return true;
 	return false;
     case kCFCalendarUnitWeek:
+    case kCFCalendarUnitWeekOfMonth:
+    case kCFCalendarUnitWeekOfYear:
 	if (kCFCalendarUnitWeekday == smaller) return true;
 	if (kCFCalendarUnitDay == smaller) return true;
 	if (kCFCalendarUnitHour == smaller) return true;

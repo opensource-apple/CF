@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*	CFStream.c
-	Copyright (c) 2000-2009, Apple Inc. All rights reserved.
-	Responsibility: Becky Willrich
+	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
+	Responsibility: John Iarocci
 */
 
 #include <CoreFoundation/CFRuntime.h>
@@ -33,8 +33,13 @@
 #include "CFInternal.h"
 #include <stdio.h>
 
+#if defined(DEBUG)
+#include <assert.h>
+#endif
+
 struct CFStreamAux {
 	CFSpinLock_t streamLock;
+    CFArrayRef previousRunloopsAndModes;
 };
 
 enum {
@@ -76,15 +81,26 @@ __private_extern__ CFStreamStatus _CFStreamGetStatus(struct _CFStream *stream);
 static Boolean _CFStreamRemoveRunLoopAndModeFromArray(CFMutableArrayRef runLoopsAndModes, CFRunLoopRef rl, CFStringRef mode);
 static void _wakeUpRunLoop(struct _CFStream *stream);
 
+CF_INLINE void checkRLMArray(CFArrayRef arr)
+{
+#if defined(DEBUG)
+    assert(arr == NULL || (CFArrayGetCount(arr) % 2) == 0);
+#endif
+}
+
 CF_INLINE void* _CFStreamCreateReserved(CFAllocatorRef alloc) {
 	struct CFStreamAux* aux = (struct CFStreamAux*) CFAllocatorAllocate(alloc, sizeof(struct CFStreamAux), 0);
 	if (aux) {
 		aux->streamLock = CFSpinLockInit;
+        aux->previousRunloopsAndModes = NULL;
 	}
 	return aux;
 }
 
 CF_INLINE void _CFStreamDestroyReserved(CFAllocatorRef alloc, void* aux) {
+    struct CFStreamAux* paux = (struct CFStreamAux*) aux;
+    if (paux->previousRunloopsAndModes)
+        CFRelease(paux->previousRunloopsAndModes);
 	CFAllocatorDeallocate(alloc, aux);
 }
 
@@ -665,41 +681,76 @@ static void _cfstream_shared_signalEventSync(void* info)
     }
 }
 
-// Largely cribbed from CFSocket.c; find a run loop where our source is scheduled and wake it up.  We skip the runloop cycling, so we
-// are likely to signal the same run loop over and over again.  Don't know if we should worry about that.
-static void _wakeUpRunLoop(struct _CFStream *stream) {
-    CFRunLoopRef rl = NULL;
-    SInt32 idx, cnt;
-    CFArrayRef rlArray;
-    if (!stream->client || !stream->client->runLoopsAndModes) return;
-    rlArray = stream->client->runLoopsAndModes;
-    cnt = CFArrayGetCount(rlArray);
-    if (cnt == 0) return;
-    if (cnt == 2) {
-        rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
-    } else {
-        rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
-        for (idx = 2; NULL != rl && idx < cnt; idx+=2) {
-            CFRunLoopRef value = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, idx);
-            if (value != rl) rl = NULL;
+/* This routine is to be considered unsafe... */
+static CFArrayRef _CFStreamGetRunLoopsAndModes(struct _CFStream *stream) 
+{
+    CFArrayRef result = NULL;
+    if (stream && stream->client) {
+        _CFStreamLock(stream);
+        struct CFStreamAux* aux = _CFStreamGetAuxRecord(stream);
+        if (aux->previousRunloopsAndModes) {
+            CFRelease(aux->previousRunloopsAndModes);
+            aux->previousRunloopsAndModes = NULL;
         }
-        if (NULL == rl) {	/* more than one different rl, so we must pick one */
-            for (idx = 0; idx < cnt; idx+=2) {
-                CFRunLoopRef value = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, idx);
-                CFStringRef currentMode = CFRunLoopCopyCurrentMode(value);
-                if (NULL != currentMode && CFEqual(currentMode, CFArrayGetValueAtIndex(rlArray, idx+1)) && CFRunLoopIsWaiting(value)) {
-                    CFRelease(currentMode);
-                    rl = value;
-                    break;
-                }
-                if (NULL != currentMode) CFRelease(currentMode);
-            }
-            if (NULL == rl) {	/* didn't choose one above, so choose first */
-                rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
-            }
+        if (stream->client->runLoopsAndModes) {
+            aux->previousRunloopsAndModes = CFArrayCreateCopy(CFGetAllocator(stream), stream->client->runLoopsAndModes);
         }
+        result = aux->previousRunloopsAndModes;
+        checkRLMArray(result);
+        _CFStreamUnlock(stream);
     }
-    if (NULL != rl && CFRunLoopIsWaiting(rl)) CFRunLoopWakeUp(rl);
+    return result;
+}
+
+static CFArrayRef _CFStreamCopyRunLoopsAndModes(struct _CFStream *stream) 
+{
+    CFArrayRef result = NULL;
+    if (stream && stream->client) {
+        _CFStreamLock(stream);
+        if (stream->client->runLoopsAndModes) {
+            result = CFArrayCreateCopy(CFGetAllocator(stream), stream->client->runLoopsAndModes);
+        }
+        checkRLMArray(result);
+        _CFStreamUnlock(stream);
+    }
+    return result;
+}
+
+static void _wakeUpRunLoop(struct _CFStream *stream) {
+    CFArrayRef rlArray = _CFStreamCopyRunLoopsAndModes(stream);
+    if (rlArray) {
+        CFIndex cnt = CFArrayGetCount(rlArray);
+        CFRunLoopRef rl;
+
+        if (cnt == 2) {
+            rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
+        } else if (cnt > 2) {
+            CFIndex idx;
+            rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
+            for (idx = 2; NULL != rl && idx < cnt; idx+=2) {
+                CFRunLoopRef value = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, idx);
+                if (value != rl) rl = NULL;
+            }
+            if (NULL == rl) {	/* more than one different rl, so we must pick one */
+                for (idx = 0; idx < cnt; idx+=2) {
+                    CFRunLoopRef value = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, idx);
+                    CFStringRef currentMode = CFRunLoopCopyCurrentMode(value);
+                    if (NULL != currentMode && CFEqual(currentMode, CFArrayGetValueAtIndex(rlArray, idx+1)) && CFRunLoopIsWaiting(value)) {
+                        CFRelease(currentMode);
+                        rl = value;
+                        break;
+                    }
+                    if (NULL != currentMode) CFRelease(currentMode);
+                }
+                if (NULL == rl) {	/* didn't choose one above, so choose first */
+                    rl = (CFRunLoopRef)CFArrayGetValueAtIndex(rlArray, 0);
+                }
+            }
+        }
+        if (NULL != rl && CFRunLoopIsWaiting(rl)) 
+            CFRunLoopWakeUp(rl);
+    }
+    CFRelease(rlArray);
 }
 
 __private_extern__ void _CFStreamSignalEvent(struct _CFStream *stream, CFStreamEventType event, CFErrorRef error, Boolean synchronousAllowed) {
@@ -1398,12 +1449,15 @@ __private_extern__ void _CFStreamScheduleWithRunLoop(struct _CFStream *stream, C
 		}
     }
     
+    _CFStreamLock(stream);
     if (!stream->client->runLoopsAndModes) {
         stream->client->runLoopsAndModes = CFArrayCreateMutable(CFGetAllocator(stream), 0, &kCFTypeArrayCallBacks);
     }
     CFArrayAppendValue(stream->client->runLoopsAndModes, runLoop);
     CFArrayAppendValue(stream->client->runLoopsAndModes, runLoopMode);
-    
+    checkRLMArray(stream->client->runLoopsAndModes);
+    _CFStreamUnlock(stream);
+
     if (cb->schedule) {
         __CFBitSet(stream->flags, CALLING_CLIENT);
         cb->schedule(stream, runLoop, runLoopMode, _CFStreamGetInfoPointer(stream));
@@ -1480,7 +1534,10 @@ __private_extern__ void _CFStreamUnscheduleFromRunLoop(struct _CFStream *stream,
         __CFSpinUnlock(&sSourceLock);
     }
     
+    _CFStreamLock(stream);
     _CFStreamRemoveRunLoopAndModeFromArray(stream->client->runLoopsAndModes, runLoop, runLoopMode);
+    checkRLMArray(stream->client->runLoopsAndModes);
+    _CFStreamUnlock(stream);
 
     if (cb->unschedule) {
         cb->unschedule(stream, runLoop, runLoopMode, _CFStreamGetInfoPointer(stream));
@@ -1508,17 +1565,20 @@ static void waitForOpen(struct _CFStream *stream) {
     _CFStreamUnscheduleFromRunLoop(stream, runLoop, privateMode);
 }
 
-CF_INLINE CFArrayRef _CFStreamGetRunLoopsAndModes(struct _CFStream *stream) {
-    if (stream->client) return stream->client->runLoopsAndModes;
-    else return NULL;
-}
-
 CF_EXPORT CFArrayRef _CFReadStreamGetRunLoopsAndModes(CFReadStreamRef readStream) {
     return _CFStreamGetRunLoopsAndModes((struct _CFStream *)readStream);
 }
 
 CF_EXPORT CFArrayRef _CFWriteStreamGetRunLoopsAndModes(CFWriteStreamRef writeStream) {
     return _CFStreamGetRunLoopsAndModes((struct _CFStream *)writeStream);
+}
+
+CF_EXPORT CFArrayRef _CFReadStreamCopyRunLoopsAndModes(CFReadStreamRef readStream) {
+    return _CFStreamCopyRunLoopsAndModes((struct _CFStream *)readStream);
+}
+
+CF_EXPORT CFArrayRef _CFWriteStreamCopyRunLoopsAndModes(CFWriteStreamRef writeStream) {
+    return _CFStreamCopyRunLoopsAndModes((struct _CFStream *)writeStream);
 }
 
 CF_EXPORT void CFReadStreamSignalEvent(CFReadStreamRef stream, CFStreamEventType event, const void *error) {
@@ -1558,6 +1618,8 @@ void _CFStreamSourceScheduleWithRunLoop(CFRunLoopSourceRef source, CFMutableArra
     CFIndex count;
     CFRange range;
     
+    checkRLMArray(runLoopsAndModes);
+
     count = CFArrayGetCount(runLoopsAndModes);
     range = CFRangeMake(0, count);
     
@@ -1594,6 +1656,8 @@ void _CFStreamSourceUnscheduleFromRunLoop(CFRunLoopSourceRef source, CFMutableAr
     count = CFArrayGetCount(runLoopsAndModes);
     range = CFRangeMake(0, count);
 	
+    checkRLMArray(runLoopsAndModes);
+
 	while (range.length) {
     
 		CFIndex i = CFArrayGetFirstIndexOfValue(runLoopsAndModes, range, runLoop);
@@ -1629,6 +1693,8 @@ void _CFStreamSourceScheduleWithAllRunLoops(CFRunLoopSourceRef source, CFArrayRe
     if (!source)
         return;
 
+    checkRLMArray(runLoopsAndModes);
+
     for (i = 0; i < count; i += 2) {
 
         // Make sure it's scheduled on all the right loops and modes.
@@ -1648,6 +1714,8 @@ void _CFStreamSourceUncheduleFromAllRunLoops(CFRunLoopSourceRef source, CFArrayR
     if (!source)
         return;
 
+    checkRLMArray(runLoopsAndModes);
+
     for (i = 0; i < count; i += 2) {
 
         // Go through the array removing the source from all loops and modes.
@@ -1662,6 +1730,8 @@ Boolean _CFStreamRemoveRunLoopAndModeFromArray(CFMutableArrayRef runLoopsAndMode
     Boolean found = FALSE;
     
     if (!runLoopsAndModes) return FALSE;
+
+    checkRLMArray(runLoopsAndModes);
 
     cnt = CFArrayGetCount(runLoopsAndModes);
     for (idx = 0; idx + 1 < cnt; idx += 2) {

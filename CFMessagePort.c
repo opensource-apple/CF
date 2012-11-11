@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFMessagePort.c
-	Copyright (c) 1998-2010, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -44,7 +44,6 @@
 
 extern pid_t getpid(void);
 
-
 #define __kCFMessagePortMaxNameLengthMax 255
 
 #if defined(BOOTSTRAP_MAX_NAME_LEN)
@@ -60,8 +59,10 @@ extern pid_t getpid(void);
 
 #define __CFMessagePortMaxDataSize 0x60000000L
 
-
+//#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 DISPATCH_HELPER_FUNCTIONS(mport, CFMessagePort)
+//#pragma GCC diagnostic pop
 
 
 static CFSpinLock_t __CFAllMessagePortsLock = CFSpinLockInit;
@@ -82,6 +83,7 @@ struct __CFMessagePort {
     dispatch_queue_t _dispatchQ;	/* only used by local port */
     CFMessagePortInvalidationCallBack _icallout;
     CFMessagePortCallBack _callout;	/* only used by local port; immutable */
+    CFMessagePortCallBackEx _calloutEx;	/* only used by local port; immutable */
     CFMessagePortContext _context;	/* not part of remote port; immutable; invalidated */
 };
 
@@ -230,7 +232,7 @@ static CFStringRef __CFMessagePortCopyDescription(CFTypeRef cf) {
 	if (NULL == contextDesc) {
 	    contextDesc = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<CFMessagePort context %p>"), ms->_context.info);
 	}
-	void *addr = ms->_callout;
+	void *addr = ms->_callout ? (void *)ms->_callout : (void *)ms->_calloutEx;
 	Dl_info info;
 	const char *name = (dladdr(addr, &info) && info.dli_saddr == addr && info.dli_sname) ? info.dli_sname : "???";
 	result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<CFMessagePort %p [%p]>{locked = %s, valid = %s, remote = %s, name = %@, source = %p, callout = %s (%p), context = %@}"), cf, CFGetAllocator(ms), locked, (__CFMessagePortIsValid(ms) ? "Yes" : "No"), (__CFMessagePortIsRemote(ms) ? "Yes" : "No"), ms->_name, ms->_source, name, addr, (NULL != contextDesc ? contextDesc : CFSTR("<no description>")));
@@ -315,18 +317,25 @@ CFTypeID CFMessagePortGetTypeID(void) {
 static CFStringRef __CFMessagePortSanitizeStringName(CFStringRef name, uint8_t **utfnamep, CFIndex *utfnamelenp) {
     uint8_t *utfname;
     CFIndex utflen;
-    CFStringRef result;
+    CFStringRef result = NULL;
     utfname = CFAllocatorAllocate(kCFAllocatorSystemDefault, __kCFMessagePortMaxNameLength + 1, 0);
     CFStringGetBytes(name, CFRangeMake(0, CFStringGetLength(name)), kCFStringEncodingUTF8, 0, false, utfname, __kCFMessagePortMaxNameLength, &utflen);
     utfname[utflen] = '\0';
-    /* A new string is created, because the original string may have been
-       truncated to the max length, and we want the string name to definitely
-       match the raw UTF-8 chunk that has been created. Also, this is useful
-       to get a constant string in case the original name string was mutable. */
-    result = CFStringCreateWithBytes(kCFAllocatorSystemDefault, utfname, utflen, kCFStringEncodingUTF8, false);
+    if (strlen(utfname) != utflen) {
+	/* PCA 9194709: refuse to sanitize a string with an embedded nul character */
+	CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
+	utfname = NULL;
+	utfnamelenp = 0;
+    } else {
+	/* A new string is created, because the original string may have been
+	   truncated to the max length, and we want the string name to definitely
+	   match the raw UTF-8 chunk that has been created. Also, this is useful
+	   to get a constant string in case the original name string was mutable. */
+	result = CFStringCreateWithBytes(kCFAllocatorSystemDefault, utfname, utflen, kCFStringEncodingUTF8, false);
+    }
     if (NULL != utfnamep) {
 	*utfnamep = utfname;
-    } else {
+    } else if (NULL != utfname) {
 	CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
     }
     if (NULL != utfnamelenp) {
@@ -344,7 +353,7 @@ static void __CFMessagePortInvalidationCallBack(CFMachPortRef port, void *info) 
     if (info) CFMessagePortInvalidate(info);
 }
 
-static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo, Boolean perPID) {
+static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo, Boolean perPID, CFMessagePortCallBackEx calloutEx) {
     CFMessagePortRef memory;
     uint8_t *utfname = NULL;
 
@@ -392,6 +401,7 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
     memory->_dispatchQ = NULL;
     memory->_icallout = NULL;
     memory->_callout = callout;
+    memory->_calloutEx = calloutEx;
     memory->_context.info = NULL;
     memory->_context.retain = NULL;
     memory->_context.release = NULL;
@@ -471,11 +481,15 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 }
 
 CFMessagePortRef CFMessagePortCreateLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo) {
-    return __CFMessagePortCreateLocal(allocator, name, callout, context, shouldFreeInfo, false);
+    return __CFMessagePortCreateLocal(allocator, name, callout, context, shouldFreeInfo, false, NULL);
 }
 
 CFMessagePortRef CFMessagePortCreatePerProcessLocal(CFAllocatorRef allocator, CFStringRef name, CFMessagePortCallBack callout, CFMessagePortContext *context, Boolean *shouldFreeInfo) {
-    return __CFMessagePortCreateLocal(allocator, name, callout, context, shouldFreeInfo, true);
+    return __CFMessagePortCreateLocal(allocator, name, callout, context, shouldFreeInfo, true, NULL);
+}
+
+CFMessagePortRef _CFMessagePortCreateLocalEx(CFAllocatorRef allocator, CFStringRef name, Boolean perPID, uintptr_t unused, CFMessagePortCallBackEx calloutEx, CFMessagePortContext *context, Boolean *shouldFreeInfo) {
+    return __CFMessagePortCreateLocal(allocator, name, NULL, context, shouldFreeInfo, perPID, calloutEx);
 }
 
 static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CFStringRef name, Boolean perPID, CFIndex pid) {
@@ -531,6 +545,7 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
     memory->_dispatchQ = NULL;
     memory->_icallout = NULL;
     memory->_callout = NULL;
+    memory->_calloutEx = NULL;
     ctx.version = 0;
     ctx.info = memory;
     ctx.retain = NULL;
@@ -721,6 +736,7 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 	}
 	ms->_source = NULL;
 	ms->_replyPort = NULL;
+        ms->_port = NULL;
 	__CFMessagePortUnlock(ms);
 
 	__CFSpinLock(&__CFAllMessagePortsLock);
@@ -731,13 +747,6 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 	if (NULL != callout) {
 	    callout(ms, info);
 	}
-	// We already know we're going invalid, don't need this callback
-	// anymore; plus, this solves a reentrancy deadlock; also, this
-	// must be done before the deallocate of the Mach port, to
-	// avoid a race between the notification message which could be
-	// handled in another thread, and this NULL'ing out.
-	CFMachPortSetInvalidationCallBack(port, NULL);
-	// For hashing and equality purposes, cannot get rid of _port here
 	if (!__CFMessagePortIsRemote(ms) && NULL != ms->_context.release) {
 	    ms->_context.release(info);
 	}
@@ -753,6 +762,20 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 	    // Get rid of our extra ref on the Mach port gotten from bs server
 	    mach_port_deallocate(mach_task_self(), CFMachPortGetPort(port));
 	}
+        if (NULL != port) {
+	    // We already know we're going invalid, don't need this callback
+	    // anymore; plus, this solves a reentrancy deadlock; also, this
+	    // must be done before the deallocate of the Mach port, to
+	    // avoid a race between the notification message which could be
+	    // handled in another thread, and this NULL'ing out.
+            CFMachPortSetInvalidationCallBack(port, NULL);
+            if (__CFMessagePortExtraMachRef(ms)) {
+                mach_port_mod_refs(mach_task_self(), CFMachPortGetPort(port), MACH_PORT_RIGHT_SEND, -1);
+                mach_port_mod_refs(mach_task_self(), CFMachPortGetPort(port), MACH_PORT_RIGHT_RECEIVE, -1);
+            }
+            CFMachPortInvalidate(port);
+            CFRelease(port);
+        }
     } else {
 	__CFMessagePortUnlock(ms);
     }
@@ -959,7 +982,7 @@ SInt32 CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef
 
 static mach_port_t __CFMessagePortGetPort(void *info) {
     CFMessagePortRef ms = info;
-    if (!ms->_port) CFLog(kCFLogLevelWarning, CFSTR("*** Warning: A local CFMessagePort (%p) is being put in a run loop or dispatch queue, but it has not been named yet, so this will be a no-op and no messages are going to be received, even if named later."), info);
+    if (!ms->_port && __CFMessagePortIsValid(ms)) CFLog(kCFLogLevelWarning, CFSTR("*** Warning: A local CFMessagePort (%p) is being put in a run loop or dispatch queue, but it has not been named yet, so this will be a no-op and no messages are going to be received, even if named later."), info);
     return ms->_port ? CFMachPortGetPort(ms->_port) : MACH_PORT_NULL;
 }
 
@@ -1024,7 +1047,12 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
 	msgid = CFSwapInt32LittleToHost(MSGP_GET(msgp, msgid));
 	data = CFDataCreateWithBytesNoCopy(allocator, MSGP1_FIELD(msgp, ool).address, MSGP1_FIELD(msgp, ool).size, kCFAllocatorNull);
     }
-    returnData = ms->_callout(ms, msgid, data, context_info);
+    if (ms->_callout) {
+        returnData = ms->_callout(ms, msgid, data, context_info);
+    } else {
+        mach_msg_trailer_t *trailer = (mach_msg_trailer_t *)(((uintptr_t)&(msgp->header) + msgp->header.msgh_size + sizeof(natural_t) - 1) & ~(sizeof(natural_t) - 1));
+        returnData = ms->_calloutEx(ms, msgid, data, context_info, trailer, 0);
+    }
     /* Now, returnData could be (1) NULL, (2) an ordinary data < MAX_INLINE,
     (3) ordinary data >= MAX_INLINE, (4) a no-copy data < MAX_INLINE,
     (5) a no-copy data >= MAX_INLINE. In cases (2) and (4), we send the return

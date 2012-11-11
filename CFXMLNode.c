@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*	CFXMLNode.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
-	Responsibility: Chris Parker
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Responsibility: David Smith
 */
 
 #include <CoreFoundation/CFXMLNode.h>
@@ -133,7 +133,7 @@ static CFHashCode __CFXMLNodeHash(CFTypeRef  cf) {
         return url ? CFHash(url) : (CFHashCode)cf;
     } else {
         CFAssert2(false, __kCFLogAssertion, "%s(): Saw unexpected XML type code %d", __PRETTY_FUNCTION__, node->dataTypeID);
-        return (CFHashCode)cf;
+        return CFHash(cf);
     }
 }
 

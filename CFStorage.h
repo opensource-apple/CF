@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStorage.h
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 */
 /*!
         @header CFStorage
@@ -52,6 +52,11 @@ storage was a single block.
 
 #include <CoreFoundation/CFBase.h>
 
+enum {
+        kCFStorageEnumerationConcurrent = (1UL << 0) /* Allow enumeration to proceed concurrently */
+};
+typedef CFOptionFlags CFStorageEnumerationOptionFlags;
+
 CF_EXTERN_C_BEGIN
 
 /*!
@@ -71,6 +76,21 @@ typedef struct __CFStorage *CFStorageRef;
 typedef void (*CFStorageApplierFunction)(const void *val, void *context);
 
 /*!
+	@typedef CFStorageRangeApplierBlock
+	Type of the callback block used by the apply functions of
+	    CFStorage
+	@param val  A pointer to a range of values, numbering range.length
+	@param range The range of values.  This will always be a subrange of the range
+	    passed to the apply function.  Do not try to modify the contents of the vals pointer, because
+	    there is no guarantee it points into the contents of the CFStorage object.
+	 @param stop An "out" parameter that, if set to true from within the block, indicates that the enumeration may stop.
+ 
+*/
+#if __BLOCKS__
+typedef void (^CFStorageApplierBlock)(const void *vals, CFRange range, bool *stop);
+#endif
+
+/*!
         @function CFStorageGetTypeID
         Returns the type identifier of all CFStorage instances.
 */
@@ -85,8 +105,8 @@ CF_EXPORT CFTypeID CFStorageGetTypeID(void);
 		CFAllocator is used. If this reference is not a valid
 		CFAllocator, the behavior is undefined.
 	@param valueSizeInBytes The size in bytes of each of the elements 
-                to be stored in the storage.  If this value is zero or
-                negative, the result is undefined.
+		to be stored in the storage.  If this value is zero or
+		negative, the result is undefined.
 	@result A reference to the new CFStorage instance.
 */
 CF_EXPORT CFStorageRef CFStorageCreate(CFAllocatorRef alloc, CFIndex valueSizeInBytes);
@@ -94,16 +114,17 @@ CF_EXPORT CFStorageRef CFStorageCreate(CFAllocatorRef alloc, CFIndex valueSizeIn
 /*!
 	@function CFStorageInsertValues
 	Allocates space for range.length values at location range.location.  Use
-        CFStorageReplaceValues() to set those values.
+	 CFStorageReplaceValues() to set those values.
 	@param storage The storage to which the values are to be inserted.
-                If this parameter is not a valid CFStorage, the behavior is undefined.
-	@param range The range of values within the storage to delete. If the
-		range location or end point (defined by the location plus
-		length minus 1) are outside the index space of the storage (0
-		to N inclusive, where N is the count of the storage), the
-		behavior is undefined. If the range length is negative, the
-		behavior is undefined. The range may be empty (length 0),
-		in which case the no values are inserted.
+		If this parameter is not a valid CFStorage, the behavior is undefined.
+	@param range The range of values within the storage to insert. The
+ 		range location must be at least zero and not exceed the count of the storage.
+ 		Values at indexes equal to or greater than the range location have their indexes
+  		increased by the length of the range.  Thus this creates a gap in the storage
+  		 equal to the length of the given range.  If the range length is negative, the
+   		behavior is undefined. The range may be empty (length 0),
+  		 in which case there is no effect.
+   		
 */
 CF_EXPORT void CFStorageInsertValues(CFStorageRef storage, CFRange range);
 
@@ -111,14 +132,14 @@ CF_EXPORT void CFStorageInsertValues(CFStorageRef storage, CFRange range);
 	@function CFStorageDeleteValues
 	Deletes the values of the storage in the specified range.
 	@param storage The storage from which the values are to be deleted.
-                If this parameter is not a valid CFStorage, the behavior is undefined.
+		If this parameter is not a valid CFStorage, the behavior is undefined.
 	@param range The range of values within the storage to delete. If the
 		range location or end point (defined by the location plus
 		length minus 1) are outside the index space of the storage (0
 		to N inclusive, where N is the count of the storage), the
 		behavior is undefined. If the range length is negative, the
 		behavior is undefined. The range may be empty (length 0),
-		in which case the no values are deleted.
+		in which case no values are deleted.
 */
 CF_EXPORT void CFStorageDeleteValues(CFStorageRef storage, CFRange range);
 
@@ -132,23 +153,48 @@ CF_EXPORT void CFStorageDeleteValues(CFStorageRef storage, CFRange range);
 CF_EXPORT CFIndex CFStorageGetCount(CFStorageRef storage);
 
 /*!
-        @function CFStorageGetValueAtIndex
-        Returns a pointer to the specified value.  The pointer is mutable and may be used to
-        get or set the value.
+	@function CFStorageGetValueAtIndex
+		Returns a pointer to the specified value.  The pointer is mutable and may be used to
+		get or set the value.  This is considered to be a mutating function, and so calling this
+		while accessing the CFStorage from another thread is undefined behavior,
+ 		even if you do not set a value.  To access the CFStorage in a non-mutating
+  		manner, use the more efficient CFStorageGetConstValueAtIndex().
 	@param storage The storage to be queried. If this parameter is not a
 		valid CFStorage, the behavior is undefined.
 	@param idx The index of the value to retrieve. If the index is
 		outside the index space of the storage (0 to N-1 inclusive,
 		where N is the count of the storage), the behavior is
 		undefined.
-        @param validConsecutiveValueRange This parameter is a C pointer to a CFRange.
-                If NULL is specified, this argument is ignored; otherwise, the range
-                is set to the range of values that may be accessed via an offset from the result pointer.
-                The range location is set to the index of the lowest consecutive
-                value and the range length is set to the count of consecutive values.
+	@param validConsecutiveValueRange This parameter is a C pointer to a CFRange.
+		If NULL is specified, this argument is ignored; otherwise, the range
+		is set to the range of values that may be accessed via an offset from the result pointer.
+		The range location is set to the index of the lowest consecutive
+		value and the range length is set to the count of consecutive values.
 	@result The value with the given index in the storage.
 */
 CF_EXPORT void *CFStorageGetValueAtIndex(CFStorageRef storage, CFIndex idx, CFRange *validConsecutiveValueRange);
+
+/*!
+	@function CFStorageGetConstValueAtIndex
+		Returns a pointer to the specified value.  The pointer is immutable and may
+		only be used to get the value.  This is not considered to be a mutating function,
+		so it is safe to call this concurrently with other non-mutating functions.  Furthermore,
+ 		this is often more efficient than CFStorageGetValueAtIndex(), so it should be used
+  		in preference to that function when possible.
+	@param storage The storage to be queried. If this parameter is not a
+		valid CFStorage, the behavior is undefined.
+	@param idx The index of the value to retrieve. If the index is
+		outside the index space of the storage (0 to N-1 inclusive,
+		where N is the count of the storage), the behavior is
+		undefined.
+	@param validConsecutiveValueRange This parameter is a C pointer to a CFRange.
+		If NULL is specified, this argument is ignored; otherwise, the range
+		is set to the range of values that may be accessed via an offset from the result pointer.
+		The range location is set to the index of the lowest consecutive
+		value and the range length is set to the count of consecutive values.
+	@result The value with the given index in the storage.
+*/
+CF_EXPORT const void *CFStorageGetConstValueAtIndex(CFStorageRef storage, CFIndex idx, CFRange *validConsecutiveValueRange);
 
 /*!
         @function CFStorageGetValues
@@ -197,6 +243,43 @@ CF_EXPORT void CFStorageGetValues(CFStorageRef storage, CFRange range, void *val
 CF_EXPORT void CFStorageApplyFunction(CFStorageRef storage, CFRange range, CFStorageApplierFunction applier, void *context);
 
 /*!
+	@function CFStorageApplyBlock
+	Enumerates ranges of stored objects with a block.
+ 	@param storage The storage to be operated upon. If this parameter is not
+		a valid CFStorage, the behavior is undefined.
+	 @param range The range of values within the storage to operate on. If the
+		 sum of the range location and length is larger than the
+		 count of the storage, the behavior is undefined.  If the
+		 range location or length is negative, the behavior is undefined.
+  	@param options Options controlling how the enumeration may proceed.
+  	@param applier The callback block.  The block is passed a pointer to
+		a buffer of contiguous objects in the storage, and the range of stored 
+		values represented by the buffer.  If the block modifies the 
+ 		contents of the buffer, the behavior is undefined.  If the block modifies
+  		the contents of the CFStorage, the behavior is undefined.
+ 
+ */
+#if __BLOCKS__
+CF_EXPORT void CFStorageApplyBlock(CFStorageRef storage, CFRange range, CFStorageEnumerationOptionFlags options, CFStorageApplierBlock applier);
+#endif
+
+
+/*!
+	@function CFStorageCreateWithSubrange
+	Returns a new CFStorage that contains a portion of an existing CFStorage.
+ 	@param storage The storage to be operated upon. If this parameter is not
+		a valid CFStorage, the behavior is undefined.
+	 @param range The range of values within the storage to operate on. If the
+		 sum of the range location and length is larger than the
+		 count of the storage, the behavior is undefined.  If the
+		 range location or length is negative, the behavior is undefined.
+ 	 @result A reference to a new CFStorage containing a byte-for-byte copy of
+		 the objects in the range.  This may use copy-on-write techniques
+ 		 to allow efficient implementation.
+ */
+CF_EXPORT CFStorageRef CFStorageCreateWithSubrange(CFStorageRef storage, CFRange range);
+
+/*!
         @function CFStorageReplaceValues
 	Replaces a range of values in the storage.
 	@param storage The storage from which the specified values are to be
@@ -211,10 +294,10 @@ CF_EXPORT void CFStorageApplyFunction(CFStorageRef storage, CFRange range, CFSto
 		in which case the new values are merely inserted at the
 		range location.
 	@param values A C array of the values to be copied into the storage. 
-                The new values in the storage are ordered in the same order 
-                in which they appear in this C array. This parameter may be NULL 
-                if the range length is 0.  This C array is not changed or freed by
-                this function. If this parameter is not a valid pointer to a C array of at least
+		The new values in the storage are ordered in the same order 
+		in which they appear in this C array. This parameter may be NULL 
+		if the range length is 0.  This C array is not changed or freed by
+		this function. If this parameter is not a valid pointer to a C array of at least
 		range length pointers, the behavior is undefined.
 */
 CF_EXPORT void CFStorageReplaceValues(CFStorageRef storage, CFRange range, const void *values);
@@ -223,6 +306,7 @@ CF_EXPORT void CFStorageReplaceValues(CFStorageRef storage, CFRange range, const
 */
 CF_EXPORT CFIndex __CFStorageGetCapacity(CFStorageRef storage);
 CF_EXPORT CFIndex __CFStorageGetValueSize(CFStorageRef storage);
+CF_EXPORT void __CFStorageSetAlwaysFrozen(CFStorageRef storage, bool alwaysFrozen);
 
 
 CF_EXTERN_C_END

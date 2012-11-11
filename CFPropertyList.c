@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPropertyList.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -35,7 +35,9 @@
 #include <CoreFoundation/CFPriv.h>
 #include <CoreFoundation/CFStringEncodingConverter.h>
 #include <CoreFoundation/CFInternal.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <CoreFoundation/CFStream.h>
+#endif
 #include <CoreFoundation/CFCalendar.h>
 #include "CFLocaleInternal.h"
 #include <limits.h>
@@ -44,24 +46,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include <ctype.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#include <CoreFoundation/CFPreferences.h>
-#include <mach-o/dyld.h>
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
-
-
-__private_extern__ bool allowMissingSemi = false;
-
-// Should move this somewhere else
-intptr_t _CFDoOperation(intptr_t code, intptr_t subcode1, intptr_t subcode2) {
-    switch (code) {
-    case 15317: allowMissingSemi = subcode1 ? true : false; break;
-    }
-    return code;
-}
 
 #define PLIST_IX    0
 #define ARRAY_IX    1
@@ -91,13 +75,52 @@ intptr_t _CFDoOperation(intptr_t code, intptr_t subcode1, intptr_t subcode2) {
 #define DOCTYPE_TAG_LENGTH	7
 #define CDSECT_TAG_LENGTH	9
 
+#if DEPLOYMENT_TARGET_MACOSX
+// Set for some exceptional circumstances, like running out of memory
+extern char * __crashreporter_info__;
+
+#define out_of_memory_warning() \
+    do { \
+        __crashreporter_info__ = "CFPropertyList ran out of memory while attempting to allocate temporary storage."; \
+    } while (0)
+#else
+#define out_of_memory_warning() do {} while (0)
+#endif
+
+#if !defined(new_cftype_array)
+#define new_cftype_array(N, C) \
+    size_t N ## _count__ = (C); \
+    if (N ## _count__ > LONG_MAX / sizeof(CFTypeRef)) { \
+        out_of_memory_warning(); \
+        HALT; \
+    } \
+    Boolean N ## _is_stack__ = (N ## _count__ <= 256); \
+    if (N ## _count__ == 0) N ## _count__ = 1; \
+    STACK_BUFFER_DECL(CFTypeRef, N ## _buffer__, N ## _is_stack__ ? N ## _count__ : 1); \
+    if (N ## _is_stack__) memset(N ## _buffer__, 0, N ## _count__ * sizeof(CFTypeRef)); \
+    CFTypeRef * N = N ## _is_stack__ ? N ## _buffer__ : (CFTypeRef *)CFAllocatorAllocate(kCFAllocatorSystemDefaultGCRefZero, (N ## _count__) * sizeof(CFTypeRef), __kCFAllocatorGCScannedMemory); \
+    if (! N) { \
+        out_of_memory_warning(); \
+        HALT; \
+    } \
+    do {} while (0)
+#endif
+
+#if !defined(free_cftype_array)
+#define free_cftype_array(N) \
+    if (! N ## _is_stack__) { \
+        if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFAllocatorDeallocate(kCFAllocatorSystemDefault, N); \
+    } \
+    do {} while (0)
+#endif
+
 // Used to reference an old-style plist parser error inside of a more general XML error
 #define CFPropertyListOldStyleParserErrorKey     CFSTR("kCFPropertyListOldStyleParsingError")
 
 // don't allow _CFKeyedArchiverUID here
 #define __CFAssertIsPList(cf) CFAssert2(CFGetTypeID(cf) == CFStringGetTypeID() || CFGetTypeID(cf) == CFArrayGetTypeID() || CFGetTypeID(cf) == CFBooleanGetTypeID() || CFGetTypeID(cf) == CFNumberGetTypeID() || CFGetTypeID(cf) == CFDictionaryGetTypeID() || CFGetTypeID(cf) == CFDateGetTypeID() || CFGetTypeID(cf) == CFDataGetTypeID(), __kCFLogAssertion, "%s(): %p not of a property list type", __PRETTY_FUNCTION__, cf);
 
-static bool __CFPropertyListIsValidAux(CFPropertyListRef plist, bool recursive, CFMutableSetRef set, CFPropertyListFormat format);
+static bool __CFPropertyListIsValidAux(CFPropertyListRef plist, bool recursive, CFMutableSetRef set, CFPropertyListFormat format, CFStringRef *error);
 
 static CFTypeID stringtype = -1, datatype = -1, numbertype = -1, datetype = -1;
 static CFTypeID booltype = -1, nulltype = -1, dicttype = -1, arraytype = -1, settype = -1;
@@ -132,25 +155,25 @@ static void initStatics() {
     }
 }
 
-__private_extern__ CFErrorRef __CFPropertyListCreateError(CFAllocatorRef allocator, CFIndex code, CFStringRef debugString, ...) {    
+__private_extern__ CFErrorRef __CFPropertyListCreateError(CFIndex code, CFStringRef debugString, ...) {    
     va_list argList;        
     CFErrorRef error = NULL;
     
     if (debugString != NULL) {
         CFStringRef debugMessage = NULL;
         va_start(argList, debugString);
-        debugMessage = CFStringCreateWithFormatAndArguments(allocator, NULL, debugString, argList);
+        debugMessage = CFStringCreateWithFormatAndArguments(kCFAllocatorSystemDefault, NULL, debugString, argList);
         va_end(argList);
     
-        CFMutableDictionaryRef userInfo = CFDictionaryCreateMutable(allocator, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks); 
+        CFMutableDictionaryRef userInfo = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks); 
         CFDictionarySetValue(userInfo, kCFErrorDebugDescriptionKey, debugMessage);
                 
-        error = CFErrorCreate(allocator, kCFErrorDomainCocoa, code, userInfo);
+        error = CFErrorCreate(kCFAllocatorSystemDefault, kCFErrorDomainCocoa, code, userInfo);
         
         CFRelease(debugMessage);
         CFRelease(userInfo);
     } else {
-        error = CFErrorCreate(allocator, kCFErrorDomainCocoa, code, NULL);
+        error = CFErrorCreate(kCFAllocatorSystemDefault, kCFErrorDomainCocoa, code, NULL);
     }
     
     return error;
@@ -160,7 +183,7 @@ CFStringRef __CFPropertyListCopyErrorDebugDescription(CFErrorRef error) {
     CFStringRef result = NULL;
     if (error) {
         CFDictionaryRef userInfo = CFErrorCopyUserInfo(error);
-        result = CFStringCreateCopy(kCFAllocatorDefault, (CFStringRef)CFDictionaryGetValue(userInfo, kCFErrorDebugDescriptionKey));
+        result = CFStringCreateCopy(kCFAllocatorSystemDefault, (CFStringRef)CFDictionaryGetValue(userInfo, kCFErrorDebugDescriptionKey));
         CFRelease(userInfo);
     }
     return result;
@@ -171,89 +194,97 @@ struct context {
     bool answer;
     CFMutableSetRef set;
     CFPropertyListFormat format;
+    CFStringRef *error;
 };
 
 static void __CFPropertyListIsArrayPlistAux(const void *value, void *context) {
     struct context *ctx = (struct context *)context;
     if (!ctx->answer) return;
-#if defined(DEBUG)
-    if (!value) CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property list arrays cannot contain NULL"));
-#endif
-    ctx->answer = value && __CFPropertyListIsValidAux(value, true, ctx->set, ctx->format);
+    if (!value && !*(ctx->error)) {
+	*(ctx->error) = (CFStringRef)CFRetain(CFSTR("property list arrays cannot contain NULL"));
+    }
+    ctx->answer = value && __CFPropertyListIsValidAux(value, true, ctx->set, ctx->format, ctx->error);
 }
 
 static void __CFPropertyListIsDictPlistAux(const void *key, const void *value, void *context) {
     struct context *ctx = (struct context *)context;
     if (!ctx->answer) return;
-#if defined(DEBUG)
-    if (!key) CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property list dictionaries cannot contain NULL keys"));
-    if (!value) CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property list dictionaries cannot contain NULL values"));
-    if (stringtype != CFGetTypeID(key)) {
+    if (!key && !*(ctx->error)) *(ctx->error) = (CFStringRef)CFRetain(CFSTR("property list dictionaries cannot contain NULL keys"));
+    if (!value && !*(ctx->error)) *(ctx->error) = (CFStringRef)CFRetain(CFSTR("property list dictionaries cannot contain NULL values"));
+    if (stringtype != CFGetTypeID(key) && !*(ctx->error)) {
 	CFStringRef desc = CFCopyTypeIDDescription(CFGetTypeID(key));
-	CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property list dictionaries may only have keys which are CFStrings, not '%@'"), desc);
+	*(ctx->error) = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("property list dictionaries may only have keys which are CFStrings, not '%@'"), desc);
 	CFRelease(desc);
     }
-#endif
-    ctx->answer = key && value && (stringtype == CFGetTypeID(key)) && __CFPropertyListIsValidAux(value, true, ctx->set, ctx->format);
+    ctx->answer = key && value && (stringtype == CFGetTypeID(key)) && __CFPropertyListIsValidAux(value, true, ctx->set, ctx->format, ctx->error);
 }
 
-static bool __CFPropertyListIsValidAux(CFPropertyListRef plist, bool recursive, CFMutableSetRef set, CFPropertyListFormat format) {
+static bool __CFPropertyListIsValidAux(CFPropertyListRef plist, bool recursive, CFMutableSetRef set, CFPropertyListFormat format, CFStringRef *error) {
     CFTypeID type;
-#if defined(DEBUG)
-    if (!plist) CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property lists cannot contain NULL"));
-#endif
-    if (!plist) return false;
+    if (!plist) {
+	*error = (CFStringRef)CFRetain(CFSTR("property lists cannot contain NULL"));
+    	return false;
+    }
     type = CFGetTypeID(plist);    
     if (stringtype == type) return true;
     if (datatype == type) return true;
     if (kCFPropertyListOpenStepFormat != format) {
 	if (booltype == type) return true;
 	if (numbertype == type) return true;
-	if (datetype == type) return true;
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
+	if (datetype == type) return true;        
 	if (_CFKeyedArchiverUIDGetTypeID() == type) return true;
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
     }
     if (!recursive && arraytype == type) return true;
     if (!recursive && dicttype == type) return true;
     // at any one invocation of this function, set should contain the objects in the "path" down to this object
-#if defined(DEBUG)
-    if (CFSetContainsValue(set, plist)) CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property lists cannot contain recursive container references"));
-#endif
-    if (CFSetContainsValue(set, plist)) return false;
+    if (CFSetContainsValue(set, plist)) {
+	*error = (CFStringRef)CFRetain(CFSTR("property lists cannot contain recursive container references"));
+	return false;
+    }
     if (arraytype == type) {
-	struct context ctx = {true, set, format}; 
+	struct context ctx = {true, set, format, error}; 
 	CFSetAddValue(set, plist);
 	CFArrayApplyFunction((CFArrayRef)plist, CFRangeMake(0, CFArrayGetCount((CFArrayRef)plist)), __CFPropertyListIsArrayPlistAux, &ctx);
 	CFSetRemoveValue(set, plist);
 	return ctx.answer;
     }
     if (dicttype == type) {
-	struct context ctx = {true, set, format}; 
+	struct context ctx = {true, set, format, error}; 
 	CFSetAddValue(set, plist);
 	CFDictionaryApplyFunction((CFDictionaryRef)plist, __CFPropertyListIsDictPlistAux, &ctx);
 	CFSetRemoveValue(set, plist);
 	return ctx.answer;
     }
-#if defined(DEBUG)
-    {
-	CFStringRef desc = CFCopyTypeIDDescription(type);
-	CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): property lists cannot contain objects of type '%@'"), desc);
-	CFRelease(desc);
-    }
-#endif
+
+    CFStringRef desc = CFCopyTypeIDDescription(type);
+    *error = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("property lists cannot contain objects of type '%@'"), desc);
+    CFRelease(desc);
+
     return false;
 }
 
 Boolean CFPropertyListIsValid(CFPropertyListRef plist, CFPropertyListFormat format) {
     initStatics();
     CFAssert1(plist != NULL, __kCFLogAssertion, "%s(): NULL is not a property list", __PRETTY_FUNCTION__);
-    CFMutableSetRef set = CFSetCreateMutable(kCFAllocatorSystemDefault, 0, NULL);
-    bool result = __CFPropertyListIsValidAux(plist, true, set, format);
-    CFRelease(set);
+    CFMutableSetRef set = CFSetCreateMutable(kCFAllocatorSystemDefaultGCRefZero, 0, NULL);
+    CFStringRef error = NULL;
+    bool result = __CFPropertyListIsValidAux(plist, true, set, format, &error);
+    if (error) {
+#if defined(DEBUG)
+	CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListIsValid(): %@"), error);
+#endif
+	CFRelease(error);
+    }
+    if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFRelease(set);
+    return result;
+}
+
+static Boolean _CFPropertyListIsValidWithErrorString(CFPropertyListRef plist, CFPropertyListFormat format, CFStringRef *error) {
+    initStatics();
+    CFAssert1(plist != NULL, __kCFLogAssertion, "%s(): NULL is not a property list", __PRETTY_FUNCTION__);
+    CFMutableSetRef set = CFSetCreateMutable(kCFAllocatorSystemDefaultGCRefZero, 0, NULL);
+    bool result = __CFPropertyListIsValidAux(plist, true, set, format, error);
+    if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFRelease(set);
     return result;
 }
 
@@ -287,6 +318,9 @@ typedef struct {
 
 static CFTypeRef parseOldStylePropertyListOrStringsFile(_CFXMLPlistParseInfo *pInfo);
 
+CF_INLINE void __CFPListRelease(CFTypeRef cf, _CFXMLPlistParseInfo *pInfo) {
+    if (cf && !_CFAllocatorIsGCRefZero(pInfo->allocator)) CFRelease(cf);
+}
 
 
 // The following set of _plist... functions append various things to a mutable data which is in UTF8 encoding. These are pretty general. Assumption is call characters and CFStrings can be converted to UTF8 and appeneded.
@@ -382,6 +416,12 @@ static void _appendEscapedString(CFStringRef origStr, CFMutableDataRef mStr) {
 
     for (i = 0; i < length; i ++) {
 	UniChar ch = __CFStringGetCharacterFromInlineBufferQuick(&inlineBuffer, i);
+	if (CFStringIsSurrogateHighCharacter(ch) && (bufCnt + 2 >= BUFSIZE)) {
+	    // flush the buffer first so we have room for a low/high pair and do not split them
+	    _plistAppendCharacters(mStr, buf, bufCnt);
+	    bufCnt = 0;
+	}
+	
         switch(ch) {
             case '<':
 		if (bufCnt) _plistAppendCharacters(mStr, buf, bufCnt);
@@ -502,40 +542,6 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
         _plistAppendUTF8CString(xmlString, "</");
         _plistAppendCharacters(xmlString, CFXMLPlistTags[STRING_IX], STRING_TAG_LENGTH);
         _plistAppendUTF8CString(xmlString, ">\n");
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
-    } else if (typeID == _CFKeyedArchiverUIDGetTypeID()) {
-        _plistAppendUTF8CString(xmlString, "<");
-        _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
-        _plistAppendUTF8CString(xmlString, ">\n");
-	    _appendIndents(indentation+1, xmlString);
-	    _plistAppendUTF8CString(xmlString, "<");
-	    _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
-	    _plistAppendUTF8CString(xmlString, ">");
-	    _appendEscapedString(CFSTR("CF$UID"), xmlString);
-	    _plistAppendUTF8CString(xmlString, "</");
-	    _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
-	    _plistAppendUTF8CString(xmlString, ">\n");
-	    _appendIndents(indentation + 1, xmlString);
-            _plistAppendUTF8CString(xmlString, "<");
-            _plistAppendCharacters(xmlString, CFXMLPlistTags[INTEGER_IX], INTEGER_TAG_LENGTH);
-            _plistAppendUTF8CString(xmlString, ">");
-
-	    uint64_t v = _CFKeyedArchiverUIDGetValue((CFKeyedArchiverUIDRef)object);
-	    CFNumberRef num = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt64Type, &v);
-            _plistAppendFormat(xmlString, CFSTR("%@"), num);
-	    CFRelease(num);
-
-            _plistAppendUTF8CString(xmlString, "</");
-            _plistAppendCharacters(xmlString, CFXMLPlistTags[INTEGER_IX], INTEGER_TAG_LENGTH);
-            _plistAppendUTF8CString(xmlString, ">\n");
-        _appendIndents(indentation, xmlString);
-        _plistAppendUTF8CString(xmlString, "</");
-        _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
-        _plistAppendUTF8CString(xmlString, ">\n");
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
     } else if (typeID == arraytype) {
         UInt32 i, count = CFArrayGetCount((CFArrayRef)object);
         if (count == 0) {
@@ -557,7 +563,6 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
     } else if (typeID == dicttype) {
         UInt32 i, count = CFDictionaryGetCount((CFDictionaryRef)object);
         CFMutableArrayRef keyArray;
-        CFTypeRef *keys;
         if (count == 0) {
             _plistAppendUTF8CString(xmlString, "<");
             _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
@@ -567,7 +572,7 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
         _plistAppendUTF8CString(xmlString, "<");
         _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
         _plistAppendUTF8CString(xmlString, ">\n");
-        keys = (CFTypeRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, count * sizeof(CFTypeRef), 0);
+        new_cftype_array(keys, count);
         CFDictionaryGetKeysAndValues((CFDictionaryRef)object, keys, NULL);
         keyArray = CFArrayCreateMutable(kCFAllocatorSystemDefault, count, &kCFTypeArrayCallBacks);
         CFArrayReplaceValues(keyArray, CFRangeMake(0, 0), keys, count);
@@ -586,7 +591,7 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
             _plistAppendUTF8CString(xmlString, ">\n");
             _CFAppendXML0(CFDictionaryGetValue((CFDictionaryRef)object, key), indentation+1, xmlString);
         }
-        CFAllocatorDeallocate(kCFAllocatorSystemDefault, keys);
+        free_cftype_array(keys);
         _appendIndents(indentation, xmlString);
         _plistAppendUTF8CString(xmlString, "</");
         _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
@@ -751,7 +756,7 @@ static void skipXMLComment(_CFXMLPlistParseInfo *pInfo) {
         }
         p ++; 
     }
-    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unterminated comment started on line %d"), lineNumber(pInfo));
+    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unterminated comment started on line %d"), lineNumber(pInfo));
 }
 
 // stringToMatch and buf must both be of at least len
@@ -783,14 +788,14 @@ static void skipXMLProcessingInstruction(_CFXMLPlistParseInfo *pInfo) {
         pInfo->curr ++; 
     }
     pInfo->curr = begin;
-    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing the processing instruction begun on line %d"), lineNumber(pInfo));
+    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing the processing instruction begun on line %d"), lineNumber(pInfo));
 }
 
 // first character should be immediately after the "<!"
 static void skipDTD(_CFXMLPlistParseInfo *pInfo) {
     // First pass "DOCTYPE"
     if (pInfo->end - pInfo->curr < DOCTYPE_TAG_LENGTH || !matchString(pInfo->curr, CFXMLPlistTags[DOCTYPE_IX], DOCTYPE_TAG_LENGTH)) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Malformed DTD on line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Malformed DTD on line %d"), lineNumber(pInfo));
         return;
     }
     pInfo->curr += DOCTYPE_TAG_LENGTH;
@@ -807,7 +812,7 @@ static void skipDTD(_CFXMLPlistParseInfo *pInfo) {
         pInfo->curr ++;
     }
     if (pInfo->curr == pInfo->end) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing DTD"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing DTD"));
         return;
     }
 
@@ -820,10 +825,10 @@ static void skipDTD(_CFXMLPlistParseInfo *pInfo) {
         if (*(pInfo->curr) == '>') {
             pInfo->curr ++;
         } else {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing DTD"), *(pInfo->curr), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing DTD"), *(pInfo->curr), lineNumber(pInfo));
         }
     } else {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing DTD"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing DTD"));
     }
 }
 
@@ -836,7 +841,7 @@ static void skipPERef(_CFXMLPlistParseInfo *pInfo) {
         }
         p ++;
     }
-    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing percent-escape sequence begun on line %d"), lineNumber(pInfo));
+    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing percent-escape sequence begun on line %d"), lineNumber(pInfo));
 }
 
 // First character should be just past '['
@@ -851,7 +856,7 @@ static void skipInlineDTD(_CFXMLPlistParseInfo *pInfo) {
         } else if (ch == '<') {
             pInfo->curr ++;
             if (pInfo->curr >= pInfo->end) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
                 return;
             }
             ch = *(pInfo->curr);
@@ -870,25 +875,25 @@ static void skipInlineDTD(_CFXMLPlistParseInfo *pInfo) {
                         pInfo->curr ++;
                     }
                     if (*(pInfo->curr) != '>') {
-                        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
+                        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
                         return;
                     }
                     pInfo->curr ++;
                 }
             } else {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing inline DTD"), ch, lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing inline DTD"), ch, lineNumber(pInfo));
                 return;
             }
         } else if (ch == ']') {
             pInfo->curr ++;
             return;
         } else {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing inline DTD"), ch, lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d while parsing inline DTD"), ch, lineNumber(pInfo));
             return;
         }
     }
     if (!pInfo->error) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF while parsing inline DTD"));
     }
 }
 
@@ -975,16 +980,16 @@ static CFTypeRef getContentObject(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
     while (!pInfo->error && pInfo->curr < pInfo->end) {
         skipWhitespace(pInfo);
         if (pInfo->curr >= pInfo->end) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
             return NULL;
         }
         if (*(pInfo->curr) != '<') {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
             return NULL;
         }
         pInfo->curr ++;
         if (pInfo->curr >= pInfo->end) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
             return NULL;
         }
         switch (*(pInfo->curr)) {
@@ -995,14 +1000,14 @@ static CFTypeRef getContentObject(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
             case '!':
                 // Could be a comment
                 if (pInfo->curr+2 >= pInfo->end) {
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
                     return NULL;
                 }
                 if (*(pInfo->curr+1) == '-' && *(pInfo->curr+2) == '-') {
                     pInfo->curr += 2;
                     skipXMLComment(pInfo);
                 } else {
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
                     return NULL;
                 }
                 break;
@@ -1019,9 +1024,9 @@ static CFTypeRef getContentObject(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
     return NULL;
 }
 
-static void _catFromMarkToBuf(const UniChar *mark, const UniChar *buf, CFMutableStringRef *string, CFAllocatorRef allocator ) {
+static void _catFromMarkToBuf(const UniChar *mark, const UniChar *buf, CFMutableStringRef *string, _CFXMLPlistParseInfo *pInfo) {
     if (!(*string)) {
-        *string = CFStringCreateMutable(allocator, 0);
+        *string = CFStringCreateMutable(pInfo->allocator, 0);
     }
     CFStringAppendCharacters(*string, mark, buf-mark);
 }
@@ -1029,11 +1034,11 @@ static void _catFromMarkToBuf(const UniChar *mark, const UniChar *buf, CFMutable
 static void parseCDSect_pl(_CFXMLPlistParseInfo *pInfo, CFMutableStringRef string) {
     const UniChar *end, *begin;
     if (pInfo->end - pInfo->curr < CDSECT_TAG_LENGTH) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
         return;
     }
     if (!matchString(pInfo->curr, CFXMLPlistTags[CDSECT_IX], CDSECT_TAG_LENGTH)) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered improper CDATA opening at line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered improper CDATA opening at line %d"), lineNumber(pInfo));
         return;
     }
     pInfo->curr += CDSECT_TAG_LENGTH;
@@ -1050,7 +1055,7 @@ static void parseCDSect_pl(_CFXMLPlistParseInfo *pInfo, CFMutableStringRef strin
     }
     // Never found the end mark
     pInfo->curr = begin;
-    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Could not find end of CDATA started on line %d"), lineNumber(pInfo));
+    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Could not find end of CDATA started on line %d"), lineNumber(pInfo));
 }
 
 // Only legal references are {lt, gt, amp, apos, quote, #ddd, #xAAA}
@@ -1060,7 +1065,7 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
     pInfo->curr ++; // move past the '&';
     len = pInfo->end - pInfo->curr; // how many characters we can safely scan
     if (len < 1) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
         return;
     }
     switch (*(pInfo->curr)) {
@@ -1070,7 +1075,7 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
                 pInfo->curr += 3;
                 break;
             }
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
             return;
         case 'g': // "gt"
             if (len >= 3 && *(pInfo->curr+1) == 't' && *(pInfo->curr+2) == ';') {
@@ -1078,11 +1083,11 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
                 pInfo->curr += 3;
                 break;
             }
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
             return;
         case 'a': // "apos" or "amp"
             if (len < 4) {   // Not enough characters for either conversion
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
                 return;
             }
             if (*(pInfo->curr+1) == 'm') {
@@ -1100,7 +1105,7 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
                     break;
                 }
             }
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
             return;
         case 'q':  // "quote"
             if (len >= 5 && *(pInfo->curr+1) == 'u' && *(pInfo->curr+2) == 'o' && *(pInfo->curr+3) == 't' && *(pInfo->curr+4) == ';') {
@@ -1108,14 +1113,14 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
                 pInfo->curr += 5;
                 break;
             }
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
             return;
         case '#':
         {
             uint16_t num = 0;
             Boolean isHex = false;
             if ( len < 4) {  // Not enough characters to make it all fit!  Need at least "&#d;"
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
                 return;
             }
             pInfo->curr ++;
@@ -1135,22 +1140,22 @@ static void parseEntityReference_pl(_CFXMLPlistParseInfo *pInfo, CFMutableString
                 if (ch <= '9' && ch >= '0') {
                     num += (ch - '0');
                 } else if (!isHex) {
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c at line %d"), ch, lineNumber(pInfo));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c at line %d"), ch, lineNumber(pInfo));
                     return;
                 } else if (ch >= 'a' && ch <= 'f') {
                     num += 10 + (ch - 'a');
                 } else if (ch >= 'A' && ch <= 'F') {
                     num += 10 + (ch - 'A');
                 } else {
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c at line %d"), ch, lineNumber(pInfo));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c at line %d"), ch, lineNumber(pInfo));
                     return;                    
                 }
             }
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
             return;
         }
         default:
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown ampersand-escape sequence at line %d"), lineNumber(pInfo));
             return;
     }
     CFStringAppendCharacters(string, &ch, 1);
@@ -1165,11 +1170,12 @@ static CFStringRef _uniqueStringForString(_CFXMLPlistParseInfo *pInfo, CFStringR
         CFSetAddValue(pInfo->stringSet, uniqued);
         __CFTypeCollectionRelease(pInfo->allocator, uniqued);
     }
+    if (uniqued && !_CFAllocatorIsGCRefZero(pInfo->allocator)) CFRetain(uniqued);
     return uniqued;
 }
 
 static CFStringRef _uniqueStringForCharacters(_CFXMLPlistParseInfo *pInfo, const UniChar *base, CFIndex length) {
-    if (0 == length) return CFSTR("");
+    if (0 == length) return !_CFAllocatorIsGCRefZero(pInfo->allocator) ? (CFStringRef)CFRetain(CFSTR("")) : CFSTR("");
     // This is to avoid having to promote the buffers of all the strings compared against
     // during the set probe; if a Unicode string is passed in, that's what happens.
     CFStringRef stringToUnique = NULL;
@@ -1195,7 +1201,8 @@ static CFStringRef _uniqueStringForCharacters(_CFXMLPlistParseInfo *pInfo, const
         CFSetAddValue(pInfo->stringSet, stringToUnique);
 	uniqued = stringToUnique;
     }
-    CFRelease(stringToUnique);
+    __CFPListRelease(stringToUnique, pInfo);
+    if (uniqued && !_CFAllocatorIsGCRefZero(pInfo->allocator)) CFRetain(uniqued);
     return uniqued;
 }
 
@@ -1210,11 +1217,11 @@ static CFStringRef getString(_CFXMLPlistParseInfo *pInfo) {
 	    if (pInfo->curr + 1 >= pInfo->end) break;
             // Could be a CDSect; could be the end of the string
             if (*(pInfo->curr+1) != '!') break; // End of the string
-            _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo->allocator);
+            _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo);
             parseCDSect_pl(pInfo, string);
             mark = pInfo->curr;
         } else if (ch == '&') {
-            _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo->allocator);
+            _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo);
             parseEntityReference_pl(pInfo, string);
             mark = pInfo->curr;
         } else {
@@ -1223,13 +1230,12 @@ static CFStringRef getString(_CFXMLPlistParseInfo *pInfo) {
     }
 
     if (pInfo->error) {
-        if (string) CFRelease(string);
+        __CFPListRelease(string, pInfo);
         return NULL;
     }
     if (!string) {
         if (pInfo->mutabilityOption != kCFPropertyListMutableContainersAndLeaves) {
             CFStringRef uniqueString = _uniqueStringForCharacters(pInfo, mark, pInfo->curr-mark);
-            if (uniqueString) CFRetain(uniqueString);
             return uniqueString;
         } else {
             string = CFStringCreateMutable(pInfo->allocator, 0);
@@ -1237,11 +1243,10 @@ static CFStringRef getString(_CFXMLPlistParseInfo *pInfo) {
             return string;
         }
     }
-    _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo->allocator);
+    _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo);
     if (pInfo->mutabilityOption != kCFPropertyListMutableContainersAndLeaves) {
         CFStringRef uniqueString = _uniqueStringForString(pInfo, string);
-        if (uniqueString) CFRetain(uniqueString);
-        CFRelease(string);
+        __CFPListRelease(string, pInfo);
         return uniqueString;
     }
     return string;
@@ -1250,21 +1255,21 @@ static CFStringRef getString(_CFXMLPlistParseInfo *pInfo) {
 static Boolean checkForCloseTag(_CFXMLPlistParseInfo *pInfo, const UniChar *tag, CFIndex tagLen) {
     if (pInfo->end - pInfo->curr < tagLen + 3) {
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
         }
         return false;
     }
     if (*(pInfo->curr) != '<' || *(++pInfo->curr) != '/') {
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
         }
         return false;
     }
     pInfo->curr ++;
     if (!matchString(pInfo->curr, tag, tagLen)) {
-        CFStringRef str = CFStringCreateWithCharactersNoCopy(pInfo->allocator, tag, tagLen, kCFAllocatorNull);
+        CFStringRef str = CFStringCreateWithCharactersNoCopy(kCFAllocatorSystemDefault, tag, tagLen, kCFAllocatorNull);
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Close tag on line %d does not match open tag %@"), lineNumber(pInfo), str);
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Close tag on line %d does not match open tag %@"), lineNumber(pInfo), str);
         }
         CFRelease(str);
         return false;
@@ -1273,13 +1278,13 @@ static Boolean checkForCloseTag(_CFXMLPlistParseInfo *pInfo, const UniChar *tag,
     skipWhitespace(pInfo);
     if (pInfo->curr == pInfo->end) {
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
         }
         return false;
     }
     if (*(pInfo->curr) != '>') {
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected character %c on line %d"), *(pInfo->curr), lineNumber(pInfo));
         }
         return false;
     }
@@ -1293,28 +1298,28 @@ static CFTypeRef parsePListTag(_CFXMLPlistParseInfo *pInfo) {
     const UniChar *save;
     result = getContentObject(pInfo, NULL);
     if (!result) {
-        if (!pInfo->error) pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty plist tag"));
+        if (!pInfo->error) pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty plist tag"));
         return NULL;
     }
     save = pInfo->curr; // Save this in case the next step fails
     tmp = getContentObject(pInfo, NULL);
     if (tmp) {
         // Got an extra object
-        CFRelease(tmp);
-        CFRelease(result);
+        __CFPListRelease(tmp, pInfo);
+        __CFPListRelease(result, pInfo);
         pInfo->curr = save;
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected element at line %d (plist can only include one object)"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected element at line %d (plist can only include one object)"), lineNumber(pInfo));
         return NULL;
     }
     if (pInfo->error) {
         // Parse failed catastrophically
-        CFRelease(result);
+        __CFPListRelease(result, pInfo);
         return NULL;
     }
     if (checkForCloseTag(pInfo, CFXMLPlistTags[PLIST_IX], PLIST_TAG_LENGTH)) {
         return result;
     }
-    CFRelease(result);
+    __CFPListRelease(result, pInfo);
     return NULL;
 }
 
@@ -1329,11 +1334,11 @@ static CFTypeRef parseArrayTag(_CFXMLPlistParseInfo *pInfo) {
     CFTypeRef tmp = getContentObject(pInfo, NULL);
     while (tmp) {
         CFArrayAppendValue(array, tmp);
-        CFRelease(tmp);
+        __CFPListRelease(tmp, pInfo);
         tmp = getContentObject(pInfo, NULL);
     }
     if (pInfo->error) { // getContentObject encountered a parse error
-        CFRelease(array);
+        __CFPListRelease(array, pInfo);
         return NULL;
     }
     if (checkForCloseTag(pInfo, CFXMLPlistTags[ARRAY_IX], ARRAY_TAG_LENGTH)) {
@@ -1341,13 +1346,13 @@ static CFTypeRef parseArrayTag(_CFXMLPlistParseInfo *pInfo) {
 	if (1 == allowImmutableCollections) {
 	    if (pInfo->mutabilityOption == kCFPropertyListImmutable) {
 		CFArrayRef newArray = CFArrayCreateCopy(pInfo->allocator, array);
-		CFRelease(array);
+		__CFPListRelease(array, pInfo);
 		array = (CFMutableArrayRef)newArray;
 	    }
 	}
 	return array;
     }
-    CFRelease(array);
+    __CFPListRelease(array, pInfo);
     return NULL;
 }
 
@@ -1359,20 +1364,20 @@ static CFTypeRef parseDictTag(_CFXMLPlistParseInfo *pInfo) {
     key = getContentObject(pInfo, &gotKey);
     while (key) {
         if (!gotKey) {
-            if (key) CFRelease(key);
-            if (dict) CFRelease(dict);
+            __CFPListRelease(key, pInfo);
+            __CFPListRelease(dict, pInfo);
             pInfo->curr = base;
             if (!pInfo->error) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Found non-key inside <dict> at line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Found non-key inside <dict> at line %d"), lineNumber(pInfo));
             }
             return NULL;
         }
         value = getContentObject(pInfo, NULL);
         if (!value) {
-            if (key) CFRelease(key);
-            if (dict) CFRelease(dict);
+            __CFPListRelease(key, pInfo);
+            __CFPListRelease(dict, pInfo);
             if (!pInfo->error) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Value missing for key inside <dict> at line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Value missing for key inside <dict> at line %d"), lineNumber(pInfo));
             }
             return NULL;
         }
@@ -1381,9 +1386,9 @@ static CFTypeRef parseDictTag(_CFXMLPlistParseInfo *pInfo) {
 	    _CFDictionarySetCapacity(dict, 10);
 	}
         CFDictionarySetValue(dict, key, value);
-        CFRelease(key);
+        __CFPListRelease(key, pInfo);
         key = NULL;
-        CFRelease(value);
+        __CFPListRelease(value, pInfo);
         value = NULL;
         base = pInfo->curr;
         key = getContentObject(pInfo, &gotKey);
@@ -1404,7 +1409,7 @@ static CFTypeRef parseDictTag(_CFXMLPlistParseInfo *pInfo) {
 		    uint32_t v;
 		    CFNumberGetValue((CFNumberRef)val, kCFNumberSInt32Type, &v);
 		    uid = (CFTypeRef)_CFKeyedArchiverUIDCreate(pInfo->allocator, v);
-		    CFRelease(dict);
+		    __CFPListRelease(dict, pInfo);
 		    return uid;
 		}
 	    }
@@ -1412,14 +1417,14 @@ static CFTypeRef parseDictTag(_CFXMLPlistParseInfo *pInfo) {
 	    if (1 == allowImmutableCollections) {
 		if (pInfo->mutabilityOption == kCFPropertyListImmutable) {
 		    CFDictionaryRef newDict = CFDictionaryCreateCopy(pInfo->allocator, dict);
-		    CFRelease(dict);
+		    __CFPListRelease(dict, pInfo);
 		    dict = (CFMutableDictionaryRef)newDict;
 		}
 	    }
 	}
         return dict;
     }
-    if (dict) CFRelease(dict);
+    __CFPListRelease(dict, pInfo);
     return NULL;
 }
 
@@ -1429,11 +1434,11 @@ static CFTypeRef parseDataTag(_CFXMLPlistParseInfo *pInfo) {
     result = __CFPLDataDecode(pInfo, pInfo->mutabilityOption == kCFPropertyListMutableContainersAndLeaves);
     if (!result) {
         pInfo->curr = base;
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Could not interpret <data> at line %d (should be base64-encoded)"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Could not interpret <data> at line %d (should be base64-encoded)"), lineNumber(pInfo));
         return NULL;
     }
     if (checkForCloseTag(pInfo, CFXMLPlistTags[DATA_IX], DATA_TAG_LENGTH)) return result;
-    CFRelease(result);
+    __CFPListRelease(result, pInfo);
     return NULL;
 }
 
@@ -1453,7 +1458,13 @@ static CFTypeRef parseDateTag(_CFXMLPlistParseInfo *pInfo) {
     int32_t year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
     int32_t num = 0;
     Boolean badForm = false;
-
+    Boolean yearIsNegative = false;
+    
+    if (pInfo->curr < pInfo->end && *pInfo->curr == '-') {
+        yearIsNegative = true;
+        pInfo->curr++;
+    }
+    
     while (pInfo->curr < pInfo->end && isdigit(*pInfo->curr)) {
         year = 10*year + (*pInfo->curr) - '0';
         pInfo->curr ++;
@@ -1496,14 +1507,14 @@ static CFTypeRef parseDateTag(_CFXMLPlistParseInfo *pInfo) {
     }
 
     if (badForm) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Could not interpret <date> at line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Could not interpret <date> at line %d"), lineNumber(pInfo));
         return NULL;
     }
     if (!checkForCloseTag(pInfo, CFXMLPlistTags[DATE_IX], DATE_TAG_LENGTH)) return NULL;
 
     CFAbsoluteTime at = 0.0;
 #if 1
-    CFGregorianDate date = {year, month, day, hour, minute, second};
+    CFGregorianDate date = {yearIsNegative ? -year : year, month, day, hour, minute, second};
     at = CFGregorianDateGetAbsoluteTime(date, NULL);
 #else
     CFCalendarRef calendar = CFCalendarCreateWithIdentifier(kCFAllocatorSystemDefault, kCFCalendarIdentifierGregorian);
@@ -1524,37 +1535,37 @@ static CFTypeRef parseRealTag(_CFXMLPlistParseInfo *pInfo) {
     CFStringInlineBuffer buf;
     if (!str) {
         if (!pInfo->error) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <real> on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <real> on line %d"), lineNumber(pInfo));
         }
         return NULL;
     }
     
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("nan"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberNaN) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("+infinity"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberPositiveInfinity) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("-infinity"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberNegativeInfinity) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("infinity"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberPositiveInfinity) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("-inf"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberNegativeInfinity) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("inf"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberPositiveInfinity) : NULL;
 	}
 	if (kCFCompareEqualTo == CFStringCompare(str, CFSTR("+inf"), kCFCompareCaseInsensitive)) {
-	    CFRelease(str);
+	    __CFPListRelease(str, pInfo);
 	    return (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) ? CFRetain(kCFNumberPositiveInfinity) : NULL;
 	}
 
@@ -1562,19 +1573,19 @@ static CFTypeRef parseRealTag(_CFXMLPlistParseInfo *pInfo) {
     CFStringInitInlineBuffer(str, &buf, CFRangeMake(0, len));
     idx = 0;
     if (!__CFStringScanDouble(&buf, NULL, &idx, &val) || idx != len) {
-        CFRelease(str);
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered misformatted real on line %d"), lineNumber(pInfo));
+        __CFPListRelease(str, pInfo);
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered misformatted real on line %d"), lineNumber(pInfo));
         return NULL;
     }
-    CFRelease(str);
+    __CFPListRelease(str, pInfo);
     result = CFNumberCreate(pInfo->allocator, kCFNumberDoubleType, &val);
     if (checkForCloseTag(pInfo, CFXMLPlistTags[REAL_IX], REAL_TAG_LENGTH)) return result;
-    CFRelease(result);
+    __CFPListRelease(result, pInfo);
     return NULL;
 }
 
 #define GET_CH	if (pInfo->curr == pInfo->end) {	\
-			pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Premature end of file after <integer> on line %d"), lineNumber(pInfo)); \
+			pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Premature end of file after <integer> on line %d"), lineNumber(pInfo)); \
 			return NULL;			\
 		}					\
 		ch = *(pInfo->curr)
@@ -1598,7 +1609,7 @@ static CFTypeRef parseIntegerTag(_CFXMLPlistParseInfo *pInfo) {
     while (pInfo->curr < pInfo->end && __CFIsWhitespace(*(pInfo->curr))) pInfo->curr++;
     GET_CH;
     if ('<' == ch) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <integer> on line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <integer> on line %d"), lineNumber(pInfo));
         return NULL;
     }
     if ('-' == ch || '+' == ch) {
@@ -1631,7 +1642,7 @@ static CFTypeRef parseIntegerTag(_CFXMLPlistParseInfo *pInfo) {
 	return CFNumberCreate(pInfo->allocator, kCFNumberSInt32Type, &val);
     }
     if ('<' == ch) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Incomplete <integer> on line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Incomplete <integer> on line %d"), lineNumber(pInfo));
 	return NULL;
     }
     uint64_t value = 0;
@@ -1649,25 +1660,25 @@ static CFTypeRef parseIntegerTag(_CFXMLPlistParseInfo *pInfo) {
                 new_digit = (ch - 'A' + 10);
                 break;
             default:	// other character
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unknown character '%c' (0x%x) in <integer> on line %d"), ch, ch, lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unknown character '%c' (0x%x) in <integer> on line %d"), ch, ch, lineNumber(pInfo));
                 return NULL;
 	}
 	if (!isHex && new_digit > 9) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Hex digit in non-hex <integer> on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Hex digit in non-hex <integer> on line %d"), lineNumber(pInfo));
 	    return NULL;
 	}
 	if (UINT64_MAX / multiplier < value) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Integer overflow in <integer> on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Integer overflow in <integer> on line %d"), lineNumber(pInfo));
 	    return NULL;
 	}
 	value = multiplier * value;
 	if (UINT64_MAX - new_digit < value) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Integer overflow in <integer> on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Integer overflow in <integer> on line %d"), lineNumber(pInfo));
 	    return NULL;
 	}
 	value = value + new_digit;
 	if (isNeg && (uint64_t)INT64_MAX + 1 < value) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Integer underflow in <integer> on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Integer underflow in <integer> on line %d"), lineNumber(pInfo));
 	    return NULL;
 	}
 	pInfo->curr++;
@@ -1715,7 +1726,7 @@ static CFTypeRef parseXMLElement(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
     if (markerLength == 0) {
         // Back up to the beginning of the marker
         pInfo->curr = marker;
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Malformed tag on line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Malformed tag on line %d"), lineNumber(pInfo));
         return NULL;
     }
     switch (*marker) {
@@ -1767,14 +1778,14 @@ static CFTypeRef parseXMLElement(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
     }
 
     if (!pInfo->allowNewTypes && markerIx != PLIST_IX && markerIx != ARRAY_IX && markerIx != DICT_IX && markerIx != STRING_IX && markerIx != KEY_IX && markerIx != DATA_IX) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered new tag when expecting only old-style property list objects"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered new tag when expecting only old-style property list objects"));
         return NULL;
     }
 
     switch (markerIx) {
         case PLIST_IX:
             if (isEmpty) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty plist tag"));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty plist tag"));
                 return NULL;
             }
             return parsePListTag(pInfo);
@@ -1805,21 +1816,21 @@ static CFTypeRef parseXMLElement(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
             str = getString(pInfo);
             if (!str) return NULL; // getString will already have set the error string
             if (!checkForCloseTag(pInfo, CFXMLPlistTags[markerIx], tagLen)) {
-                CFRelease(str);
+                __CFPListRelease(str, pInfo);
                 return NULL;
             }
             return str;
         }
         case DATA_IX:
             if (isEmpty) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <data> on line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <data> on line %d"), lineNumber(pInfo));
                 return NULL;
             } else {
                 return parseDataTag(pInfo);
             }
         case DATE_IX:
             if (isEmpty) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <date> on line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <date> on line %d"), lineNumber(pInfo));
                 return NULL;
             } else {
                 return parseDateTag(pInfo);
@@ -1836,14 +1847,14 @@ static CFTypeRef parseXMLElement(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
             return CFRetain(kCFBooleanFalse);
         case REAL_IX:
             if (isEmpty) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <real> on line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <real> on line %d"), lineNumber(pInfo));
                 return NULL;
             } else {
                 return parseRealTag(pInfo);
             }
         case INTEGER_IX:
             if (isEmpty) {
-                pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered empty <integer> on line %d"), lineNumber(pInfo));
+                pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered empty <integer> on line %d"), lineNumber(pInfo));
                 return NULL;
             } else {
                 return parseIntegerTag(pInfo);
@@ -1851,8 +1862,8 @@ static CFTypeRef parseXMLElement(_CFXMLPlistParseInfo *pInfo, Boolean *isKey) {
         default:  {
             CFStringRef markerStr = CFStringCreateWithCharacters(pInfo->allocator, marker, markerLength);
             pInfo->curr = marker;
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown tag %@ on line %d"), markerStr, lineNumber(pInfo));
-            CFRelease(markerStr);
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown tag %@ on line %d"), markerStr, lineNumber(pInfo));
+            __CFPListRelease(markerStr, pInfo);
             return NULL;
         }
     }
@@ -1863,11 +1874,11 @@ static CFTypeRef parseXMLPropertyList(_CFXMLPlistParseInfo *pInfo) {
         UniChar ch;
         skipWhitespace(pInfo);
         if (pInfo->curr+1 >= pInfo->end) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("No XML content found"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("No XML content found"));
             return NULL;
         }
         if (*(pInfo->curr) != '<') {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected character %c at line %d"), *(pInfo->curr), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected character %c at line %d"), *(pInfo->curr), lineNumber(pInfo));
             return NULL;
         }
         ch = *(++ pInfo->curr);
@@ -1893,7 +1904,7 @@ static CFTypeRef parseXMLPropertyList(_CFXMLPlistParseInfo *pInfo) {
     }
     // Should never get here
     if (!(pInfo->error)) {
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unexpected EOF"));
     }
     return NULL;
 }
@@ -1922,6 +1933,10 @@ static CFStringEncoding encodingForXMLData(CFDataRef data, CFErrorRef *error) {
         if ( ch == '?' || ch == '>') return kCFStringEncodingUTF8;
         idx ++;
         scan = idx;
+	if (idx + 8 >= end) {
+	    if (error) *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("End of buffer while looking for encoding name"));
+	    return 0;
+	}
         if (ch == 'e' && *scan++ == 'n' && *scan++ == 'c' && *scan++ == 'o' && *scan++ == 'd' && *scan++ == 'i'
             && *scan++ == 'n' && *scan++ == 'g' && *scan++ == '=') {
             idx = scan;
@@ -1950,7 +1965,7 @@ static CFStringEncoding encodingForXMLData(CFDataRef data, CFErrorRef *error) {
         }
 
         if (error) {
-            *error = __CFPropertyListCreateError(kCFAllocatorSystemDefault, kCFPropertyListReadCorruptError, CFSTR("Encountered unknown encoding (%@)"), encodingName);
+            *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Encountered unknown encoding (%@)"), encodingName);
             CFRelease(encodingName);
         }
         return 0;
@@ -2008,7 +2023,7 @@ CFTypeRef _CFPropertyListCreateFromXMLStringError(CFAllocatorRef allocator, CFSt
     
     if (!length) {
         if (error) {
-            *error = __CFPropertyListCreateError(allocator, kCFPropertyListReadCorruptError, CFSTR("Conversion of string failed. The string is empty."));
+            *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Conversion of string failed. The string is empty."));
         }
         return NULL;
     }
@@ -2021,11 +2036,12 @@ CFTypeRef _CFPropertyListCreateFromXMLStringError(CFAllocatorRef allocator, CFSt
     CFRetain(xmlString);
     UniChar *buf = (UniChar *)CFStringGetCharactersPtr(xmlString);
     
-    allocator = allocator ? allocator : __CFGetDefaultAllocator();
-    CFRetain(allocator);
-    
     if (!buf) {
-        buf = (UniChar *)CFAllocatorAllocate(allocator, length * sizeof(UniChar), 0);
+        buf = (UniChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, length * sizeof(UniChar), 0);
+        if (!buf) {
+            out_of_memory_warning();
+            return NULL;
+        }
         CFStringGetCharacters(xmlString, CFRangeMake(0, length), buf);
         createdBuffer = true;
     }
@@ -2075,11 +2091,10 @@ CFTypeRef _CFPropertyListCreateFromXMLStringError(CFAllocatorRef allocator, CFSt
     }
     
     if (createdBuffer) {
-        CFAllocatorDeallocate(allocator, (void *)pInfo->begin);
+        CFAllocatorDeallocate(kCFAllocatorSystemDefault, (void *)pInfo->begin);
     }
-    if (pInfo->stringSet) CFRelease(pInfo->stringSet);
+    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(pInfo->stringSet);
     if (pInfo->error) CFRelease(pInfo->error);
-    CFRelease(allocator);
     CFRelease(xmlString);
     return result;
 }
@@ -2128,19 +2143,22 @@ CFTypeRef _CFPropertyListCreateFromXMLString(CFAllocatorRef allocator, CFStringR
     return result;
 }
 
-
 /* Get a single value for a given key in a top-level dictionary in a property list.
  @param allocator The allocator to use.
  @param data The property list data.
  @param option Currently unused, set to 0.
- @param key The key to search for in the top-level dictionary. If the top-level data structure is not a dictionary, the return value will be false.
+ @param keyPath The keyPath to search for in the property list. Keys are colon-separated. Indexes into arrays are specified with an integer (zero-based).
  @param value If the key is found and the parameter is non-NULL, this will be set to a reference to the value. It is the caller's responsibility to release the object. If no object is found, will be set to NULL. If this parameter is NULL, this function can be used to check for the existence of a key without creating it by just checking the return value.
  @param error If an error occurs, will be set to a valid CFErrorRef. It is the caller's responsibility to release this value.
  @return True if the key is found, false otherwise.
  */
-bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFStringRef key, CFPropertyListRef *value, CFErrorRef *error) {
+bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFStringRef keyPath, CFPropertyListRef *value, CFErrorRef *error) {
     
     initStatics();
+    
+    if (!keyPath || CFStringGetLength(keyPath) == 0) {
+        return false;
+    }
     
     uint8_t marker;    
     CFBinaryPlistTrailer trailer;
@@ -2151,39 +2169,76 @@ bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, 
     
     // First check to see if it is a binary property list
     if (8 <= datalen && __CFBinaryPlistGetTopLevelInfo(databytes, datalen, &marker, &offset, &trailer)) {
-	// Create a dictionary to cache objects in
-        CFMutableDictionaryRef objects = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, NULL, &kCFTypeDictionaryValueCallBacks);
-        _CFDictionarySetCapacity(objects, 1);
-	
-	// Look for the value in the top-level dictionary
-	uint64_t keyOffset, valueOffset;
-	result = __CFBinaryPlistGetOffsetForValueFromDictionary3(databytes, datalen, offset, &trailer, (CFTypeRef)key, &keyOffset, &valueOffset, false, objects);
-	
-	// value could be null if the caller wanted to check for the existence of a key but not bother creating it
-	if (result && value) {
-	    CFPropertyListRef pl;
+        // Split up the key path
+        CFArrayRef keyPathArray = CFStringCreateArrayBySeparatingStrings(kCFAllocatorSystemDefaultGCRefZero, keyPath, CFSTR(":"));
+        uint64_t keyOffset, valueOffset = offset;
+        
+        // Create a dictionary to cache objects in
+        CFMutableDictionaryRef objects = CFDictionaryCreateMutable(kCFAllocatorSystemDefaultGCRefZero, 0, NULL, &kCFTypeDictionaryValueCallBacks);
+        CFIndex keyPathCount = CFArrayGetCount(keyPathArray);
+        _CFDictionarySetCapacity(objects, keyPathCount + 1);
+
+        for (CFIndex i = 0; i < keyPathCount; i++) {
+            CFStringRef oneKey = (CFStringRef)CFArrayGetValueAtIndex(keyPathArray, i);
+            SInt32 intValue = CFStringGetIntValue(oneKey);
+            if ((intValue == 0 && CFStringCompare(CFSTR("0"), oneKey, 0) != kCFCompareEqualTo) || intValue == INT_MAX || intValue == INT_MIN) {
+                // Treat as a string key into a dictionary
+                result = __CFBinaryPlistGetOffsetForValueFromDictionary3(databytes, datalen, valueOffset, &trailer, (CFTypeRef)oneKey, &keyOffset, &valueOffset, false, objects);
+            } else {
+                // Treat as integer index into an array
+                result = __CFBinaryPlistGetOffsetForValueFromArray2(databytes, datalen, valueOffset, &trailer, intValue, &valueOffset, objects);
+            }
+            
+            if (!result) {
+                break;
+            }
+        }
+        
+        // value could be null if the caller wanted to check for the existence of a key but not bother creating it
+        if (result && value) {
+            CFPropertyListRef pl;
 	    result = __CFBinaryPlistCreateObject2(databytes, datalen, valueOffset, &trailer, allocator, option, objects, NULL, 0, &pl);
 	    if (result) {
 		// caller's responsibility to release the created object
 		*value = pl;
 	    }
 	}
-	
-	CFRelease(objects);
+        
+        if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFRelease(keyPathArray);
+        if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFRelease(objects);
     } else {
 	// Try an XML property list
 	// Note: This is currently not any more efficient than grabbing the whole thing. This could be improved in the future.
 	CFPropertyListRef plist = CFPropertyListCreateWithData(allocator, data, option, NULL, error);
-	if (!(*error) && plist && CFGetTypeID((CFTypeRef)plist) == dicttype) {
-	    CFPropertyListRef pl = (CFPropertyListRef)CFDictionaryGetValue((CFDictionaryRef)plist, key);
-	    if (pl) {
-		*value = pl;
-		// caller's responsibility to release the created object
-		CFRetain(*value);
-		result = true;
-	    }
+        CFPropertyListRef nextObject = plist;
+        result = true;
+        
+	if (!(*error) && plist) {
+            CFArrayRef keyPathArray = CFStringCreateArrayBySeparatingStrings(kCFAllocatorSystemDefaultGCRefZero, keyPath, CFSTR(":"));
+            for (CFIndex i = 0;  i < CFArrayGetCount(keyPathArray); i++) {
+                CFStringRef oneKey = (CFStringRef)CFArrayGetValueAtIndex(keyPathArray, i);
+                SInt32 intValue = CFStringGetIntValue(oneKey);
+                if (((intValue == 0 && CFStringCompare(CFSTR("0"), oneKey, 0) != kCFCompareEqualTo) || intValue == INT_MAX || intValue == INT_MIN) && CFGetTypeID((CFTypeRef)nextObject) == dicttype) {
+                    // Treat as a string key into a dictionary
+                    nextObject = (CFPropertyListRef)CFDictionaryGetValue((CFDictionaryRef)nextObject, oneKey);
+                } else if (CFGetTypeID((CFTypeRef)nextObject) == arraytype) {
+                    // Treat as integer index into an array
+                    nextObject = (CFPropertyListRef)CFArrayGetValueAtIndex((CFArrayRef)nextObject, intValue);
+                } else {
+                    result = false;
+                    break;
+                }
+            }
+            
+            if (result && nextObject && value) {
+                *value = nextObject;
+                // caller's responsibility to release the created object
+                CFRetain(*value);
+            }
+            
+            if (!_CFAllocatorIsGCRefZero(kCFAllocatorSystemDefaultGCRefZero)) CFRelease(keyPathArray);
 	}
-	if (plist) CFRelease(plist);
+        if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(plist);
     }
     
     return result;
@@ -2196,7 +2251,7 @@ CFTypeRef _CFPropertyListCreateWithData(CFAllocatorRef allocator, CFDataRef data
     
     if (!data || CFDataGetLength(data) == 0) {
         if (error) {
-            *error = __CFPropertyListCreateError(allocator, kCFPropertyListReadCorruptError, CFSTR("Cannot parse a NULL or zero-length data"));
+            *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Cannot parse a NULL or zero-length data"));
         }
         return NULL;
     }
@@ -2211,9 +2266,6 @@ CFTypeRef _CFPropertyListCreateWithData(CFAllocatorRef allocator, CFDataRef data
 	return plist;
     }
     
-    allocator = allocator ? allocator : __CFGetDefaultAllocator();
-    CFRetain(allocator);
-    
     // Use our own error variable here so we can check it against NULL later
     CFErrorRef subError = NULL;
     encoding = encodingForXMLData(data, &subError); // 0 is an error return, NOT MacRoman.
@@ -2223,10 +2275,13 @@ CFTypeRef _CFPropertyListCreateWithData(CFAllocatorRef allocator, CFDataRef data
         // Note that encodingForXMLData() will give us the right values for a standard plist, too.
         if (error && subError == NULL) {
 	    // encodingForXMLData didn't set an error, so we create a new one here
-            *error = __CFPropertyListCreateError(allocator, kCFPropertyListReadCorruptError, CFSTR("Could not determine the encoding of the XML data"));
+            *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Could not determine the encoding of the XML data"));
         } else if (error && subError) {
 	    // give the caller the subError, they will release
 	    *error = subError;
+	} else if (!error && subError) {
+	    // Release the error
+	    CFRelease(subError);
 	}
         return NULL;
     }
@@ -2241,7 +2296,7 @@ CFTypeRef _CFPropertyListCreateWithData(CFAllocatorRef allocator, CFDataRef data
     plist = _CFPropertyListCreateFromXMLStringError(allocator, xmlString, option, error, allowNewTypes, format);
     
     if (xmlString) {
-        CFRelease(xmlString);
+        if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(xmlString);
         xmlString = NULL;
     }
     
@@ -2291,23 +2346,22 @@ CFDataRef CFPropertyListCreateData(CFAllocatorRef allocator, CFPropertyListRef p
     CFDataRef data = NULL;
     
     
-    allocator = allocator ? allocator : __CFGetDefaultAllocator();
-    CFRetain(allocator);
-    
-    if (!CFPropertyListIsValid(propertyList, format)) {
-        CFLog(kCFLogLevelError, CFSTR("Property list invalid for format: %d"), format);
-        CFRelease(allocator);
+    CFStringRef validErr = NULL;
+    if (!_CFPropertyListIsValidWithErrorString(propertyList, format, &validErr)) {
+        CFLog(kCFLogLevelError, CFSTR("Property list invalid for format: %d (%@)"), format, validErr);
+	if (validErr) CFRelease(validErr);
         return NULL;
     }
     
     if (format == kCFPropertyListOpenStepFormat) {
         CFLog(kCFLogLevelError, CFSTR("Property list format kCFPropertyListOpenStepFormat not supported for writing"));
-        CFRelease(allocator);
         return NULL;
     } else if (format == kCFPropertyListXMLFormat_v1_0) {
-        data = _CFPropertyListCreateXMLData(kCFAllocatorSystemDefault, propertyList, true);
+        data = _CFPropertyListCreateXMLData(allocator, propertyList, true);
     } else if (format == kCFPropertyListBinaryFormat_v1_0) {
-        CFWriteStreamRef stream = CFWriteStreamCreateWithAllocatedBuffers(allocator, allocator);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+        // TODO: Is it more efficient to create a stream here or just use a mutable data?
+        CFWriteStreamRef stream = CFWriteStreamCreateWithAllocatedBuffers(kCFAllocatorSystemDefault, allocator);
         CFWriteStreamOpen(stream);
         CFIndex len = CFPropertyListWrite(propertyList, stream, format, options, error);
         if (0 < len) {
@@ -2315,13 +2369,19 @@ CFDataRef CFPropertyListCreateData(CFAllocatorRef allocator, CFPropertyListRef p
         }
         CFWriteStreamClose(stream);
 	CFRelease(stream);
+#else
+        CFMutableDataRef dataForPlist = CFDataCreateMutable(allocator, 0);
+        __CFBinaryPlistWrite(propertyList, dataForPlist, 0, options, error);
+        return dataForPlist;
+#endif
     } else {
 	CFLog(kCFLogLevelError, CFSTR("Unknown format option"));
     }
     
-    CFRelease(allocator);
     return data;
 }
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 
 CFIndex CFPropertyListWrite(CFPropertyListRef propertyList, CFWriteStreamRef stream, CFPropertyListFormat format, CFOptionFlags options, CFErrorRef *error) {
     initStatics();
@@ -2333,8 +2393,10 @@ CFIndex CFPropertyListWrite(CFPropertyListRef propertyList, CFWriteStreamRef str
     CFAssert1(CFWriteStreamGetTypeID() == CFGetTypeID(stream), __kCFLogAssertion, "%s(): stream argument is not a write stream", __PRETTY_FUNCTION__);
     CFAssert1(kCFStreamStatusOpen == CFWriteStreamGetStatus(stream) || kCFStreamStatusWriting == CFWriteStreamGetStatus(stream), __kCFLogAssertion, "%s():  stream is not open", __PRETTY_FUNCTION__);
     
-    if (!CFPropertyListIsValid(propertyList, format)) {
-        CFLog(kCFLogLevelError, CFSTR("Property list invalid for format: %d"), format);
+    CFStringRef validErr = NULL;
+    if (!_CFPropertyListIsValidWithErrorString(propertyList, format, &validErr)) {
+        CFLog(kCFLogLevelError, CFSTR("Property list invalid for format: %d (%@)"), format, validErr);
+	if (validErr) CFRelease(validErr);
         return 0;
     }
     if (format == kCFPropertyListOpenStepFormat) {
@@ -2348,7 +2410,8 @@ CFIndex CFPropertyListWrite(CFPropertyListRef propertyList, CFWriteStreamRef str
 	while (0 < len) {
 	    CFIndex ret = CFWriteStreamWrite(stream, ptr, len);
 	    if (ret == 0) {
-                if (error) *error = __CFPropertyListCreateError(kCFAllocatorSystemDefault, kCFPropertyListWriteStreamError, CFSTR("Property list writing could not be completed because stream is full."));
+                if (error) *error = __CFPropertyListCreateError(kCFPropertyListWriteStreamError, CFSTR("Property list writing could not be completed because stream is full."));
+                CFRelease(data);
 	        return 0;
 	    }
 	    if (ret < 0) {
@@ -2364,6 +2427,7 @@ CFIndex CFPropertyListWrite(CFPropertyListRef propertyList, CFWriteStreamRef str
                     }
                     CFRelease(underlyingError);
                 }
+		CFRelease(data);
 		return 0;
 	    }
 	    ptr += ret;
@@ -2387,8 +2451,10 @@ CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStrea
     CFErrorRef error = NULL;
     
     // For backwards compatibility, we check the format parameter up front since these do not have CFError counterparts in the newer API
-    if (!CFPropertyListIsValid(propertyList, format)) {
-        if (errorString) *errorString = (CFStringRef)CFRetain(CFSTR("Property list invalid for format"));
+    CFStringRef validErr = NULL;
+    if (!_CFPropertyListIsValidWithErrorString(propertyList, format, &validErr)) {
+	if (errorString) *errorString = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("Property list invalid for format (%@)"), validErr);
+	if (validErr) CFRelease(validErr);
         return 0;
     }
     if (format == kCFPropertyListOpenStepFormat) {
@@ -2460,7 +2526,7 @@ CFPropertyListRef CFPropertyListCreateWithStream(CFAllocatorRef allocator, CFRea
     CFAssert1(kCFStreamStatusOpen == CFReadStreamGetStatus(stream) || kCFStreamStatusReading == CFReadStreamGetStatus(stream), __kCFLogAssertion, "%s():  stream is not open", __PRETTY_FUNCTION__);
     CFAssert2(mutabilityOption == kCFPropertyListImmutable || mutabilityOption == kCFPropertyListMutableContainers || mutabilityOption == kCFPropertyListMutableContainersAndLeaves, __kCFLogAssertion, "%s(): Unrecognized option %d", __PRETTY_FUNCTION__, mutabilityOption);
     
-    if (0 == streamLength) streamLength = INT_MAX;
+    if (0 == streamLength) streamLength = LONG_MAX;
     CFErrorRef underlyingError = NULL;
     __CFConvertReadStreamToBytes(stream, streamLength, &buffer, &buflen, &underlyingError);
     if (underlyingError) {
@@ -2478,7 +2544,7 @@ CFPropertyListRef CFPropertyListCreateWithStream(CFAllocatorRef allocator, CFRea
     
     if (!buffer || buflen < 6) {
         if (buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, buffer);
-        if (error) *error = __CFPropertyListCreateError(allocator, kCFPropertyListReadCorruptError, CFSTR("stream had too few bytes"));
+        if (error) *error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("stream had too few bytes"));
         return NULL;
     }
     data = CFDataCreateWithBytesNoCopy(kCFAllocatorSystemDefault, buffer, buflen, kCFAllocatorSystemDefault);
@@ -2498,6 +2564,8 @@ CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFRea
     if (error) CFRelease(error);
     return result;
 }
+
+#endif //DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 
 // ========================================================================
 
@@ -2609,7 +2677,7 @@ static CFStringRef parseQuotedPlistString(_CFXMLPlistParseInfo *pInfo, UniChar q
 	UniChar ch = *(pInfo->curr);
         if (ch == quote) break;
         if (ch == '\\') {
-            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo->allocator);
+            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo);
             pInfo->curr ++;
             ch = getSlashedChar(pInfo);
             CFStringAppendCharacters(str, &ch, 1);
@@ -2620,26 +2688,24 @@ static CFStringRef parseQuotedPlistString(_CFXMLPlistParseInfo *pInfo, UniChar q
         }
     }
     if (pInfo->end <= pInfo->curr) {
-        if (str) CFRelease(str);
+        __CFPListRelease(str, pInfo);
         pInfo->curr = startMark;
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unterminated quoted string starting on line %d"), lineNumber(pInfo));
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unterminated quoted string starting on line %d"), lineNumber(pInfo));
         return NULL;
     }
     if (!str) {
         if (pInfo->mutabilityOption == kCFPropertyListMutableContainersAndLeaves) {
-            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo->allocator);
+            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo);
         } else {
             str = (CFMutableStringRef)_uniqueStringForCharacters(pInfo, mark, pInfo->curr-mark);
-            CFRetain(str);
         }
     } else {
         if (mark != pInfo->curr) {
-            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo->allocator);
+            _catFromMarkToBuf(mark, pInfo->curr, &str, pInfo);
         }
         if (pInfo->mutabilityOption != kCFPropertyListMutableContainersAndLeaves) {
             CFStringRef uniqueString = _uniqueStringForString(pInfo, str);
-            CFRetain(uniqueString);
-            CFRelease(str);
+            __CFPListRelease(str, pInfo);
             str = (CFMutableStringRef)uniqueString;
         }
     }
@@ -2662,7 +2728,6 @@ static CFStringRef parseUnquotedPlistString(_CFXMLPlistParseInfo *pInfo) {
     if (pInfo->curr != mark) {
         if (pInfo->mutabilityOption != kCFPropertyListMutableContainersAndLeaves) {
             CFStringRef str = _uniqueStringForCharacters(pInfo, mark, pInfo->curr-mark);
-            CFRetain(str);
             return str;
         } else {
             CFMutableStringRef str = CFStringCreateMutable(pInfo->allocator, 0);
@@ -2670,7 +2735,7 @@ static CFStringRef parseUnquotedPlistString(_CFXMLPlistParseInfo *pInfo) {
             return str;
         }
     }
-    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF"));
+    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF"));
     return NULL;
 }
 
@@ -2679,7 +2744,7 @@ static CFStringRef parsePlistString(_CFXMLPlistParseInfo *pInfo, bool requireObj
     Boolean foundChar = advanceToNonSpace(pInfo);
     if (!foundChar) {
         if (requireObject) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF while parsing string"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF while parsing string"));
         }
         return NULL;
     }
@@ -2691,7 +2756,7 @@ static CFStringRef parsePlistString(_CFXMLPlistParseInfo *pInfo, bool requireObj
         return parseUnquotedPlistString(pInfo);
     } else {
         if (requireObject) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Invalid string character at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Invalid string character at line %d"), lineNumber(pInfo));
 	}
         return NULL;
     }
@@ -2703,11 +2768,11 @@ static CFTypeRef parsePlistArray(_CFXMLPlistParseInfo *pInfo) {
     Boolean foundChar;
     while (tmp) {
         CFArrayAppendValue(array, tmp);
-        CFRelease(tmp);
+        __CFPListRelease(tmp, pInfo);
         foundChar = advanceToNonSpace(pInfo);
 	if (!foundChar) {
-	    CFRelease(array);
-	    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Expected ',' for array at line %d"), lineNumber(pInfo));
+	    __CFPListRelease(array, pInfo);
+	    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Expected ',' for array at line %d"), lineNumber(pInfo));
 	    return NULL;
 	}
         if (*pInfo->curr != ',') {
@@ -2719,8 +2784,8 @@ static CFTypeRef parsePlistArray(_CFXMLPlistParseInfo *pInfo) {
     }
     foundChar = advanceToNonSpace(pInfo);
     if (!foundChar || *pInfo->curr != ')') {
-        CFRelease(array);
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Expected terminating ')' for array at line %d"), lineNumber(pInfo));
+        __CFPListRelease(array, pInfo);
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Expected terminating ')' for array at line %d"), lineNumber(pInfo));
         return NULL;
     }
     if (pInfo->error) {
@@ -2742,7 +2807,7 @@ static CFDictionaryRef parsePlistDictContent(_CFXMLPlistParseInfo *pInfo) {
         if (!foundChar) {
             CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListCreateFromXMLData(): Unexpected end of file. Missing semicolon or value in dictionary."));
             failedParse = true;
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Missing ';' on line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Missing ';' on line %d"), lineNumber(pInfo));
             break;
         }
 	
@@ -2758,32 +2823,29 @@ static CFDictionaryRef parsePlistDictContent(_CFXMLPlistParseInfo *pInfo) {
 		break;
 	    }
 	} else {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected ';' or '=' after key at line %d"), lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected ';' or '=' after key at line %d"), lineNumber(pInfo));
 	    failedParse = true;
 	    break;
 	}
 	CFDictionarySetValue(dict, key, value);
-	CFRelease(key);
+	__CFPListRelease(key, pInfo);
 	key = NULL;
-	CFRelease(value);
+	__CFPListRelease(value, pInfo);
 	value = NULL;
 	foundChar = advanceToNonSpace(pInfo);
 	if (foundChar && *pInfo->curr == ';') {
 	    pInfo->curr ++;
 	    key = parsePlistString(pInfo, false);
-	} else if ((!allowMissingSemi && _CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) || !foundChar) {
+	} else if (true || !foundChar) {
 	    CFLog(kCFLogLevelWarning, CFSTR("CFPropertyListCreateFromXMLData(): Old-style plist parser: missing semicolon in dictionary."));
 	    failedParse = true;
-	    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Missing ';' on line %d"), lineNumber(pInfo));
-	} else {
-	    // on pre-Jaguar systems, do nothing except silently ignore the rest
-	    // of the dictionary, which is what happened on those systems.
+	    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Missing ';' on line %d"), lineNumber(pInfo));
 	}
     }
 
     if (failedParse) {
-        if (key) CFRelease(key);
-        CFRelease(dict);
+        __CFPListRelease(key, pInfo);
+        __CFPListRelease(dict, pInfo);
         return NULL;
     }
     if (pInfo->error) {
@@ -2798,8 +2860,8 @@ static CFTypeRef parsePlistDict(_CFXMLPlistParseInfo *pInfo) {
     if (!dict) return NULL;
     Boolean foundChar = advanceToNonSpace(pInfo);
     if (!foundChar || *pInfo->curr != '}') {
-        CFRelease(dict);
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Expected terminating '}' for dictionary at line %d"), lineNumber(pInfo));
+        __CFPListRelease(dict, pInfo);
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Expected terminating '}' for dictionary at line %d"), lineNumber(pInfo));
         return NULL;
     }
     pInfo->curr ++;
@@ -2849,13 +2911,13 @@ static CFTypeRef parsePlistData(_CFXMLPlistParseInfo *pInfo) {
 	unsigned char bytes[numBytes];
 	int numBytesRead = getDataBytes(pInfo, bytes, numBytes);
 	if (numBytesRead < 0) {
-	    CFRelease(result);
+	    __CFPListRelease(result, pInfo);
             switch (numBytesRead) {
                 case -2: 
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Malformed data byte group at line %d; uneven length"), lineNumber(pInfo));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Malformed data byte group at line %d; uneven length"), lineNumber(pInfo));
                     break;
                 default: 
-                    pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Malformed data byte group at line %d; invalid hex"), lineNumber(pInfo));
+                    pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Malformed data byte group at line %d; invalid hex"), lineNumber(pInfo));
                     break;
             }
 	    return NULL;
@@ -2873,8 +2935,8 @@ static CFTypeRef parsePlistData(_CFXMLPlistParseInfo *pInfo) {
         pInfo->curr ++; // Move past '>'
         return result;
     } else {
-        CFRelease(result);
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Expected terminating '>' for data at line %d"), lineNumber(pInfo));
+        __CFPListRelease(result, pInfo);
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Expected terminating '>' for data at line %d"), lineNumber(pInfo));
         return NULL;
     }
 }
@@ -2886,7 +2948,7 @@ static CFTypeRef parsePlistObject(_CFXMLPlistParseInfo *pInfo, bool requireObjec
     Boolean foundChar = advanceToNonSpace(pInfo);
     if (!foundChar) {
         if (requireObject) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF while parsing plist"));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected EOF while parsing plist"));
         }
         return NULL;
     }
@@ -2906,7 +2968,7 @@ static CFTypeRef parsePlistObject(_CFXMLPlistParseInfo *pInfo, bool requireObjec
     } else {
         pInfo->curr --;  // Must back off the charcter we just read
         if (requireObject) {
-            pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Unexpected character '0x%x' at line %d"), ch, lineNumber(pInfo));
+            pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Unexpected character '0x%x' at line %d"), ch, lineNumber(pInfo));
         }
         return NULL;
     }
@@ -2923,11 +2985,11 @@ static CFTypeRef parseOldStylePropertyListOrStringsFile(_CFXMLPlistParseInfo *pI
     if (!foundChar) return result;
     if (!result) return NULL;
     if (CFGetTypeID(result) != stringtype) {
-        CFRelease(result);
-        pInfo->error = __CFPropertyListCreateError(pInfo->allocator, kCFPropertyListReadCorruptError, CFSTR("Junk after plist at line %d"), lineNumber(pInfo));
+        __CFPListRelease(result, pInfo);
+        pInfo->error = __CFPropertyListCreateError(kCFPropertyListReadCorruptError, CFSTR("Junk after plist at line %d"), lineNumber(pInfo));
         return NULL;
     }
-    CFRelease(result);
+    __CFPListRelease(result, pInfo);
     // Check for a strings file (looks like a dictionary without the opening/closing curly braces)
     pInfo->curr = begin;
     return parsePlistDictContent(pInfo);
@@ -2938,23 +3000,24 @@ static CFTypeRef parseOldStylePropertyListOrStringsFile(_CFXMLPlistParseInfo *pI
 static CFArrayRef _arrayDeepImmutableCopy(CFAllocatorRef allocator, CFArrayRef array, CFOptionFlags mutabilityOption) {
     CFArrayRef result = NULL;
     CFIndex i, c = CFArrayGetCount(array);
-    CFTypeRef *values;
     if (c == 0) {
         result = CFArrayCreate(allocator, NULL, 0, &kCFTypeArrayCallBacks);
-    } else if ((values = (CFTypeRef *)CFAllocatorAllocate(allocator, c*sizeof(CFTypeRef), 0)) != NULL) {
+    } else {
+        new_cftype_array(values, c);
         CFArrayGetValues(array, CFRangeMake(0, c), values);
         for (i = 0; i < c; i ++) {
-            values[i] = CFPropertyListCreateDeepCopy(allocator, values[i], mutabilityOption);
-            if (values[i] == NULL) {
+            CFTypeRef newValue = CFPropertyListCreateDeepCopy(allocator, values[i], mutabilityOption);
+            if (newValue == NULL) {
                 break;
             }
+            __CFAssignWithWriteBarrier((void **)values + i, (void *)newValue);
         }
         result = (i == c) ? CFArrayCreate(allocator, values, c, &kCFTypeArrayCallBacks) : NULL;
         c = i;
-        for (i = 0; i < c; i ++) {
-            CFRelease(values[i]);
+        if (!_CFAllocatorIsGCRefZero(allocator)) {
+            for (i = 0; i < c; i ++) CFRelease(values[i]);
         }
-        CFAllocatorDeallocate(allocator, values);
+        free_cftype_array(values);
     }
     return result;
 }
@@ -2967,10 +3030,10 @@ static CFMutableArrayRef _arrayDeepMutableCopy(CFAllocatorRef allocator, CFArray
             CFTypeRef newValue = CFPropertyListCreateDeepCopy(allocator, CFArrayGetValueAtIndex(array, i), mutabilityOption);
             if (!newValue) break;
             CFArrayAppendValue(result, newValue);
-            CFRelease(newValue);
+            if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(newValue);
         }
         if (i != c) {
-            CFRelease(result);
+            if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(result);
             result = NULL;
         }
     }
@@ -2979,41 +3042,37 @@ static CFMutableArrayRef _arrayDeepMutableCopy(CFAllocatorRef allocator, CFArray
 
 CFPropertyListRef CFPropertyListCreateDeepCopy(CFAllocatorRef allocator, CFPropertyListRef propertyList, CFOptionFlags mutabilityOption) {
     initStatics();
-    CFTypeID typeID;
     CFPropertyListRef result = NULL;
     CFAssert1(propertyList != NULL, __kCFLogAssertion, "%s(): cannot copy a NULL property list", __PRETTY_FUNCTION__);
     __CFAssertIsPList(propertyList);
     CFAssert2(mutabilityOption == kCFPropertyListImmutable || mutabilityOption == kCFPropertyListMutableContainers || mutabilityOption == kCFPropertyListMutableContainersAndLeaves, __kCFLogAssertion, "%s(): Unrecognized option %d", __PRETTY_FUNCTION__, mutabilityOption);
 	if (!CFPropertyListIsValid(propertyList, kCFPropertyListBinaryFormat_v1_0)) return NULL;
     
-    if (allocator == NULL) {
-        allocator = (CFAllocatorRef)CFRetain(__CFGetDefaultAllocator());
-    } else {
-        CFRetain(allocator);
-    }
-    
-    typeID = CFGetTypeID(propertyList);
+    CFTypeID typeID = CFGetTypeID(propertyList);
     if (typeID == dicttype) {
         CFDictionaryRef dict = (CFDictionaryRef)propertyList;
         Boolean isMutable = (mutabilityOption != kCFPropertyListImmutable);
         CFIndex count = CFDictionaryGetCount(dict);
-        CFTypeRef *keys, *values;
         if (count == 0) {
             result = isMutable ? CFDictionaryCreateMutable(allocator, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks): CFDictionaryCreate(allocator, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        } else if ((keys = (CFTypeRef *)CFAllocatorAllocate(allocator, 2 * count * sizeof(CFTypeRef), 0)) != NULL)   {
+        } else {
+            new_cftype_array(keys, 2 * count);
+            CFTypeRef *values;
             CFIndex i;
             values = keys+count;
             CFDictionaryGetKeysAndValues(dict, keys, values);
             for (i = 0; i < count; i ++) {
-                keys[i] = CFStringCreateCopy(allocator, (CFStringRef)keys[i]);
-                if (keys[i] == NULL) {
+                CFTypeRef newKey = CFStringCreateCopy(allocator, (CFStringRef)keys[i]);
+                if (newKey == NULL) {
                     break;
                 }
-                values[i] = CFPropertyListCreateDeepCopy(allocator, values[i], mutabilityOption);
-                if (values[i] == NULL) {
-                    CFRelease(keys[i]);
+                __CFAssignWithWriteBarrier((void **)keys + i, (void *)newKey);
+                CFTypeRef newValue = CFPropertyListCreateDeepCopy(allocator, values[i], mutabilityOption);
+                if (newValue == NULL) {
+                    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(keys[i]);
                     break;
                 }
+                __CFAssignWithWriteBarrier((void **)values + i, (void *)newValue);
             }
             if (i == count) {
                 result = isMutable ? CFDictionaryCreateMutable(allocator, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) : CFDictionaryCreate(allocator, keys, values, count, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -3021,20 +3080,18 @@ CFPropertyListRef CFPropertyListCreateDeepCopy(CFAllocatorRef allocator, CFPrope
                     if (isMutable) {
                         CFDictionarySetValue((CFMutableDictionaryRef)result, keys[i], values[i]);
                     }
-                    CFRelease(keys[i]);
-                    CFRelease(values[i]);
+                    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(keys[i]);
+                    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(values[i]);
                 }
             } else {
                 result = NULL;
                 count = i;
                 for (i = 0; i < count; i ++) {
-                    CFRelease(keys[i]);
-                    CFRelease(values[i]);
+                    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(keys[i]);
+                    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(values[i]);
                 }
             }
-            CFAllocatorDeallocate(allocator, keys);
-        } else {
-            result = NULL;
+            free_cftype_array(keys);
         }
     } else if (typeID == arraytype) {
         if (mutabilityOption == kCFPropertyListImmutable) {
@@ -3071,7 +3128,6 @@ CFPropertyListRef CFPropertyListCreateDeepCopy(CFAllocatorRef allocator, CFPrope
         CFAssert2(false, __kCFLogAssertion, "%s(): %p is not a property list type", __PRETTY_FUNCTION__, propertyList);
         result = NULL;
     }
-    CFRelease(allocator);
     return result;
 }
 

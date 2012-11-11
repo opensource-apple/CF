@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingExt.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRINGENCODINGEXT__)
@@ -101,9 +101,7 @@ enum {
     kCFStringEncodingISOLatin7 = 0x020D,	/* ISO 8859-13 */
     kCFStringEncodingISOLatin8 = 0x020E,	/* ISO 8859-14 */
     kCFStringEncodingISOLatin9 = 0x020F,	/* ISO 8859-15 */
-#if MAC_OS_X_VERSION_10_4 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingISOLatin10 = 0x0210,	/* ISO 8859-16 */
-#endif
 
     /* MS-DOS & Windows encodings begin at 0x400 */
     kCFStringEncodingDOSLatinUS = 0x0400,	/* code page 437 */
@@ -140,9 +138,7 @@ enum {
 
     /* Various national standards begin at 0x600 */
 /*  kCFStringEncodingASCII = 0x0600, defined in CoreFoundation/CFString.h */
-#if MAC_OS_X_VERSION_10_4 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingANSEL = 0x0601,	/* ANSEL (ANSI Z39.47) */
-#endif
     kCFStringEncodingJIS_X0201_76 = 0x0620,
     kCFStringEncodingJIS_X0208_83 = 0x0621,
     kCFStringEncodingJIS_X0208_90 = 0x0622,
@@ -151,9 +147,7 @@ enum {
 #if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingShiftJIS_X0213 = 0x0628, /* Shift-JIS format encoding of JIS X0213 planes 1 and 2*/
 #endif
-#if MAC_OS_X_VERSION_10_4 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingShiftJIS_X0213_MenKuTen = 0x0629,	/* JIS X0213 in plane-row-column notation */
-#endif
     kCFStringEncodingGB_2312_80 = 0x0630,
     kCFStringEncodingGBK_95 = 0x0631,		/* annex to GB 13000-93; for Windows 95 */
     kCFStringEncodingGB_18030_2000 = 0x0632,
@@ -185,17 +179,13 @@ enum {
     kCFStringEncodingMacRomanLatin1 = 0x0A04,	/* Mac OS Roman permuted to align with ISO Latin-1 */
     kCFStringEncodingHZ_GB_2312 = 0x0A05,	/* HZ (RFC 1842, for Chinese mail & news) */
     kCFStringEncodingBig5_HKSCS_1999 = 0x0A06, /* Big-5 with Hong Kong special char set supplement*/
-#if MAC_OS_X_VERSION_10_4 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingVISCII = 0x0A07,	/* RFC 1456, Vietnamese */
     kCFStringEncodingKOI8_U = 0x0A08,	/* RFC 2319, Ukrainian */
     kCFStringEncodingBig5_E = 0x0A09,	/* Taiwan Big-5E standard */
-#endif
 
     /* Other platform encodings*/
 /*  kCFStringEncodingNextStepLatin = 0x0B01, defined in CoreFoundation/CFString.h */
-#if MAC_OS_X_VERSION_10_4 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFStringEncodingNextStepJapanese = 0x0B02,	/* NextStep Japanese encoding */
-#endif
 
     /* EBCDIC & IBM host encodings begin at 0xC00 */
     kCFStringEncodingEBCDIC_US = 0x0C01,	/* basic EBCDIC-US */

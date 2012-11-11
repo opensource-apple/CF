@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFURLAccess.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 	Responsibility: Chris Linn
 */
 
@@ -39,7 +39,7 @@ CFData read/write routines
 #include <CoreFoundation/CFNumber.h>
 #include <string.h>
 #include <ctype.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -47,7 +47,6 @@ CFData read/write routines
 #include <sys/types.h>
 #include <pwd.h>
 #include <fcntl.h>
-#include <dlfcn.h>
 #elif DEPLOYMENT_TARGET_WINDOWS
 //#include <winsock2.h>
 #include <io.h>
@@ -59,7 +58,9 @@ CFData read/write routines
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
-
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#include <dlfcn.h>
+#endif
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 
@@ -69,9 +70,6 @@ DEFINE_WEAK_CFNETWORK_FUNC_FAIL(Boolean, _CFURLWriteDataAndPropertiesToResource,
 
 DEFINE_WEAK_CFNETWORK_FUNC_FAIL(Boolean, _CFURLDestroyResource, (CFURLRef A, SInt32 *B), (A, B), if(B) *B = kCFURLImproperArgumentsError, false)
 
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 typedef struct __NSString__ *NSString;
@@ -252,7 +250,7 @@ static Boolean _CFFileURLWritePropertiesToResource(CFURLRef url, CFDictionaryRef
                 CFNumberRef modeNum = (CFNumberRef)value;
                 CFNumberGetValue(modeNum, kCFNumberSInt32Type, &mode);
             } else {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #define MODE_TYPE mode_t
 #elif DEPLOYMENT_TARGET_WINDOWS
 #define MODE_TYPE uint16_t
@@ -733,13 +731,11 @@ Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef 
 	} else {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
             result = __CFNetwork__CFURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, fetchedProperties, desiredProperties, errorCode);
-#elif DEPLOYMENT_TARGET_WINDOWS
+#else
             if (fetchedData) *fetchedData = NULL;
             if (fetchedProperties) *fetchedProperties = NULL;
             if (errorCode) *errorCode = kCFURLUnknownSchemeError;
             result = false;
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
         }
         CFRelease(scheme);
@@ -815,11 +811,9 @@ Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef data, CFDi
 	    if (errorCode) *errorCode = kCFURLUnknownSchemeError;
 	}
 	return result;
-#elif DEPLOYMENT_TARGET_WINDOWS
+#else
         if (errorCode) *errorCode = kCFURLUnknownSchemeError;
         return false;
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     }
 }
@@ -863,11 +857,9 @@ Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) {
 	    if (errorCode) *errorCode = kCFURLUnknownSchemeError;
 	}
 	return result;
-#elif DEPLOYMENT_TARGET_WINDOWS
+#else
         if (errorCode) *errorCode = kCFURLUnknownSchemeError;
         return false;
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     }
 }

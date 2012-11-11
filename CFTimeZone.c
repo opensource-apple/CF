@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,10 +22,9 @@
  */
 
 /*	CFTimeZone.c
-	Copyright 1998-2002, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
-
 
 
 #include <CoreFoundation/CFTimeZone.h>
@@ -41,18 +40,35 @@
 #include <string.h>
 #include <unicode/ucal.h>
 #include <CoreFoundation/CFDateFormatter.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/fcntl.h>
-#include <tzfile.h>
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
-#import <Foundation/NSEnumerator.h>
-
-
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#include <tzfile.h>
+#elif DEPLOYMENT_TARGET_LINUX
+#ifndef TZDIR
+#define TZDIR	"/usr/share/zoneinfo" /* Time zone object file directory */
+#endif /* !defined TZDIR */
+
+#ifndef TZDEFAULT
+#define TZDEFAULT	"/etc/localtime"
+#endif /* !defined TZDEFAULT */
+
+struct tzhead {
+    char	tzh_magic[4];		/* TZ_MAGIC */
+    char	tzh_reserved[16];	/* reserved for future use */
+    char	tzh_ttisgmtcnt[4];	/* coded number of trans. time flags */
+    char	tzh_ttisstdcnt[4];	/* coded number of trans. time flags */
+    char	tzh_leapcnt[4];		/* coded number of leap seconds */
+    char	tzh_timecnt[4];		/* coded number of transition times */
+    char	tzh_typecnt[4];		/* coded number of local time types */
+    char	tzh_charcnt[4];		/* coded number of abbr. chars */
+};
+#endif
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #define TZZONELINK	TZDEFAULT
 #define TZZONEINFO	TZDIR "/"
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -61,6 +77,11 @@ static char *__tzDir = NULL;
 static void __InitTZStrings(void);
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
+
+#if DEPLOYMENT_TARGET_LINUX
+// Symbol aliases
+CF_EXPORT CFStringRef const kCFDateFormatterTimeZone __attribute__((weak, alias ("kCFDateFormatterTimeZoneKey")));
 #endif
 
 CONST_STRING_DECL(kCFTimeZoneSystemTimeZoneDidChangeNotification, "kCFTimeZoneSystemTimeZoneDidChangeNotification")
@@ -140,7 +161,7 @@ static CFMutableArrayRef __CFCopyWindowsTimeZoneList() {
     RegCloseKey(hkResult);
     return result;
 }
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED  || DEPLOYMENT_TARGET_WINDOWS
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
 static CFMutableArrayRef __CFCopyRecursiveDirectoryList() {
     CFMutableArrayRef result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -291,7 +312,6 @@ CF_INLINE void __CFEntzcode(int32_t value, unsigned char *bufp) {
     bufp[3] = (value >> 0) & 0xff;
 }
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
 static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, CFTZPeriod **tzpp, CFIndex *cntp) {
     int32_t len, timecnt, typecnt, charcnt, idx, cnt;
     const uint8_t *p, *timep, *typep, *ttisp, *charp;
@@ -408,20 +428,6 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
     }
     return result;
 }
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, CFTZPeriod **tzpp, CFIndex *cntp) {
-/* We use Win32 function to find TimeZone
- * (Aleksey Dukhnyakov)
- */
-    *tzpp = (CFTZPeriod *)CFAllocatorAllocate(allocator, sizeof(CFTZPeriod), 0);
-    memset(*tzpp, 0, sizeof(CFTZPeriod));
-    __CFTZPeriodInit(*tzpp, 0, NULL, 0, false);
-    *cntp = 1;
-    return TRUE;
-}
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 static Boolean __CFTimeZoneEqual(CFTypeRef cf1, CFTypeRef cf2) {
     CFTimeZoneRef tz1 = (CFTimeZoneRef)cf1;
@@ -481,8 +487,7 @@ CFTypeID CFTimeZoneGetTypeID(void) {
     return __kCFTimeZoneTypeID;
 }
 
-
-#if DEPLOYMENT_TARGET_WINDOWS_SYNC
+#if DEPLOYMENT_TARGET_WINDOWS
 static const char *__CFTimeZoneWinToOlsonDefaults =
 /* Mappings to time zones in Windows Registry are best-guess */
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -720,11 +725,10 @@ void __InitTZStrings(void) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
 static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
     CFTimeZoneRef result = NULL;
     
-#if DEPLOYMENT_TARGET_WINDOWS_SYNC
+#if DEPLOYMENT_TARGET_WINDOWS
     CFStringRef name = NULL;
     TIME_ZONE_INFORMATION tzi = { 0 };
     DWORD rval = GetTimeZoneInformation(&tzi);
@@ -780,32 +784,6 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
     }
     return CFTimeZoneCreateWithTimeIntervalFromGMT(kCFAllocatorSystemDefault, 0.0);
 }
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
-    CFTimeZoneRef result = NULL;
-/* The GetTimeZoneInformation function retrieves the current
- * time-zone parameters for Win32
- * (Aleksey Dukhnyakov)
- */
-    CFDataRef data;
-    TIME_ZONE_INFORMATION tz;
-    DWORD dw_result;
-    dw_result=GetTimeZoneInformation(&tz);
-
-    if ( dw_result == TIME_ZONE_ID_STANDARD ||
-            dw_result == TIME_ZONE_ID_DAYLIGHT ) {
-        CFStringRef name = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)tz.StandardName, wcslen(tz.StandardName));
-        data = CFDataCreate(kCFAllocatorSystemDefault, (UInt8 *)&tz, sizeof(tz));
-        result = CFTimeZoneCreate(kCFAllocatorSystemDefault, name, data);
-        CFRelease(name);
-        CFRelease(data);
-        if (result) return result;
-    }
-    return CFTimeZoneCreateWithTimeIntervalFromGMT(kCFAllocatorSystemDefault, 0.0);
-}
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 CFTimeZoneRef CFTimeZoneCopySystem(void) {
     CFTimeZoneRef tz;
@@ -882,13 +860,7 @@ CFArrayRef CFTimeZoneCopyKnownNames(void) {
 /* TimeZone information locate in the registry for Win32
  * (Aleksey Dukhnyakov)
  */
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
         list = __CFCopyRecursiveDirectoryList();
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-        list = __CFCopyWindowsTimeZoneList();
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 	// Remove undesirable ancient cruft
 	CFDictionaryRef dict = __CFTimeZoneCopyCompatibilityDictionary();
 	CFIndex idx;
@@ -906,7 +878,6 @@ CFArrayRef CFTimeZoneCopyKnownNames(void) {
     return tzs;
 }
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
 /* The criteria here are sort of: coverage for the U.S. and Europe,
  * large cities, abbreviation uniqueness, and perhaps a few others.
  * But do not make the list too large with obscure information.
@@ -966,66 +937,6 @@ static const char *__CFTimeZoneAbbreviationDefaults =
 "    <key>WIT</key>  <string>Asia/Jakarta</string>"
 " </dict>"
 " </plist>";
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-static const char *__CFTimeZoneAbbreviationDefaults =
-/* Mappings to time zones in Windows Registry are best-guess */
-"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-" <!DOCTYPE plist SYSTEM \"file://localhost/System/Library/DTDs/PropertyList.dtd\">"
-" <plist version=\"1.0\">"
-" <dict>"
-"    <key>ADT</key>  <string>Atlantic Standard Time</string>"
-"    <key>AKDT</key> <string>Alaskan Standard Time</string>"
-"    <key>AKST</key> <string>Alaskan Standard Time</string>"
-"    <key>ART</key>  <string>SA Eastern Standard Time</string>"
-"    <key>AST</key>  <string>Atlantic Standard Time</string>"
-"    <key>BDT</key>  <string>Central Asia Standard Time</string>"
-"    <key>BRST</key> <string>SA Eastern Standard Time</string>"
-"    <key>BRT</key>  <string>SA Eastern Standard Time</string>"
-"    <key>BST</key>  <string>GMT Standard Time</string>"
-"    <key>CAT</key>  <string>South Africa Standard Time</string>"
-"    <key>CDT</key>  <string>Central Standard Time</string>"
-"    <key>CEST</key> <string>Central Europe Standard Time</string>"
-"    <key>CET</key>  <string>Central Europe Standard Time</string>"
-"    <key>CLST</key> <string>SA Western Standard Time</string>"
-"    <key>CLT</key>  <string>SA Western Standard Time</string>"
-"    <key>COT</key>  <string>Central Standard Time</string>"
-"    <key>CST</key>  <string>Central Standard Time</string>"
-"    <key>EAT</key>  <string>E. Africa Standard Time</string>"
-"    <key>EDT</key>  <string>Eastern Standard Time</string>"
-"    <key>EEST</key> <string>E. Europe Standard Time</string>"
-"    <key>EET</key>  <string>E. Europe Standard Time</string>"
-"    <key>EST</key>  <string>Eastern Standard Time</string>"
-"    <key>GMT</key>  <string>Greenwich Standard Time</string>"
-"    <key>GST</key>  <string>Arabian Standard Time</string>"
-"    <key>HKT</key>  <string>China Standard Time</string>"
-"    <key>HST</key>  <string>Hawaiian Standard Time</string>"
-"    <key>ICT</key>  <string>SE Asia Standard Time</string>"
-"    <key>IRST</key> <string>Iran Standard Time</string>"
-"    <key>IST</key>  <string>India Standard Time</string>"
-"    <key>JST</key>  <string>Tokyo Standard Time</string>"
-"    <key>KST</key>  <string>Korea Standard Time</string>"
-"    <key>MDT</key>  <string>Mountain Standard Time</string>"
-"    <key>MSD</key>  <string>E. Europe Standard Time</string>"
-"    <key>MSK</key>  <string>E. Europe Standard Time</string>"
-"    <key>MST</key>  <string>Mountain Standard Time</string>"
-"    <key>NZDT</key> <string>New Zealand Standard Time</string>"
-"    <key>NZST</key> <string>New Zealand Standard Time</string>"
-"    <key>PDT</key>  <string>Pacific Standard Time</string>"
-"    <key>PET</key>  <string>SA Pacific Standard Time</string>"
-"    <key>PHT</key>  <string>Taipei Standard Time</string>"
-"    <key>PKT</key>  <string>West Asia Standard Time</string>"
-"    <key>PST</key>  <string>Pacific Standard Time</string>"
-"    <key>SGT</key>  <string>Singapore Standard Time</string>"
-"    <key>UTC</key>  <string>Greenwich Standard Time</string>"
-"    <key>WAT</key>  <string>W. Central Africa Standard Time</string>"
-"    <key>WEST</key> <string>W. Europe Standard Time</string>"
-"    <key>WET</key>  <string>W. Europe Standard Time</string>"
-"    <key>WIT</key>  <string>SE Asia Standard Time</string>"
-" </dict>"
-" </plist>";
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 CFDictionaryRef CFTimeZoneCopyAbbreviationDictionary(void) {
     CFDictionaryRef dict;
@@ -1043,15 +954,17 @@ CFDictionaryRef CFTimeZoneCopyAbbreviationDictionary(void) {
     return dict;
 }
 
+void _removeFromCache(const void *key, const void *value, void *context) {
+    CFDictionaryRemoveValue(__CFTimeZoneCache, (CFStringRef)key);
+}
+
 void CFTimeZoneSetAbbreviationDictionary(CFDictionaryRef dict) {
     __CFGenericValidateType(dict, CFDictionaryGetTypeID());
     __CFTimeZoneLockGlobal();
     if (dict != __CFTimeZoneAbbreviationDict) {
 	if (dict) CFRetain(dict);
 	if (__CFTimeZoneAbbreviationDict) {
-	    for (id key in (id)__CFTimeZoneAbbreviationDict) {
-		CFDictionaryRemoveValue(__CFTimeZoneCache, (CFStringRef)key);
-	    }
+	    CFDictionaryApplyFunction(__CFTimeZoneAbbreviationDict, _removeFromCache, NULL);
 	    CFRelease(__CFTimeZoneAbbreviationDict);
 	}
 	__CFTimeZoneAbbreviationDict = dict;
@@ -1101,7 +1014,6 @@ CFTimeZoneRef CFTimeZoneCreate(CFAllocatorRef allocator, CFStringRef name, CFDat
     return memory;
 }
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
 static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t seconds, CFStringRef name, int isDST) {
     CFTimeZoneRef result;
     CFDataRef data;
@@ -1127,28 +1039,7 @@ static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t s
     CFRelease(data);
     return result;
 }
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t seconds, CFStringRef name, int isDST) {
-/* CFTimeZoneRef->_data will contain TIME_ZONE_INFORMATION structure
- * to find current timezone
- * (Aleksey Dukhnyakov)
- */
-    CFTimeZoneRef result;
-    TIME_ZONE_INFORMATION tzi;
-    CFDataRef data;
-    CFIndex length = CFStringGetLength(name);
 
-    memset(&tzi,0,sizeof(tzi));
-    tzi.Bias=(long)(-seconds/60);
-    CFStringGetCharacters(name, CFRangeMake(0, length < 31 ? length : 31 ), (UniChar *)tzi.StandardName);
-    data = CFDataCreate(allocator,(UInt8 *)&tzi, sizeof(tzi));
-    result = CFTimeZoneCreate(allocator, name, data);
-    CFRelease(data);
-    return result;
-}
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 // rounds offset to nearest minute
 CFTimeZoneRef CFTimeZoneCreateWithTimeIntervalFromGMT(CFAllocatorRef allocator, CFTimeInterval ti) {
@@ -1164,13 +1055,7 @@ CFTimeZoneRef CFTimeZoneCreateWithTimeIntervalFromGMT(CFAllocatorRef allocator, 
     seconds -= ((ti < 0) ? -hour : hour) * 3600;
     minute = (ti < 0) ? (-seconds / 60) : (seconds / 60);
     if (fabs(ti) < 1.0) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
 	name = (CFStringRef)CFRetain(CFSTR("GMT"));
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-        name = (CFStringRef)CFRetain(CFSTR("Greenwich Standard Time"));
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
     } else {
 	name = CFStringCreateWithFormat(allocator, NULL, CFSTR("GMT%c%02d%02d"), (ti < 0.0 ? '-' : '+'), hour, minute);
     }
@@ -1222,12 +1107,11 @@ CFTimeZoneRef CFTimeZoneCreateWithName(CFAllocatorRef allocator, CFStringRef nam
 	    }
 	}
     }
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
     CFURLRef baseURL, tempURL;
     void *bytes;
     CFIndex length;
 
-#if DEPLOYMENT_TARGET_WINDOWS_SYNC
+#if DEPLOYMENT_TARGET_WINDOWS
     if (!__tzZoneInfo) __InitTZStrings();
     if (!__tzZoneInfo) return NULL;
     baseURL = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, __tzZoneInfo, kCFURLWindowsPathStyle, true);
@@ -1253,7 +1137,7 @@ CFTimeZoneRef CFTimeZoneCreateWithName(CFAllocatorRef allocator, CFStringRef nam
 	CFStringRef mapping = CFDictionaryGetValue(dict, name);
 	if (mapping) {
 	    name = mapping;
-#if DEPLOYMENT_TARGET_WINDOWS_SYNC
+#if DEPLOYMENT_TARGET_WINDOWS
 	} else if (CFStringHasPrefix(name, __tzZoneInfo)) {
 	    CFMutableStringRef unprefixed = CFStringCreateMutableCopy(kCFAllocatorSystemDefault, CFStringGetLength(name), name);
 	    CFStringDelete(unprefixed, CFRangeMake(0, CFStringGetLength(__tzZoneInfo)));
@@ -1297,112 +1181,6 @@ CFTimeZoneRef CFTimeZoneCreateWithName(CFAllocatorRef allocator, CFStringRef nam
     }
     return result;
 }
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-/* Reading GMT offset and daylight flag from the registry
- * for TimeZone name
- * (Aleksey Dukhnyakov)
- */
-    {
-        CFStringRef safeName = name;
-        struct {
-            LONG Bias;
-            LONG StandardBias;
-            LONG DaylightBias;
-            SYSTEMTIME StandardDate;
-            SYSTEMTIME DaylightDate;
-        } tzi;
-        TIME_ZONE_INFORMATION tzi_system;
-
-        HKEY hkResult;
-        DWORD dwType, dwSize=sizeof(tzi),
-        dwSize_name1=sizeof(tzi_system.StandardName),
-        dwSize_name2=sizeof(tzi_system.DaylightName);
-
-        if (tryAbbrev) {
-            CFDictionaryRef abbrevs = CFTimeZoneCopyAbbreviationDictionary();
-            tzName = (CFStringRef)CFDictionaryGetValue(abbrevs, name);
-            if (NULL == tzName) {
-		CFRelease(abbrevs);
-                return NULL;
-            }
-            name = tzName;
-        	CFRelease(abbrevs);
-        }
-
-/* Open regestry and move down to the TimeZone information
- */
-        if (RegOpenKey(HKEY_LOCAL_MACHINE,_T(TZZONEINFO),&hkResult) !=
-            ERROR_SUCCESS ) {
-            return NULL;
-        }
-/* Move down to specific TimeZone name
- */
-#if defined(UNICODE)
-        UniChar *uniTimeZone = (UniChar*)CFStringGetCharactersPtr(name);
-        if (uniTimeZone == NULL) {
-            // We need to extract the bytes out of the CFStringRef and create our own
-            // UNICODE string to pass to the Win32 API - RegOpenKey.
-            UInt8 uniBuff[MAX_PATH+2]; // adding +2 to handle Unicode-null termination /0/0.
-            CFIndex usedBuff = 0;
-            CFIndex numChars = CFStringGetBytes(name, CFRangeMake(0, CFStringGetLength(name)), kCFStringEncodingUnicode, 0, FALSE, uniBuff, MAX_PATH, &usedBuff);
-            if (numChars == 0) {
-                return NULL;
-            } else {
-                // NULL-terminate the newly created Unicode string.
-                uniBuff[usedBuff] = '\0';
-                uniBuff[usedBuff+1] = '\0';                
-            }
-            
-            if (RegOpenKey(hkResult, (LPCWSTR)uniBuff ,&hkResult) != ERROR_SUCCESS ) {
-                return NULL;
-            }
-        } else {
-            if (RegOpenKey(hkResult, (LPCWSTR)uniTimeZone ,&hkResult) != ERROR_SUCCESS ) {
-                return NULL;
-            }
-        }
-#else
-        if (RegOpenKey(hkResult,CFStringGetCStringPtr(name, CFStringGetSystemEncoding()),&hkResult) != ERROR_SUCCESS ) {
-            return NULL;
-        }
-#endif
-
-/* TimeZone information(offsets, daylight flag, ...) assign to tzi structure
- */
-        if ( RegQueryValueEx(hkResult,_T("TZI"),NULL,&dwType,(LPBYTE)&tzi,&dwSize) != ERROR_SUCCESS &&
-            RegQueryValueEx(hkResult,_T("Std"),NULL,&dwType,(LPBYTE)&tzi_system.StandardName,&dwSize_name1) != ERROR_SUCCESS &&
-            RegQueryValueEx(hkResult,_T("Dlt"),NULL,&dwType,(LPBYTE)&tzi_system.DaylightName,&dwSize_name2) != ERROR_SUCCESS )
-        {
-            return NULL;
-        }
-
-        tzi_system.Bias=tzi.Bias;
-        tzi_system.StandardBias=tzi.StandardBias;
-        tzi_system.DaylightBias=tzi.DaylightBias;
-        tzi_system.StandardDate=tzi.StandardDate;
-        tzi_system.DaylightDate=tzi.DaylightDate;
-
-/* CFTimeZoneRef->_data will contain TIME_ZONE_INFORMATION structure
- * to find current timezone
- * (Aleksey Dukhnyakov)
- */
-        data = CFDataCreate(allocator,(UInt8 *)&tzi_system, sizeof(tzi_system));
-
-        RegCloseKey(hkResult);
-        result = CFTimeZoneCreate(allocator, name, data);
-        if (result) {
-            if (tryAbbrev)
-                result->_periods->abbrev = (CFStringRef)CFStringCreateCopy(allocator,safeName);
-            else {
-           }
-        }
-        CFRelease(data);
-    }
-    return result;
-}
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 CFStringRef CFTimeZoneGetName(CFTimeZoneRef tz) {
     CF_OBJC_FUNCDISPATCH0(CFTimeZoneGetTypeID(), CFStringRef, tz, "name");
@@ -1435,169 +1213,29 @@ BOOL __CFTimeZoneGetWin32SystemTime(SYSTEMTIME * sys_time, CFAbsoluteTime time)
     else
         return FALSE;
 }
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 CFTimeInterval CFTimeZoneGetSecondsFromGMT(CFTimeZoneRef tz, CFAbsoluteTime at) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
     CFIndex idx;
-    CF_OBJC_FUNCDISPATCH1(CFTimeZoneGetTypeID(), CFTimeInterval, tz, "_secondsFromGMTForAbsoluteTime:", at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
     idx = __CFBSearchTZPeriods(tz, at);
     return __CFTZPeriodGMTOffset(&(tz->_periods[idx]));
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-/* To calculate seconds from GMT, calculate current timezone time and
- * subtract GMT timnezone time
- * (Aleksey Dukhnyakov)
- */
- 	TIME_ZONE_INFORMATION tzi;
-	FILETIME ftime1,ftime2;
-	SYSTEMTIME stime0,stime1,stime2;
-	LONGLONG * l1= (LONGLONG*)&ftime1;
-    LONGLONG * l2= (LONGLONG*)&ftime2;
-    CFRange range={0,sizeof(TIME_ZONE_INFORMATION)};
-    double result;
-
-    CF_OBJC_FUNCDISPATCH1(CFTimeZoneGetTypeID(), CFTimeInterval, tz, "_secondsFromGMTForAbsoluteTime:", at);
-
-    CFDataGetBytes(tz->_data,range,(UInt8 *)&tzi);
-
-    if (!__CFTimeZoneGetWin32SystemTime(&stime0,at) ||
-            !SystemTimeToTzSpecificLocalTime(&tzi,&stime0,&stime1) ||
-	        !SystemTimeToFileTime(&stime1,&ftime1) )
-	{
-        CFAssert(0, __kCFLogAssertion, "Win32 system time/timezone failed !\n");
-		return 0;
-	}
-
-    tzi.DaylightDate.wMonth=0;
-	tzi.StandardDate.wMonth=0;
-    tzi.StandardBias=0;
-    tzi.DaylightBias=0;
-    tzi.Bias=0;
-
-	if ( !SystemTimeToTzSpecificLocalTime(&tzi,&stime0,&stime2) ||
-            !SystemTimeToFileTime(&stime2,&ftime2))
-    {
-        CFAssert(0, __kCFLogAssertion, "Win32 system time/timezone failed !\n");
-		return 0;
-    }
-    result=(double)((*l1-*l2)/10000000);
-	return result;
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 }
-
-#if DEPLOYMENT_TARGET_WINDOWS_SAFARI
-/*
- * Get abbreviation for name for WIN32 platform
- * (Aleksey Dukhnyakov)
- */
-
-typedef struct {
-    CFStringRef tzName;
-    CFStringRef tzAbbr;
-} _CFAbbrFind;
-
-static void _CFFindKeyForValue(const void *key, const void *value, void *context) {
-    if ( ((_CFAbbrFind *)context)->tzAbbr != NULL ) {
-        if ( ((_CFAbbrFind *)context)->tzName == (CFStringRef) value ) {
-            ((_CFAbbrFind *)context)->tzAbbr = (CFStringRef)key ;
-        }
-    }
-}
-
-CFIndex __CFTimeZoneInitAbbrev(CFTimeZoneRef tz) {
-
-    if ( tz->_periods->abbrev == NULL ) {
-        _CFAbbrFind abbr = { NULL, NULL };
-        CFDictionaryRef abbrevs = CFTimeZoneCopyAbbreviationDictionary();
-
-        CFDictionaryApplyFunction(abbrevs, _CFFindKeyForValue, &abbr);
-
-        if ( abbr.tzAbbr != NULL)
-            tz->_periods->abbrev = (CFStringRef)CFStringCreateCopy(kCFAllocatorSystemDefault, abbr.tzAbbr);
-        else
-            tz->_periods->abbrev = (CFStringRef)CFStringCreateCopy(kCFAllocatorSystemDefault, tz->_name);
-/* We should return name of TimeZone if couldn't find abbrevation.
- * (Ala on MACOSX)
- *
- * (Aleksey Dukhnyakov)
-*/
-        CFRelease( abbrevs );
-    }
-
-    return 0;
-}
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 CFStringRef CFTimeZoneCopyAbbreviation(CFTimeZoneRef tz, CFAbsoluteTime at) {
     CFStringRef result;
     CFIndex idx;
-    CF_OBJC_FUNCDISPATCH1(CFTimeZoneGetTypeID(), CFStringRef, tz, "_abbreviationForAbsoluteTime:", at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
     idx = __CFBSearchTZPeriods(tz, at);
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-/*
- * Initialize abbreviation for this TimeZone
- * (Aleksey Dukhnyakov)
- */
-    idx = __CFTimeZoneInitAbbrev(tz);
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
     result = __CFTZPeriodAbbreviation(&(tz->_periods[idx]));
     return result ? (CFStringRef)CFRetain(result) : NULL;
 }
 
 Boolean CFTimeZoneIsDaylightSavingTime(CFTimeZoneRef tz, CFAbsoluteTime at) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
     CFIndex idx;
-    CF_OBJC_FUNCDISPATCH1(CFTimeZoneGetTypeID(), Boolean, tz, "_isDaylightSavingTimeForAbsoluteTime:", at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
     idx = __CFBSearchTZPeriods(tz, at);
     return __CFTZPeriodIsDST(&(tz->_periods[idx]));
-#elif DEPLOYMENT_TARGET_WINDOWS_SAFARI
-/* Compare current timezone time and current timezone time without
- * transition to day light saving time
- * (Aleskey Dukhnyakov)
- */
-	TIME_ZONE_INFORMATION tzi;
-	SYSTEMTIME stime0,stime1,stime2;
-    CFRange range={0,sizeof(TIME_ZONE_INFORMATION)};
-
-    CF_OBJC_FUNCDISPATCH1(CFTimeZoneGetTypeID(), Boolean, tz, "_isDaylightSavingTimeForAbsoluteTime:", at);
-
-    CFDataGetBytes(tz->_data,range,(UInt8 *)&tzi);
-
-	if ( !__CFTimeZoneGetWin32SystemTime(&stime0,at) ||
-            !SystemTimeToTzSpecificLocalTime(&tzi,&stime0,&stime1)) {
-        CFAssert(0, __kCFLogAssertion, "Win32 system time/timezone failed !\n");
-		return FALSE;
-    }
-
-    tzi.DaylightDate.wMonth=0;
-	tzi.StandardDate.wMonth=0;
-
-	if ( !SystemTimeToTzSpecificLocalTime(&tzi,&stime0,&stime2)) {
-        CFAssert(0, __kCFLogAssertion, "Win32 system time/timezone failed !\n");
-		return FALSE;
-    }
-
-    if ( !memcmp(&stime1,&stime2,sizeof(stime1)) )
-        return FALSE;
-
-    return TRUE;
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 }
 
 CFTimeInterval CFTimeZoneGetDaylightSavingTimeOffset(CFTimeZoneRef tz, CFAbsoluteTime at) {

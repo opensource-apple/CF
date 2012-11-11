@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	ForFoundationOnly.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !CF_BUILDING_CF && !NSBUILDINGFOUNDATION
@@ -51,7 +51,9 @@
 
 CF_EXTERN_C_BEGIN
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_LINUX
+#include <malloc.h>
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <malloc/malloc.h>
 #endif
 
@@ -59,6 +61,7 @@ CF_EXTERN_C_END
 
 // ---- CFBundle material ----------------------------------------
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <CoreFoundation/CFBundlePriv.h>
 
 CF_EXTERN_C_BEGIN
@@ -68,13 +71,14 @@ CF_EXPORT const CFStringRef _kCFBundleInfoPlistURLKey;
 CF_EXPORT const CFStringRef _kCFBundleRawInfoPlistURLKey;
 CF_EXPORT const CFStringRef _kCFBundleNumericVersionKey;
 CF_EXPORT const CFStringRef _kCFBundleResourcesFileMappedKey;
-CF_EXPORT const CFStringRef _kCFBundleCFMLoadAsBundleKey;
 CF_EXPORT const CFStringRef _kCFBundleAllowMixedLocalizationsKey;
 CF_EXPORT const CFStringRef _kCFBundleInitialPathKey;
 CF_EXPORT const CFStringRef _kCFBundleResolvedPathKey;
 CF_EXPORT const CFStringRef _kCFBundlePrincipalClassKey;
 
-CF_EXPORT CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, UInt8 version);
+#if __BLOCKS__
+CF_EXPORT CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, Boolean (^predicate)(CFStringRef filename, Boolean *stop), UInt8 version);
+#endif
 
 CF_EXPORT UInt8 _CFBundleLayoutVersion(CFBundleRef bundle);
 
@@ -86,6 +90,7 @@ CF_EXPORT CFErrorRef _CFBundleCreateError(CFAllocatorRef allocator, CFBundleRef 
 
 CF_EXTERN_C_END
 
+#endif
 
 // ---- CFPreferences material ----------------------------------------
 
@@ -188,6 +193,8 @@ CF_EXPORT CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLo
 
 CF_EXPORT CFStringRef __CFStringCreateImmutableFunnel2(CFAllocatorRef alloc, const void *bytes, CFIndex numBytes, CFStringEncoding encoding, Boolean possiblyExternalFormat, Boolean tryToReduceUnicode, Boolean hasLengthByte, Boolean hasNullByte, Boolean noCopy, CFAllocatorRef contentsDeallocator);
 
+CF_EXPORT void __CFStringAppendBytes(CFMutableStringRef str, const char *cStr, CFIndex appendedLength, CFStringEncoding encoding);
+
 CF_INLINE Boolean __CFStringEncodingIsSupersetOfASCII(CFStringEncoding encoding) {
     switch (encoding & 0x0000FF00) {
 	case 0x0: // MacOS Script range
@@ -211,7 +218,7 @@ CF_INLINE Boolean __CFStringEncodingIsSupersetOfASCII(CFStringEncoding encoding)
             return false; // It's modal encoding
 
         case 0xA00: // Misc standard range
-            if ((encoding == kCFStringEncodingShiftJIS) || (encoding == kCFStringEncodingHZ_GB_2312)) return false;
+            if ((encoding == kCFStringEncodingShiftJIS) || (encoding == kCFStringEncodingHZ_GB_2312) || (encoding == kCFStringEncodingUTF7_IMAP)) return false;
             return true;
 
         case 0xB00:
@@ -391,8 +398,6 @@ CF_EXPORT CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, C
 
 CF_EXPORT CFTypeRef _CFPropertyListCreateFromXMLString(CFAllocatorRef allocator, CFStringRef xmlString, CFOptionFlags option, CFStringRef *errorString, Boolean allowNewTypes, CFPropertyListFormat *format);
 
-CF_EXPORT bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFStringRef key, CFPropertyListRef *value, CFErrorRef *error);
-
 // ---- Sudden Termination material ----------------------------------------
 
 #if DEPLOYMENT_TARGET_MACOSX
@@ -404,6 +409,14 @@ CF_EXPORT void _CFSuddenTerminationExitWhenTerminationEnabled(int exitStatus);
 CF_EXPORT size_t _CFSuddenTerminationDisablingCount(void);
 
 #endif
+
+// ---- Thread-specific data --------------------------------------------
+
+// Get some thread specific data from a pre-assigned slot.
+CF_EXPORT void *_CFGetTSD(uint32_t slot);
+
+// Set some thread specific data in a pre-assigned slot. Don't pick a random value. Make sure you're using a slot that is unique. Pass in a destructor to free this data, or NULL if none is needed. Unlike pthread TSD, the destructor is per-thread.
+CF_EXPORT void *_CFSetTSD(uint32_t slot, void *newVal, void (*destructor)(void *));
 
 #if DEPLOYMENT_TARGET_WINDOWS
 // ---- Windows-specific material ---------------------------------------
@@ -430,9 +443,6 @@ CF_EXPORT int _NS_mkstemp(char *name, int bufSize);
 CF_EXTERN_C_BEGIN
 
 CF_EXPORT CFTypeID CFTypeGetTypeID(void);
-
-CF_EXPORT CFTypeRef _CFRetainGC(CFTypeRef cf);
-CF_EXPORT void _CFReleaseGC(CFTypeRef cf);
 
 CF_EXPORT void _CFArraySetCapacity(CFMutableArrayRef array, CFIndex cap);
 CF_EXPORT void _CFBagSetCapacity(CFMutableBagRef bag, CFIndex cap);
@@ -495,7 +505,9 @@ CF_EXPORT void *__CFURLReservedPtr(CFURLRef  url);
 CF_EXPORT void __CFURLSetReservedPtr(CFURLRef  url, void *ptr);
 CF_EXPORT CFStringEncoding _CFURLGetEncoding(CFURLRef url);
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 CF_EXPORT Boolean _CFRunLoopFinished(CFRunLoopRef rl, CFStringRef mode);
+#endif
 
 CF_EXPORT CFIndex _CFStreamInstanceSize(void);
 
@@ -515,6 +527,11 @@ extern kern_return_t _CFDiscorporateMemoryDeallocate(CFDiscorporateMemory *hm);
 extern kern_return_t _CFDiscorporateMemoryDematerialize(CFDiscorporateMemory *hm);
 extern kern_return_t _CFDiscorporateMemoryMaterialize(CFDiscorporateMemory *hm);
 #endif
+
+enum {
+    kCFNumberFormatterOrdinalStyle = 6,
+    kCFNumberFormatterDurationStyle = 7,
+};
 
 CF_EXPORT CFRange _CFDataFindBytes(CFDataRef data, CFDataRef dataToFind, CFRange searchRange, CFDataSearchFlags compareOptions);
 

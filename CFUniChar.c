@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,13 +22,12 @@
  */
 
 /*	CFUniChar.c
-	Copyright (c) 2001-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2001-2011, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
 #include <CoreFoundation/CFByteOrder.h>
 #include "CFInternal.h"
-#include "CFBundle_Internal.h"
 #include "CFUniChar.h" 
 #include "CFStringEncodingConverterExt.h"
 #include "CFUnicodeDecomposition.h"
@@ -41,7 +40,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <zlib.h>
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <mach/mach.h>
@@ -101,7 +99,7 @@ static const void *__CFGetSectDataPtr(const char *segname, const char *sectname,
 
 // Memory map the file
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 CF_INLINE void __CFUniCharCharacterSetPath(char *cpath) {
 #elif DEPLOYMENT_TARGET_WINDOWS
 CF_INLINE void __CFUniCharCharacterSetPath(wchar_t *wpath) {
@@ -109,6 +107,8 @@ CF_INLINE void __CFUniCharCharacterSetPath(wchar_t *wpath) {
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    strlcpy(cpath, __kCFCharacterSetDir, MAXPATHLEN);
+#elif DEPLOYMENT_TARGET_LINUX
     strlcpy(cpath, __kCFCharacterSetDir, MAXPATHLEN);
 #elif DEPLOYMENT_TARGET_WINDOWS
     wchar_t frameworkPath[MAXPATHLEN];
@@ -163,10 +163,10 @@ void __AddBitmapStateForName(const wchar_t *bitmapName) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-static bool __CFUniCharLoadBytesFromFile(const char *fileName, const void **bytes) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+static bool __CFUniCharLoadBytesFromFile(const char *fileName, const void **bytes, int64_t *fileSize) {
 #elif DEPLOYMENT_TARGET_WINDOWS
-static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **bytes) {
+static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **bytes, int64_t *fileSize) {
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
@@ -191,13 +191,21 @@ static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **b
         mappingHandle = CreateFileMapping(bitmapFileHandle, NULL, PAGE_READONLY, 0, 0, NULL);
         CloseHandle(bitmapFileHandle);
         if (!mappingHandle) return false;
-
-        *bytes = MapViewOfFileEx(mappingHandle, FILE_MAP_READ, 0, 0, 0, 0);
-        CloseHandle(mappingHandle);
-    } else {
-        *bytes = MapViewOfFileEx(mappingHandle, FILE_MAP_READ, 0, 0, 0, 0);
-        CloseHandle(mappingHandle);
     }
+
+    *bytes = MapViewOfFileEx(mappingHandle, FILE_MAP_READ, 0, 0, 0, 0);
+
+    if (NULL != fileSize) {
+	MEMORY_BASIC_INFORMATION memoryInfo;
+
+	if (0 == VirtualQueryEx(mappingHandle, *bytes, &memoryInfo, sizeof(memoryInfo))) {
+	    *fileSize = 0; // This indicates no checking. Is it right ?
+	} else {
+	    *fileSize = memoryInfo.RegionSize;
+	}
+    }
+
+    CloseHandle(mappingHandle);
 
     return (*bytes ? true : false);
 #else
@@ -213,33 +221,38 @@ static bool __CFUniCharLoadBytesFromFile(const wchar_t *fileName, const void **b
     }
     close(fd);
 
+    if (NULL != fileSize) *fileSize = statBuf.st_size;
+
     return true;
 #endif
 }
 
 #endif // USE_MACHO_SEGMENT
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-static bool __CFUniCharLoadFile(const char *bitmapName, const void **bytes) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
+static bool __CFUniCharLoadFile(const char *bitmapName, const void **bytes, int64_t *fileSize) {
 #elif DEPLOYMENT_TARGET_WINDOWS
-static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes) {
+static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes, int64_t *fileSize) {
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 #if USE_MACHO_SEGMENT
 	*bytes = __CFGetSectDataPtr("__UNICODE", bitmapName, NULL);
+
+    if (NULL != fileSize) *fileSize = 0;
+
     return *bytes ? true : false;
 #else
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
     char cpath[MAXPATHLEN];
     __CFUniCharCharacterSetPath(cpath);
-	strlcat(cpath, bitmapName, MAXPATHLEN);
-    return __CFUniCharLoadBytesFromFile(cpath, bytes);
+    strlcat(cpath, bitmapName, MAXPATHLEN);
+    return __CFUniCharLoadBytesFromFile(cpath, bytes, fileSize);
 #elif DEPLOYMENT_TARGET_WINDOWS
     wchar_t wpath[MAXPATHLEN];
     __CFUniCharCharacterSetPath(wpath);
-	wcsncat(wpath, bitmapName, MAXPATHLEN);
-    return __CFUniCharLoadBytesFromFile(wpath, bytes);
+    wcsncat(wpath, bitmapName, MAXPATHLEN);
+    return __CFUniCharLoadBytesFromFile(wpath, bytes, fileSize);
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
@@ -263,6 +276,37 @@ CF_INLINE bool isWhitespaceAndNewline(UTF32Char theChar, uint16_t charset, const
     return ((isWhitespace(theChar, charset, data) || isNewline(theChar, charset, data)) ? true : false);
 }
 
+#if USE_MACHO_SEGMENT
+CF_INLINE bool __CFSimpleFileSizeVerification(const void *bytes, int64_t fileSize) { return true; }
+#elif 1
+// <rdar://problem/8961744> __CFSimpleFileSizeVerification is broken
+static bool __CFSimpleFileSizeVerification(const void *bytes, int64_t fileSize) { return true; }
+#else
+static bool __CFSimpleFileSizeVerification(const void *bytes, int64_t fileSize) {
+    bool result = true;
+
+    if (fileSize > 0) {
+	if ((sizeof(uint32_t) * 2) > fileSize) {
+	    result = false;
+	} else {
+	    uint32_t headerSize = CFSwapInt32BigToHost(*((uint32_t *)((char *)bytes + 4)));
+
+	    if ((headerSize < (sizeof(uint32_t) * 4)) || (headerSize > fileSize)) {
+		result = false;
+	    } else {
+		const uint32_t *lastElement = (uint32_t *)(((uint8_t *)bytes) + headerSize) - 2;
+
+		if ((headerSize + CFSwapInt32BigToHost(lastElement[0]) + CFSwapInt32BigToHost(lastElement[1])) > headerSize) result = false;
+	    }
+	}
+    }
+
+    if (!result) CFLog(kCFLogLevelCritical, CFSTR("File size verification for Unicode database file failed."));
+
+    return result;
+}
+#endif // USE_MACHO_SEGMENT
+
 typedef struct {
     uint32_t _numPlanes;
     const uint8_t **_planes;
@@ -275,12 +319,12 @@ static __CFUniCharBitmapData *__CFUniCharBitmapDataArray = NULL;
 
 static CFSpinLock_t __CFUniCharBitmapLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #if !defined(CF_UNICHAR_BITMAP_FILE)
 #if USE_MACHO_SEGMENT
 #define CF_UNICHAR_BITMAP_FILE "__csbitmaps"
 #else
-#define CF_UNICHAR_BITMAP_FILE "CFCharacterSetBitmaps.bitmap"
+#define CF_UNICHAR_BITMAP_FILE "/CFCharacterSetBitmaps.bitmap"
 #endif
 #endif
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -301,10 +345,11 @@ static bool __CFUniCharLoadBitmapData(void) {
     const void *bitmapBase;
     const void *bitmap;
     int idx, bitmapIndex;
+    int64_t fileSize;
 
     __CFSpinLock(&__CFUniCharBitmapLock);
 
-    if (__CFUniCharBitmapDataArray || !__CFUniCharLoadFile(CF_UNICHAR_BITMAP_FILE, &bytes)) {
+    if (__CFUniCharBitmapDataArray || !__CFUniCharLoadFile(CF_UNICHAR_BITMAP_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
         __CFSpinUnlock(&__CFUniCharBitmapLock);
         return false;
     }
@@ -579,18 +624,18 @@ static const void **__CFUniCharMappingTables = NULL;
 
 static CFSpinLock_t __CFUniCharMappingTableLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #if __CF_BIG_ENDIAN__
 #if USE_MACHO_SEGMENT
 #define MAPPING_TABLE_FILE "__data"
 #else
-#define MAPPING_TABLE_FILE "CFUnicodeData-B.mapping"
+#define MAPPING_TABLE_FILE "/CFUnicodeData-B.mapping"
 #endif
 #else
 #if USE_MACHO_SEGMENT
 #define MAPPING_TABLE_FILE "__data"
 #else
-#define MAPPING_TABLE_FILE "CFUnicodeData-L.mapping"
+#define MAPPING_TABLE_FILE "/CFUnicodeData-L.mapping"
 #endif
 #endif
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -620,8 +665,9 @@ __private_extern__ const void *CFUniCharGetMappingData(uint32_t type) {
         const void *bodyBase;
         int headerSize;
         int idx, count;
+	int64_t fileSize;
 
-        if (!__CFUniCharLoadFile(MAPPING_TABLE_FILE, &bytes)) {
+        if (!__CFUniCharLoadFile(MAPPING_TABLE_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
             __CFSpinUnlock(&__CFUniCharMappingTableLock);
             return NULL;
         }
@@ -720,10 +766,12 @@ static bool __CFUniCharLoadCaseMappingTable(void) {
 #define TURKISH_LANG_CODE	(0x7472) // tr
 #define LITHUANIAN_LANG_CODE	(0x6C74) // lt
 #define AZERI_LANG_CODE		(0x617A) // az
+#define DUTCH_LANG_CODE		(0x6E6C) // nl
 #else
 #define TURKISH_LANG_CODE	(0x7274) // tr
 #define LITHUANIAN_LANG_CODE	(0x746C) // lt
 #define AZERI_LANG_CODE		(0x7A61) // az
+#define DUTCH_LANG_CODE		(0x6C6E) // nl
 #endif
 
 CFIndex CFUniCharMapCaseTo(UTF32Char theChar, UTF16Char *convertedChar, CFIndex maxLength, uint32_t ctype, uint32_t flags, const uint8_t *langCode) {
@@ -808,10 +856,17 @@ caseFoldRetry:
                 }
                 break;
 
+	    case DUTCH_LANG_CODE:
+		if ((theChar == 0x004A) || (theChar == 0x006A)) {
+                    *convertedChar = (((ctype == kCFUniCharToUppercase) || (ctype == kCFUniCharToTitlecase) || (kCFUniCharCaseMapDutchDigraph & flags)) ? 0x004A  : 0x006A);
+                    return 1;
+		}
+		break;
+
             default: break;
         }
     }
-#endif DO_SPECIAL_CASE_MAPPING
+#endif // DO_SPECIAL_CASE_MAPPING
 
     if (NULL == __CFUniCharBitmapDataArray) __CFUniCharLoadBitmapData();
 
@@ -1018,7 +1073,15 @@ __private_extern__ uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char th
                     return (((++currentIndex < length) && (buffer[currentIndex] == 0x0307)) ? kCFUniCharCaseMapMoreAbove : 0);
                 }
             }
-        }
+        } else if (*((const uint16_t *)langCode) == DUTCH_LANG_CODE) {
+	    if (kCFUniCharCaseMapDutchDigraph & lastFlags) {
+		return (((theChar == 0x006A) || (theChar == 0x004A)) ? kCFUniCharCaseMapDutchDigraph : 0);
+	    } else {
+		if ((type == kCFUniCharToTitlecase) && ((theChar == 0x0069) || (theChar == 0x0049))) {
+		    return (((++currentIndex < length) && ((buffer[currentIndex] == 0x006A) || (buffer[currentIndex] == 0x004A))) ? kCFUniCharCaseMapDutchDigraph : 0);
+		}
+	    }
+	}
     }
     return 0;
 }
@@ -1029,11 +1092,11 @@ static int __CFUniCharUnicodePropertyTableCount = 0;
 
 static CFSpinLock_t __CFUniCharPropTableLock = CFSpinLockInit;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #if USE_MACHO_SEGMENT
 #define PROP_DB_FILE "__properties"
 #else
-#define PROP_DB_FILE "CFUniCharPropertyDatabase.data"
+#define PROP_DB_FILE "/CFUniCharPropertyDatabase.data"
 #endif
 #elif DEPLOYMENT_TARGET_WINDOWS
 #if USE_MACHO_SEGMENT
@@ -1058,8 +1121,9 @@ const void *CFUniCharGetUnicodePropertyDataForPlane(uint32_t propertyType, uint3
         int idx, count;
         int planeIndex, planeCount;
         int planeSize;
+	int64_t fileSize;
 
-        if (!__CFUniCharLoadFile(PROP_DB_FILE, &bytes)) {
+        if (!__CFUniCharLoadFile(PROP_DB_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
             __CFSpinUnlock(&__CFUniCharPropTableLock);
             return NULL;
         }

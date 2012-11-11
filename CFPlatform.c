@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*	CFPlatform.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
-	Responsibility: Christopher Kane
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
+	Responsibility: Tony Parker
 */
 
 #include "CFInternal.h"
@@ -42,12 +42,13 @@
 #if DEPLOYMENT_TARGET_WINDOWS
 #include <shellapi.h>
 #include <shlobj.h>
+#include <WinIoCtl.h>
 
 #define getcwd _NS_getcwd
 
 #endif
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #define kCFPlatformInterfaceStringEncoding	kCFStringEncodingUTF8
 #else
 #define kCFPlatformInterfaceStringEncoding	CFStringGetSystemEncoding()
@@ -66,12 +67,14 @@ __private_extern__ Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
     return getcwd(path, maxlen) != NULL;
 }
 
+#if SUPPORT_CFM
 static Boolean __CFIsCFM = false;
 
 // If called super early, we just return false
 __private_extern__ Boolean _CFIsCFM(void) {
     return __CFIsCFM;
 }
+#endif
 
 #if DEPLOYMENT_TARGET_WINDOWS
 #define PATH_SEP '\\'
@@ -169,7 +172,7 @@ const char *_CFProcessPath(void) {
     uint32_t size = CFMaxPathSize;
     char buffer[size];
     if (0 == _NSGetExecutablePath(buffer, &size)) {
-#if DEPLOYMENT_TARGET_MACOSX && defined(__ppc__)
+#if SUPPORT_CFM
 	size_t len = strlen(buffer);
 	if (12 <= len && 0 == strcmp("LaunchCFMApp", buffer + len - 12)) {
 	    struct stat exec, lcfm;
@@ -195,6 +198,28 @@ const char *_CFProcessPath(void) {
 }
 #endif
 
+#if DEPLOYMENT_TARGET_LINUX
+#include <unistd.h>
+
+const char *_CFProcessPath(void) {
+    if (__CFProcessPath) return __CFProcessPath;
+    char buf[CFMaxPathSize + 1];
+    
+    ssize_t res = readlink("/proc/self/exe", buf, CFMaxPathSize);
+    if (res > 0) {
+        // null terminate, readlink does not
+        buf[res] = 0;
+        __CFProcessPath = strdup(buf);
+        __CFprogname = strrchr(__CFProcessPath, PATH_SEP);
+        __CFprogname = (__CFprogname ? __CFprogname + 1 : __CFProcessPath);
+    } else {
+        __CFProcessPath = "";
+        __CFprogname = __CFProcessPath;
+    }
+    return __CFProcessPath;
+}
+#endif
+
 __private_extern__ CFStringRef _CFProcessNameString(void) {
     static CFStringRef __CFProcessNameString = NULL;
     if (!__CFProcessNameString) {
@@ -209,13 +234,17 @@ __private_extern__ CFStringRef _CFProcessNameString(void) {
 }
 
 static CFStringRef __CFUserName = NULL;
+static CFSpinLock_t __CFPlatformCacheLock = CFSpinLockInit;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+
+#include <pwd.h>
+
 static CFURLRef __CFHomeDirectory = NULL;
 static uint32_t __CFEUID = -1;
 static uint32_t __CFUID = -1;
 
-static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd) {
+static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd) { // __CFPlatformCacheLock must be locked on entry and will be on exit
     CFURLRef home = NULL;
     if (!issetugid()) {
 	const char *path = __CFgetenv("CFFIXED_USER_HOME");
@@ -231,7 +260,7 @@ static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd) {
     return home;
 }
 
-static void _CFUpdateUserInfo(void) {
+static void _CFUpdateUserInfo(void) { // __CFPlatformCacheLock must be locked on entry and will be on exit
     struct passwd *upwd;
 
     __CFEUID = geteuid();
@@ -264,11 +293,7 @@ static void _CFUpdateUserInfo(void) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_WINDOWS
-typedef DWORD (*NetUserGetInfoCall)(wchar_t *, wchar_t *, DWORD, char* *);
-#endif
-
-static CFURLRef _CFCreateHomeDirectoryURLForUser(CFStringRef uName) {
+static CFURLRef _CFCreateHomeDirectoryURLForUser(CFStringRef uName) { // __CFPlatformCacheLock must be locked on entry and will be on exit
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     if (!uName) {
         if (geteuid() != __CFEUID || getuid() != __CFUID || !__CFHomeDirectory)
@@ -296,12 +321,26 @@ static CFURLRef _CFCreateHomeDirectoryURLForUser(CFStringRef uName) {
         return _CFCopyHomeDirURLForUser(upwd);
     }
 #elif DEPLOYMENT_TARGET_WINDOWS
-    CFStringRef user = !uName ? _CFUserName() : uName;
+    // This code can only get the directory for the current user
+    if (uName && !CFEqual(uName, _CFUserName())) {
+        CFLog(kCFLogLevelError, CFSTR("CFCopyHomeDirectoryURLForUser(): Unable to get home directory for other user"));
+        return NULL;
+    }
+    
     CFURLRef retVal = NULL;
     CFIndex len = 0;
     CFStringRef str = NULL;
-
-    if (!uName || CFEqual(user, _CFUserName())) {
+    
+    UniChar pathChars[MAX_PATH];
+    if (S_OK == SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, (wchar_t *)pathChars)) {
+        len = (CFIndex)wcslen((wchar_t *)pathChars);
+        str = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathChars, len);
+        retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
+        CFRelease(str);
+    }
+    
+    if (!retVal) {
+        // Fall back to environment variable, but this will not be unicode compatible
         const char *cpath = __CFgetenv("HOMEPATH");
         const char *cdrive = __CFgetenv("HOMEDRIVE");
         if (cdrive && cpath) {
@@ -311,98 +350,36 @@ static CFURLRef _CFCreateHomeDirectoryURLForUser(CFStringRef uName) {
             str = CFStringCreateWithCString(kCFAllocatorSystemDefault, fullPath, kCFPlatformInterfaceStringEncoding);
             retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
             CFRelease(str);
-	}
-    }
-    if (retVal == NULL) {
-		UniChar pathChars[MAX_PATH];
-		if (S_OK == SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, (wchar_t *) pathChars)) {
-			UniChar* p = pathChars;
-			while (*p++ != 0)
-				++len;
-			str = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, pathChars, len);
-            		retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
-		} else {
-			// We have to get "some" directory location, so fall-back to the
-			// processes current directory.
-			UniChar currDir[MAX_PATH];
-			DWORD dwChars = GetCurrentDirectoryW(MAX_PATH + 1, (wchar_t *)currDir);
-			if (dwChars > 0) {
-				UniChar* p = currDir;
-				while (*p++ != 0)
-					++len;
-				str = CFStringCreateWithCharacters(kCFAllocatorDefault, currDir, len);
-				retVal = CFURLCreateWithFileSystemPath(NULL, str, kCFURLWindowsPathStyle, true);
-			}
-		    CFRelease(str);
-                }
-    }
-#if 0
-        char fullPath[CFMaxPathSize];
-        HRESULT hr = SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0 /* SHGFP_TYPE_CURRENT */, fullPath);
-        if (SUCCEEDED(hr)) {
-            CFStringRef str = CFStringCreateWithCString(NULL, fullPath, kCFPlatformInterfaceStringEncoding);
-            retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
-            CFRelease(str);
         }
     }
+    
     if (!retVal) {
-        struct _USER_INFO_2 *userInfo;
-        HINSTANCE hinstDll = GetModuleHandleA("NETAPI32");
-        if (!hinstDll)
-            hinstDll = LoadLibraryExA("NETAPI32", NULL, 0);
-        if (hinstDll) {
-            NetUserGetInfoCall lpfn = (NetUserGetInfoCall)GetProcAddress(hinstDll, "NetUserGetInfo");
-            if (lpfn) {
-        unsigned namelen = CFStringGetLength(user);
-                UniChar *username;
-                username = (UniChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UniChar) * (namelen + 1), 0);
-        CFStringGetCharacters(user, CFRangeMake(0, namelen), username);
-                if (!(*lpfn)(NULL, (wchar_t *)username, 2, (char * *)&userInfo)) {
-            UInt32 len = 0;
-            CFMutableStringRef str;
-            while (userInfo->usri2_home_dir[len] != 0) len ++;
-            str = CFStringCreateMutable(kCFAllocatorSystemDefault, len+1);
-            CFStringAppendCharacters(str, (const UniChar *)userInfo->usri2_home_dir, len);
-                    retVal = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str, kCFURLWindowsPathStyle, true);
+        // Last resort: We have to get "some" directory location, so fall-back to the processes current directory.
+        UniChar currDir[MAX_PATH];
+        DWORD dwChars = GetCurrentDirectoryW(MAX_PATH + 1, (wchar_t *)currDir);
+        if (dwChars > 0) {
+            len = (CFIndex)wcslen((wchar_t *)currDir);
+            str = CFStringCreateWithCharacters(kCFAllocatorDefault, currDir, len);
+            retVal = CFURLCreateWithFileSystemPath(NULL, str, kCFURLWindowsPathStyle, true);
             CFRelease(str);
         }
-        CFAllocatorDeallocate(kCFAllocatorSystemDefault, username);
     }
-        } else {
-        }
-    }
-#endif
-
-    // We could do more here (as in KB Article Q101507). If that article is to
-    // be believed, we should only run into this case on Win95, or through
-    // user error.
-#if DEPLOYMENT_TARGET_WINDOWS_SAFARI
-    if (retVal) {
-        CFStringRef str = CFURLCopyFileSystemPath(retVal, kCFURLWindowsPathStyle);
-        if (str && CFStringGetLength(str) == 0) {
-            CFRelease(retVal);
-            retVal=NULL;
-        }
-        if (str) CFRelease(str);
-    }
-#else
-    CFStringRef testPath = CFURLCopyPath(retVal);
+    
+    // We could do more here (as in KB Article Q101507). If that article is to be believed, we should only run into this case on Win95, or through user error.
+    CFStringRef testPath = CFURLCopyFileSystemPath(retVal, kCFURLWindowsPathStyle);
     if (CFStringGetLength(testPath) == 0) {
         CFRelease(retVal);
-        retVal=NULL;
-        }
-    if (testPath) {
-        CFRelease(testPath);
+        retVal = NULL;
     }
-#endif
+    if (testPath) CFRelease(testPath);
+    
     return retVal;
-
 #else
 #error Dont know how to compute users home directories on this platform
 #endif
 }
 
-static CFStringRef _CFUserName(void) {
+static CFStringRef _CFUserName(void) { // __CFPlatformCacheLock must be locked on entry and will be on exit
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     if (geteuid() != __CFEUID || getuid() != __CFUID)
 	_CFUpdateUserInfo();
@@ -428,10 +405,6 @@ static CFStringRef _CFUserName(void) {
     return __CFUserName;
 }
 
-__private_extern__ CFStringRef _CFGetUserName(void) {
-    return CFStringCreateCopy(kCFAllocatorSystemDefault, _CFUserName());
-}
-
 #define CFMaxHostNameLength	256
 #define CFMaxHostNameSize	(CFMaxHostNameLength+1)
 
@@ -447,11 +420,27 @@ __private_extern__ CFStringRef _CFStringCreateHostName(void) {
    These can return NULL.
 */
 CF_EXPORT CFStringRef CFGetUserName(void) {
-    return _CFUserName();
+    CFStringRef result = NULL;
+    __CFSpinLock(&__CFPlatformCacheLock);
+    result = CFStringCreateCopy(kCFAllocatorSystemDefault, _CFUserName());
+    __CFSpinUnlock(&__CFPlatformCacheLock);
+    return result;
+}
+
+CF_EXPORT CFStringRef CFCopyUserName(void) {
+    CFStringRef result = NULL;
+    __CFSpinLock(&__CFPlatformCacheLock);
+    result = CFStringCreateCopy(kCFAllocatorSystemDefault, _CFUserName());
+    __CFSpinUnlock(&__CFPlatformCacheLock);
+    return result;
 }
 
 CF_EXPORT CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName) {
-    return _CFCreateHomeDirectoryURLForUser(uName);
+    CFURLRef result = NULL;
+    __CFSpinLock(&__CFPlatformCacheLock);
+    result = _CFCreateHomeDirectoryURLForUser(uName);
+    __CFSpinUnlock(&__CFPlatformCacheLock);
+    return result;
 }
 
 #undef CFMaxHostNameLength
@@ -526,6 +515,243 @@ CF_EXPORT CFMutableStringRef _CFCreateApplicationRepositoryPath(CFAllocatorRef a
 }
 #endif
 
+#pragma mark -
+#pragma mark Thread Functions
+
+#if DEPLOYMENT_TARGET_WINDOWS
+
+// This code from here:
+// http://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx
+
+const DWORD MS_VC_EXCEPTION=0x406D1388;
+#pragma pack(push,8)
+typedef struct tagTHREADNAME_INFO
+{
+    DWORD dwType; // Must be 0x1000.
+    LPCSTR szName; // Pointer to name (in user addr space).
+    DWORD dwThreadID; // Thread ID (-1=caller thread).
+    DWORD dwFlags; // Reserved for future use, must be zero.
+} THREADNAME_INFO;
+#pragma pack(pop)
+
+CF_EXPORT void _NS_pthread_setname_np(const char *name) {
+    THREADNAME_INFO info;
+    info.dwType = 0x1000;
+    info.szName = name;
+    info.dwThreadID = GetCurrentThreadId();
+    info.dwFlags = 0;
+
+    __try
+    {
+        RaiseException( MS_VC_EXCEPTION, 0, sizeof(info)/sizeof(ULONG_PTR), (ULONG_PTR*)&info );
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+}
+
+static pthread_t __initialPthread = { NULL, 0 };
+
+CF_EXPORT int _NS_pthread_main_np() {
+    pthread_t me = pthread_self();
+    if (NULL == __initialPthread.p) {
+        __initialPthread.p = me.p;
+        __initialPthread.x = me.x;
+    }
+    return (pthread_equal(__initialPthread, me));
+}
+
+#endif
+
+#pragma mark -
+#pragma mark Thread Local Data
+
+// If slot >= CF_TSD_MAX_SLOTS, the SPI functions will crash at NULL + slot address.
+// If thread data has been torn down, these functions should crash on CF_TSD_BAD_PTR + slot address.
+#define CF_TSD_MAX_SLOTS 70
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#define CF_TSD_KEY 55
+#endif
+
+// Windows and Linux, not sure how many times the destructor could get called; CF_TSD_MAX_DESTRUCTOR_CALLS could be 1
+
+#define CF_TSD_BAD_PTR ((void *)0x1000)
+
+typedef void (*tsdDestructor)(void *);
+
+// Data structure to hold TSD data, cleanup functions for each
+typedef struct __CFTSDTable {
+    uint32_t destructorCount;
+    uintptr_t data[CF_TSD_MAX_SLOTS];
+    tsdDestructor destructors[CF_TSD_MAX_SLOTS];
+} __CFTSDTable;
+
+static void __CFTSDFinalize(void *arg);
+
+#if DEPLOYMENT_TARGET_WINDOWS
+
+#include "CFVersionCheck.h"
+
+static DWORD __CFTSDIndexKey = 0xFFFFFFFF;
+
+// Called from CFRuntime's startup code, on Windows only
+__private_extern__ void __CFTSDWindowsInitialize() {
+    __CFTSDIndexKey = TlsAlloc();
+}
+
+// Called from CFRuntime's cleanup code, on Windows only
+__private_extern__ void __CFTSDWindowsCleanup() {
+    TlsFree(__CFTSDIndexKey);
+}
+
+// Called for each thread as it exits, on Windows only
+__private_extern__ void __CFFinalizeWindowsThreadData() {
+    // Normally, this should call the finalizer several times to emulate the behavior of pthreads on Windows. However, a few bugs keep us from doing this:
+    // <rdar://problem/8989063> REGRESSION(CF-610-CF-611): Crash closing Safari in BonjourDB destructor (Windows)
+    // <rdar://problem/9326814> SyncUIHandler crashes after conflict is resolved and we do SyncNow
+    //  and a bug in dispatch keeps us from using pthreadsWin32 directly, because it does not deal with the case of a dispatch_async happening during process exit (it attempts to create a thread, but that is illegal on Win32 and causes a hang).
+    // So instead we just finalize once, which is the behavior pre-Airwolf anyway
+    __CFTSDFinalize(TlsGetValue(__CFTSDIndexKey));
+}
+
+#endif
+
+#if DEPLOYMENT_TARGET_LINUX
+
+static pthread_key_t __CFTSDIndexKey;
+
+// Called from CFRuntime's startup code, on Linux only
+__private_extern__ void __CFTSDLinuxInitialize() {
+    (void)pthread_key_create(&__CFTSDIndexKey, __CFTSDFinalize);
+}
+
+#endif
+
+static void __CFTSDSetSpecific(void *arg) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    pthread_setspecific(CF_TSD_KEY, arg);
+#elif DEPLOYMENT_TARGET_LINUX
+    pthread_setspecific(__CFTSDIndexKey, arg);
+#elif DEPLOYMENT_TARGET_WINDOWS
+    TlsSetValue(__CFTSDIndexKey, arg);
+#endif
+}
+
+static void *__CFTSDGetSpecific() {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    return pthread_getspecific(CF_TSD_KEY);
+#elif DEPLOYMENT_TARGET_LINUX
+    return pthread_getspecific(__CFTSDIndexKey);
+#elif DEPLOYMENT_TARGET_WINDOWS
+    return TlsGetValue(__CFTSDIndexKey);
+#endif
+}
+
+static void __CFTSDFinalize(void *arg) {
+    // Set our TSD so we're called again by pthreads. It will call the destructor 5 times as long as a value is set in the thread specific data. We handle each case below.
+    __CFTSDSetSpecific(arg);
+
+    if (!arg || arg == CF_TSD_BAD_PTR) {
+        // We've already been destroyed. The call above set the bad pointer again. Now we just return.
+        return;
+    }
+    
+    __CFTSDTable *table = (__CFTSDTable *)arg;
+    table->destructorCount++;
+        
+    // On 1st, 2nd, 3rd, 4th calls, invoke destructor
+    // Note that invocation of the destructor may cause a value to be set again in the per-thread data slots. The destructor count and destructors are preserved.  
+    // This logic is basically the same as what pthreads does. We just skip the 'created' flag.
+#if COCOA_ARR0
+    uintptr_t pool = _CFAutoreleasePoolPush();
+#endif
+    for (int32_t i = 0; i < CF_TSD_MAX_SLOTS; i++) {
+        if (table->data[i] && table->destructors[i]) {
+            uintptr_t old = table->data[i];
+            table->data[i] = (uintptr_t)NULL;
+            table->destructors[i]((void *)(old));
+        }
+    }
+#if COCOA_ARR0
+    _CFAutoreleasePoolPop(pool);
+#endif
+    
+    if (table->destructorCount == PTHREAD_DESTRUCTOR_ITERATIONS - 1) {    // On 4th call, destroy our data
+        free(table);
+        
+        // Now if the destructor is called again we will take the shortcut at the beginning of this function.
+        __CFTSDSetSpecific(CF_TSD_BAD_PTR);
+        return;
+    }
+}
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+extern int pthread_key_init_np(int, void (*)(void *));
+#endif
+
+// Get or initialize a thread local storage. It is created on demand.
+static __CFTSDTable *__CFTSDGetTable() {
+    __CFTSDTable *table = (__CFTSDTable *)__CFTSDGetSpecific();
+    // Make sure we're not setting data again after destruction.
+    if (table == CF_TSD_BAD_PTR) {
+        return NULL;
+    }
+    // Create table on demand
+    if (!table) {
+        // This memory is freed in the finalize function
+        table = (__CFTSDTable *)calloc(1, sizeof(__CFTSDTable));
+        // Windows and Linux have created the table already, we need to initialize it here for other platforms. On Windows, the cleanup function is called by DllMain when a thread exits. On Linux the destructor is set at init time.
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+        pthread_key_init_np(CF_TSD_KEY, __CFTSDFinalize);
+#endif
+        __CFTSDSetSpecific(table);
+    }
+    
+    return table;
+}
+
+
+// For the use of CF and Foundation only
+CF_EXPORT void *_CFGetTSD(uint32_t slot) {
+    if (slot > CF_TSD_MAX_SLOTS) {
+        _CFLogSimple(kCFLogLevelError, "Error: TSD slot %d out of range (get)", slot);
+        HALT;
+    }
+    __CFTSDTable *table = __CFTSDGetTable();
+    if (!table) {
+        // Someone is getting TSD during thread destruction. The table is gone, so we can't get any data anymore.
+        _CFLogSimple(kCFLogLevelWarning, "Warning: TSD slot %d retrieved but the thread data has already been torn down.", slot);
+        return NULL;
+    }
+    uintptr_t *slots = (uintptr_t *)(table->data);
+    return (void *)slots[slot];
+}
+
+// For the use of CF and Foundation only
+CF_EXPORT void *_CFSetTSD(uint32_t slot, void *newVal, tsdDestructor destructor) {
+    if (slot > CF_TSD_MAX_SLOTS) {
+        _CFLogSimple(kCFLogLevelError, "Error: TSD slot %d out of range (set)", slot);
+        HALT;
+    }
+    __CFTSDTable *table = __CFTSDGetTable();
+    if (!table) {
+        // Someone is setting TSD during thread destruction. The table is gone, so we can't get any data anymore.
+        _CFLogSimple(kCFLogLevelWarning, "Warning: TSD slot %d set but the thread data has already been torn down.", slot);
+        return NULL;
+    }
+
+    void *oldVal = (void *)table->data[slot];
+    
+    table->data[slot] = (uintptr_t)newVal;
+    table->destructors[slot] = destructor;
+    
+    return oldVal;
+}
+
+#pragma mark -
+#pragma mark Windows Wide to UTF8 and UTF8 to Wide
+
 #if DEPLOYMENT_TARGET_WINDOWS
 /* On Windows, we want to use UTF-16LE for path names to get full unicode support. Internally, however, everything remains in UTF-8 representation. These helper functions stand between CF and the Microsoft CRT to ensure that we are using the right representation on both sides. */
 
@@ -587,7 +813,14 @@ CF_EXPORT int _NS_rmdir(const char *name) {
 
 CF_EXPORT int _NS_chmod(const char *name, int mode) {
     wchar_t *wide = createWideFileSystemRepresentation(name, NULL);
-    int res = _wchmod(wide, mode);
+    
+    // Convert mode
+    int newMode = 0;
+    if (mode | 0400) newMode |= _S_IREAD;
+    if (mode | 0200) newMode |= _S_IWRITE;
+    if (mode | 0100) newMode |= _S_IEXEC;
+    
+    int res = _wchmod(wide, newMode);
     free(wide);
     return res;
 }
@@ -618,7 +851,8 @@ CF_EXPORT char *_NS_getcwd(char *dstbuf, size_t size) {
 }
 
 CF_EXPORT char *_NS_getenv(const char *name) {
-    // todo: wide env variables
+    // todo: wide getenv
+    // We have to be careful what happens here, because getenv is called during cf initialization, and things like cfstring may not be working yet
     return getenv(name);
 }
 
@@ -722,3 +956,224 @@ CF_EXPORT int _NS_mkstemp(char *name, int bufSize) {
 
 #endif
 
+#if DEPLOYMENT_TARGET_WINDOWS
+// Utilities to convert from a volume name to a drive letter
+
+Boolean _isAFloppy(char driveLetter)
+{
+    HANDLE h;
+    TCHAR tsz[8];
+    Boolean retval = false;
+    int iDrive;
+    
+    if (driveLetter >= 'a' && driveLetter <= 'z') {
+        driveLetter = driveLetter - 'a' + 'A';
+    }
+    
+    if ((driveLetter < 'A') || (driveLetter > 'Z')) {
+        // invalid driveLetter; I guess it's not a floppy...
+        return false;
+    }
+    
+    iDrive = driveLetter - 'A' + 1;
+    
+    // On Windows NT, use the technique described in the Knowledge Base article Q115828 and in the "FLOPPY" SDK sample.
+    wsprintf(tsz, TEXT("\\\\.\\%c:"), TEXT('@') + iDrive);
+    h = CreateFile(tsz, 0, FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        DISK_GEOMETRY Geom[20];
+        DWORD cb;
+        
+        if (DeviceIoControl (h, IOCTL_DISK_GET_MEDIA_TYPES, 0, 0,
+                             Geom, sizeof(Geom), &cb, 0)
+            && cb > 0)
+        {
+            switch (Geom[0].MediaType)
+            {
+                case F5_1Pt2_512: // 5.25 1.2MB floppy
+                case F5_360_512:  // 5.25 360K  floppy
+                case F5_320_512:  // 5.25 320K  floppy
+                case F5_320_1024: // 5.25 320K  floppy
+                case F5_180_512:  // 5.25 180K  floppy
+                case F5_160_512:  // 5.25 160K  floppy
+                case F3_1Pt44_512: // 3.5 1.44MB floppy
+                case F3_2Pt88_512: // 3.5 2.88MB floppy
+                case F3_20Pt8_512: // 3.5 20.8MB floppy
+                case F3_720_512:   // 3.5 720K   floppy
+                    retval = true;
+                    break;
+            }
+        }
+        
+        CloseHandle(h);
+    }
+
+    return retval;
+}
+
+
+extern CFStringRef CFCreateWindowsDrivePathFromVolumeName(CFStringRef volNameStr) {
+    if (!volNameStr) return NULL;
+    
+    // This code is designed to match as closely as possible code from QuickTime's library
+    CFIndex strLen = CFStringGetLength(volNameStr);
+    if (strLen == 0) {
+	return NULL;
+    }
+    
+    // Get drive names
+    long length, result;
+    wchar_t *driveNames = NULL;
+    
+    // Get the size of the buffer to store the list of drives
+    length = GetLogicalDriveStringsW(0, 0);
+    if (!length) {
+        return NULL;
+    }
+    
+    driveNames = (wchar_t *)malloc((length + 1) * sizeof(wchar_t));
+    result = GetLogicalDriveStringsW(length, driveNames);
+    
+    if (!result || result > length) {
+        free(driveNames);
+        return NULL;
+    }
+    
+    // Get the volume name string into a wide buffer
+    wchar_t *theVolumeName = (wchar_t *)malloc((strLen + 1) * sizeof(wchar_t));
+    CFStringGetCharacters(volNameStr, CFRangeMake(0, strLen), (UniChar *)theVolumeName);
+    theVolumeName[strLen] = 0;
+    
+    // lowercase volume name
+    _wcslwr(theVolumeName);
+    
+    // Iterate through the drive names, looking for something that matches
+    wchar_t *drivePtr = driveNames;
+    CFStringRef drivePathResult = NULL;
+
+    while (*drivePtr) {
+        _wcslwr(drivePtr);
+        
+        if (!_isAFloppy((char)*drivePtr)) {
+            UINT                oldErrorMode;
+            DWORD               whoCares1, whoCares2;
+            BOOL                getVolInfoSucceeded;
+            UniChar             thisVolumeName[MAX_PATH];
+            
+            // Convert this drive string into a volume name
+            oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+            getVolInfoSucceeded = GetVolumeInformationW(drivePtr, (LPWSTR)thisVolumeName, sizeof(thisVolumeName), NULL, &whoCares1, &whoCares2, NULL, 0);
+            SetErrorMode(oldErrorMode);
+            
+            if (getVolInfoSucceeded) {
+                _wcslwr((wchar_t *)thisVolumeName);
+                
+                // If the volume corresponding to this drive matches the input volume
+                // then this drive is the winner.
+                if (!wcscmp((const wchar_t *)thisVolumeName, theVolumeName) || 
+                    (*thisVolumeName == 0x00 && (CFStringCompare(volNameStr, CFSTR("NONAME"), 0) == kCFCompareEqualTo))) {
+                    drivePathResult = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)drivePtr, wcslen(drivePtr));
+                    break;
+                }
+            }
+        }
+        
+        drivePtr += wcslen(drivePtr) + 1;
+    }
+    
+    
+    free(driveNames);
+    free(theVolumeName);
+    return drivePathResult;
+}
+
+#endif // DEPLOYMENT_TARGET_WINDOWS
+
+#pragma mark -
+#pragma mark Linux OSAtomic
+
+#if DEPLOYMENT_TARGET_LINUX
+
+bool OSAtomicCompareAndSwapPtr(void *oldp, void *newp, void *volatile *dst) 
+{ 
+    return __sync_bool_compare_and_swap(dst, oldp, newp);
+}
+
+bool OSAtomicCompareAndSwapLong(long oldl, long newl, long volatile *dst) 
+{ 
+    return __sync_val_compare_and_swap(dst, oldl, newl);
+}
+
+bool OSAtomicCompareAndSwapPtrBarrier(void *oldp, void *newp, void *volatile *dst) 
+{ 
+    return __sync_bool_compare_and_swap(dst, oldp, newp);
+}
+
+int32_t OSAtomicAdd32Barrier( int32_t theAmount, volatile int32_t *theValue ) {
+    return __sync_fetch_and_add(theValue, theAmount) + theAmount;
+}
+
+bool OSAtomicCompareAndSwap32Barrier(int32_t oldValue, int32_t newValue, volatile int32_t *theValue) {
+    return __sync_bool_compare_and_swap(theValue, oldValue, newValue);
+}
+
+int32_t OSAtomicDecrement32Barrier(volatile int32_t *dst)
+{
+    return OSAtomicAdd32Barrier(-1, dst);
+}
+
+int32_t OSAtomicIncrement32Barrier(volatile int32_t *dst)
+{
+    return OSAtomicAdd32Barrier(1, dst);
+}
+
+int32_t OSAtomicAdd32( int32_t theAmount, volatile int32_t *theValue ) {
+    return OSAtomicAdd32Barrier(theAmount, theValue);
+}
+
+int32_t OSAtomicIncrement32(volatile int32_t *theValue) {
+    return OSAtomicIncrement32Barrier(theValue);
+}
+
+int32_t OSAtomicDecrement32(volatile int32_t *theValue) {
+    return OSAtomicDecrement32Barrier(theValue);
+}
+
+void OSMemoryBarrier() {
+    __sync_synchronize();
+}
+
+#endif // DEPLOYMENT_TARGET_LINUX
+
+#pragma mark -
+#pragma mark Windows and Linux Helpers
+
+#if DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
+
+#include <stdio.h>
+
+__private_extern__ int asprintf(char **ret, const char *format, ...) {
+    va_list args;
+    size_t sz = 1024;
+    *ret = (char *) malloc(sz * sizeof(char));
+    if (!*ret) return -1;
+    va_start(args, format);
+    int cnt = vsnprintf(*ret, sz, format, args);
+    va_end(args);
+    if (cnt < sz - 1) return cnt;
+    sz = cnt + 8;
+    char *oldret = *ret;
+    *ret = (char *) realloc(*ret, sz * sizeof(char));
+    if (!*ret && oldret) free(oldret);
+    if (!*ret) return -1;
+    va_start(args, format);
+    cnt = vsnprintf(*ret, sz, format, args);
+    va_end(args);
+    if (cnt < sz - 1) return cnt;
+    free(*ret);
+    *ret = NULL;
+    return -1;
+}
+
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFCharacterSetPriv.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFCHARACTERSETPRIV__)
@@ -32,7 +32,6 @@
 
 CF_EXTERN_C_BEGIN
 
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 /*!
 	@function CFCharacterSetIsSurrogateHighCharacter
 	Reports whether or not the character is a high surrogate.
@@ -65,7 +64,6 @@ CF_INLINE Boolean CFCharacterSetIsSurrogateLowCharacter(UniChar character) {
 CF_INLINE UTF32Char CFCharacterSetGetLongCharacterForSurrogatePair(UniChar surrogateHigh, UniChar surrogateLow) {
     return ((surrogateHigh - 0xD800UL) << 10) + (surrogateLow - 0xDC00UL) + 0x0010000UL;
 }
-#endif
 
 /* Check to see if the character represented by the surrogate pair surrogateHigh & surrogateLow is in the chraracter set */
 CF_EXPORT Boolean CFCharacterSetIsSurrogatePairMember(CFCharacterSetRef theSet, UniChar surrogateHigh, UniChar surrogateLow) ;

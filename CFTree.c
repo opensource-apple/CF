@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFTree.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -86,7 +86,6 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
     CFTreeRef tree = (CFTreeRef)cf;
     CFMutableStringRef result;
     CFStringRef contextDesc = NULL;
-    Boolean safeToReleaseContextDesc = true;
     const struct __CFTreeCallBacks *cb;
     CFAllocatorRef allocator;
     allocator = CFGetAllocator(tree);
@@ -94,13 +93,12 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
     cb = __CFTreeGetCallBacks(tree);
     if (NULL != cb->copyDescription) {
 	contextDesc = (CFStringRef)INVOKE_CALLBACK1(cb->copyDescription, tree->_info);
-	safeToReleaseContextDesc = _CFExecutableLinkedOnOrAfter(CFSystemVersionTiger);    // Because it came from elsewhere, only free it compatibly (3593254)
     }
     if (NULL == contextDesc) {
 	contextDesc = CFStringCreateWithFormat(allocator, NULL, CFSTR("<CFTree context %p>"), tree->_info);
     }
     CFStringAppendFormat(result, NULL, CFSTR("<CFTree %p [%p]>{children = %u, context = %@}"), cf, allocator, CFTreeGetChildCount(tree), contextDesc);
-    if (contextDesc && safeToReleaseContextDesc) CFRelease(contextDesc);
+    if (contextDesc) CFRelease(contextDesc);
     return result;
 }
 
@@ -329,7 +327,7 @@ void CFTreePrependChild(CFTreeRef tree, CFTreeRef newChild) {
     __CFGenericValidateType(newChild, __kCFTreeTypeID);
     CFAssert1(NULL == newChild->_parent, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newChild->_sibling, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
-    _CFRetainGC(newChild);
+    if (!kCFUseCollectableAllocator) CFRetain(newChild);
     __CFAssignWithWriteBarrier((void **)&newChild->_parent, tree);
     __CFAssignWithWriteBarrier((void **)&newChild->_sibling, tree->_child);
     if (!tree->_child) {
@@ -347,7 +345,7 @@ void CFTreeAppendChild(CFTreeRef tree, CFTreeRef newChild) {
     if (newChild->_parent) {
         HALT;
     }
-    _CFRetainGC(newChild);
+    if (!kCFUseCollectableAllocator) CFRetain(newChild);
     allocator = CFGetAllocator(tree);
     __CFAssignWithWriteBarrier((void **)&newChild->_parent, tree);
     newChild->_sibling = NULL;
@@ -366,7 +364,7 @@ void CFTreeInsertSibling(CFTreeRef tree, CFTreeRef newSibling) {
     CFAssert1(NULL != tree->_parent, __kCFLogAssertion, "%s(): tree must have a parent", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_parent, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_sibling, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
-    _CFRetainGC(newSibling);
+    if (!kCFUseCollectableAllocator) CFRetain(newSibling);
     allocator = CFGetAllocator(tree);
     __CFAssignWithWriteBarrier((void **)&newSibling->_parent, tree->_parent);
     __CFAssignWithWriteBarrier((void **)&newSibling->_sibling, tree->_sibling);
@@ -400,7 +398,7 @@ void CFTreeRemove(CFTreeRef tree) {
 	}
 	tree->_parent = NULL;
 	tree->_sibling = NULL;
-        _CFReleaseGC(tree);
+        if (!kCFUseCollectableAllocator) CFRelease(tree);
     }
 }
 
@@ -414,7 +412,7 @@ void CFTreeRemoveAllChildren(CFTreeRef tree) {
 	CFTreeRef nextSibling = nextChild->_sibling;
 	nextChild->_parent = NULL;
 	nextChild->_sibling = NULL;
-	_CFReleaseGC(nextChild);
+        if (!kCFUseCollectableAllocator) CFRelease(nextChild);
 	nextChild = nextSibling;
     }
 }

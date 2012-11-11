@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBundlePriv.h
-	Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLEPRIV__)
@@ -236,11 +236,17 @@ void _CFBundleFlushCachesForURL(CFURLRef url);
 CF_EXPORT
 void _CFBundleFlushBundleCaches(CFBundleRef bundle);    // The previous two functions flush cached resource paths; this one also flushes bundle-specific caches such as the info dictionary and strings files
 
+CF_EXPORT 
+CFArrayRef _CFBundleCopyAllBundles(void); // Pending publication, the only known client of this is PowerBox. Email david_smith@apple.com before using this.
+
 CF_EXPORT
 void _CFBundleSetStringsFilesShared(CFBundleRef bundle, Boolean flag);
 
 CF_EXPORT
 Boolean _CFBundleGetStringsFilesShared(CFBundleRef bundle);
+
+CF_EXPORT
+CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFStringRef executablePath);
 
 
 /* Functions deprecated as SPI */

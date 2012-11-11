@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CoreFoundation.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_COREFOUNDATION__)
@@ -63,7 +63,6 @@
 #include <CoreFoundation/CFBag.h>
 #include <CoreFoundation/CFBinaryHeap.h>
 #include <CoreFoundation/CFBitVector.h>
-#include <CoreFoundation/CFBundle.h>
 #include <CoreFoundation/CFByteOrder.h>
 #include <CoreFoundation/CFCalendar.h>
 #include <CoreFoundation/CFCharacterSet.h>
@@ -73,16 +72,11 @@
 #include <CoreFoundation/CFDictionary.h>
 #include <CoreFoundation/CFError.h>
 #include <CoreFoundation/CFLocale.h>
-#include <CoreFoundation/CFMessagePort.h>
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFNumberFormatter.h>
-#include <CoreFoundation/CFPlugIn.h>
 #include <CoreFoundation/CFPreferences.h>
 #include <CoreFoundation/CFPropertyList.h>
-#include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFSet.h>
-#include <CoreFoundation/CFSocket.h>
-#include <CoreFoundation/CFStream.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFStringEncodingExt.h>
 #include <CoreFoundation/CFTimeZone.h>
@@ -91,24 +85,26 @@
 #include <CoreFoundation/CFURLAccess.h>
 #include <CoreFoundation/CFUUID.h>
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || TARGET_OS_WIN32
+#include <CoreFoundation/CFBundle.h>
+#include <CoreFoundation/CFMessagePort.h>
+#include <CoreFoundation/CFPlugIn.h>
+#include <CoreFoundation/CFRunLoop.h>
+#include <CoreFoundation/CFStream.h>
+#include <CoreFoundation/CFSocket.h>
 
-#if (TARGET_OS_MAC || TARGET_OS_WIN32)
-#include <CoreFoundation/CFURLEnumerator.h>
+
 #endif
 
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
-#include <CoreFoundation/CFFileDescriptor.h>
-#include <CoreFoundation/CFMachPort.h>
 #endif
+
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE))
 #include <CoreFoundation/CFUserNotification.h>
 #include <CoreFoundation/CFXMLNode.h>
 #include <CoreFoundation/CFXMLParser.h>
 #endif
-#if TARGET_OS_WIN32
-#include <CoreFoundation/CFWindowsMessageQueue.h>
-#include <CoreFoundation/CFWindowsNamedPipe.h>
-#endif
+
 
 #endif /* ! __COREFOUNDATION_COREFOUNDATION__ */
 

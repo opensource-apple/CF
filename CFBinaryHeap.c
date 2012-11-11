@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBinaryHeap.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -167,7 +167,7 @@ static CFStringRef __CFBinaryHeapCopyDescription(CFTypeRef cf) {
 	    desc = heap->_callbacks.copyDescription(item);
 	}
 	if (NULL != desc) {
-	    CFStringAppendFormat(result, NULL, CFSTR("\t%u : %s\n"), idx, desc);
+	    CFStringAppendFormat(result, NULL, CFSTR("\t%u : %@\n"), idx, desc);
 	    CFRelease(desc);
 	} else {
 	    CFStringAppendFormat(result, NULL, CFSTR("\t%u : <%p>\n"), idx, item);
@@ -320,7 +320,7 @@ const void *CFBinaryHeapGetMinimum(CFBinaryHeapRef heap) {
 Boolean CFBinaryHeapGetMinimumIfPresent(CFBinaryHeapRef heap, const void **value) {
     __CFGenericValidateType(heap, __kCFBinaryHeapTypeID);
     if (0 == __CFBinaryHeapCount(heap)) return false;
-    if (NULL != value) __CFAssignWithWriteBarrier((void **)&heap->_buckets[0]._item, value);
+    if (NULL != value) __CFAssignWithWriteBarrier((void **)value, heap->_buckets[0]._item);
     return true;
 }
 

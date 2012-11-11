@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFError_Private.h
-        Copyright (c) 2006-2009, Apple Inc. All rights reserved.
+        Copyright (c) 2006-2011, Apple Inc. All rights reserved.
 	
 	This is Apple-internal SPI for CFError.
 */
@@ -37,13 +37,13 @@ CF_EXTERN_C_BEGIN
 /* This callback function is consulted if a key is not present in the userInfo dictionary. Note that setting a callback for the same domain again simply replaces the previous callback. Set NULL as the callback to remove it.
 */
 typedef CFTypeRef (*CFErrorUserInfoKeyCallBack)(CFErrorRef err, CFStringRef key);
-CF_EXPORT void CFErrorSetCallBackForDomain(CFStringRef domainName, CFErrorUserInfoKeyCallBack callBack) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
-CF_EXPORT CFErrorUserInfoKeyCallBack CFErrorGetCallBackForDomain(CFStringRef domainName) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CF_EXPORT void CFErrorSetCallBackForDomain(CFStringRef domainName, CFErrorUserInfoKeyCallBack callBack) CF_AVAILABLE(10_5, 2_0);
+CF_EXPORT CFErrorUserInfoKeyCallBack CFErrorGetCallBackForDomain(CFStringRef domainName) CF_AVAILABLE(10_5, 2_0);
 
 
 /* A key for "true" debugging descriptions which should never be shown to the user. It's only used when the CFError is shown to the console, and nothing else is available. For instance the rather terse and techie OSStatus descriptions are in this boat.
 */
-CF_EXPORT const CFStringRef kCFErrorDebugDescriptionKey AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CF_EXPORT const CFStringRef kCFErrorDebugDescriptionKey CF_AVAILABLE(10_5, 2_0);
 
 
 CF_EXTERN_C_END

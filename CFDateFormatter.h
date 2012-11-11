@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFDateFormatter.h
-	Copyright (c) 2003-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2003-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFDATEFORMATTER__)
@@ -32,8 +32,6 @@
 #include <CoreFoundation/CFDate.h>
 #include <CoreFoundation/CFLocale.h>
 
-#if MAC_OS_X_VERSION_10_3 <= MAC_OS_X_VERSION_MAX_ALLOWED
-
 CF_EXTERN_C_BEGIN
 
 typedef struct __CFDateFormatter *CFDateFormatterRef;
@@ -41,11 +39,11 @@ typedef struct __CFDateFormatter *CFDateFormatterRef;
 // CFDateFormatters are not thread-safe.  Do not use one from multiple threads!
 
 CF_EXPORT
-CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator, CFStringRef tmplate, CFOptionFlags options, CFLocaleRef locale) AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator, CFStringRef tmplate, CFOptionFlags options, CFLocaleRef locale) CF_AVAILABLE(10_6, 4_0);
 	// no options defined, pass 0 for now
 
 CF_EXPORT
-CFTypeID CFDateFormatterGetTypeID(void) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFTypeID CFDateFormatterGetTypeID(void);
 
 enum {	// date and time format styles
 	kCFDateFormatterNoStyle = 0,
@@ -69,25 +67,25 @@ typedef CFIndex CFDateFormatterStyle;
 // use nothing but numbers.
 
 CF_EXPORT
-CFDateFormatterRef CFDateFormatterCreate(CFAllocatorRef allocator, CFLocaleRef locale, CFDateFormatterStyle dateStyle, CFDateFormatterStyle timeStyle) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFDateFormatterRef CFDateFormatterCreate(CFAllocatorRef allocator, CFLocaleRef locale, CFDateFormatterStyle dateStyle, CFDateFormatterStyle timeStyle);
 	// Returns a CFDateFormatter, localized to the given locale, which
 	// will format dates to the given date and time styles.
 
 CF_EXPORT
-CFLocaleRef CFDateFormatterGetLocale(CFDateFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFLocaleRef CFDateFormatterGetLocale(CFDateFormatterRef formatter);
 
 CF_EXPORT
-CFDateFormatterStyle CFDateFormatterGetDateStyle(CFDateFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFDateFormatterStyle CFDateFormatterGetDateStyle(CFDateFormatterRef formatter);
 
 CF_EXPORT
-CFDateFormatterStyle CFDateFormatterGetTimeStyle(CFDateFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFDateFormatterStyle CFDateFormatterGetTimeStyle(CFDateFormatterRef formatter);
 	// Get the properties with which the date formatter was created.
 
 CF_EXPORT
-CFStringRef CFDateFormatterGetFormat(CFDateFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFDateFormatterGetFormat(CFDateFormatterRef formatter);
 
 CF_EXPORT
-void CFDateFormatterSetFormat(CFDateFormatterRef formatter, CFStringRef formatString) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+void CFDateFormatterSetFormat(CFDateFormatterRef formatter, CFStringRef formatString);
 	// Set the format description string of the date formatter.  This
 	// overrides the style settings.  The format of the format string
 	// is as defined by the ICU library.  The date formatter starts with a
@@ -96,19 +94,19 @@ void CFDateFormatterSetFormat(CFDateFormatterRef formatter, CFStringRef formatSt
 
 
 CF_EXPORT
-CFStringRef CFDateFormatterCreateStringWithDate(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFDateRef date) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFDateFormatterCreateStringWithDate(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFDateRef date);
 
 CF_EXPORT
-CFStringRef CFDateFormatterCreateStringWithAbsoluteTime(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFAbsoluteTime at) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFDateFormatterCreateStringWithAbsoluteTime(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFAbsoluteTime at);
 	// Create a string representation of the given date or CFAbsoluteTime
 	// using the current state of the date formatter.
 
 
 CF_EXPORT
-CFDateRef CFDateFormatterCreateDateFromString(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFStringRef string, CFRange *rangep) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFDateRef CFDateFormatterCreateDateFromString(CFAllocatorRef allocator, CFDateFormatterRef formatter, CFStringRef string, CFRange *rangep);
 
 CF_EXPORT
-Boolean CFDateFormatterGetAbsoluteTimeFromString(CFDateFormatterRef formatter, CFStringRef string, CFRange *rangep, CFAbsoluteTime *atp) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+Boolean CFDateFormatterGetAbsoluteTimeFromString(CFDateFormatterRef formatter, CFStringRef string, CFRange *rangep, CFAbsoluteTime *atp);
 	// Parse a string representation of a date using the current state
 	// of the date formatter.  The range parameter specifies the range
 	// of the string in which the parsing should occur in input, and on
@@ -119,42 +117,42 @@ Boolean CFDateFormatterGetAbsoluteTimeFromString(CFDateFormatterRef formatter, C
 
 
 CF_EXPORT
-void CFDateFormatterSetProperty(CFDateFormatterRef formatter, CFStringRef key, CFTypeRef value) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+void CFDateFormatterSetProperty(CFDateFormatterRef formatter, CFStringRef key, CFTypeRef value);
 
 CF_EXPORT
-CFTypeRef CFDateFormatterCopyProperty(CFDateFormatterRef formatter, CFStringRef key) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFTypeRef CFDateFormatterCopyProperty(CFDateFormatterRef formatter, CFStringRef key);
 	// Set and get various properties of the date formatter, the set of
 	// which may be expanded in the future.
 
-CF_EXPORT const CFStringRef kCFDateFormatterIsLenient AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFBoolean
-CF_EXPORT const CFStringRef kCFDateFormatterTimeZone AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFTimeZone
-CF_EXPORT const CFStringRef kCFDateFormatterCalendarName AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFString
-CF_EXPORT const CFStringRef kCFDateFormatterDefaultFormat AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFString
-CF_EXPORT const CFStringRef kCFDateFormatterTwoDigitStartDate AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER; // CFDate
-CF_EXPORT const CFStringRef kCFDateFormatterDefaultDate AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;	// CFDate
-CF_EXPORT const CFStringRef kCFDateFormatterCalendar AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFCalendar
-CF_EXPORT const CFStringRef kCFDateFormatterEraSymbols AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;	// CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;	// CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;	// CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterAMSymbol AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFDateFormatterPMSymbol AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFDateFormatterLongEraSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;   // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterVeryShortMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterStandaloneMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterVeryShortStandaloneMonthSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterVeryShortWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterStandaloneWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterVeryShortStandaloneWeekdaySymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterQuarterSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; 	// CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortQuarterSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterStandaloneQuarterSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneQuarterSymbols AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFArray of CFString
-CF_EXPORT const CFStringRef kCFDateFormatterGregorianStartDate AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFDate
-CF_EXPORT const CFStringRef kCFDateFormatterDoesRelativeDateFormattingKey AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER; // CFBoolean
+CF_EXPORT const CFStringRef kCFDateFormatterIsLenient;	// CFBoolean
+CF_EXPORT const CFStringRef kCFDateFormatterTimeZone;		// CFTimeZone
+CF_EXPORT const CFStringRef kCFDateFormatterCalendarName;	// CFString
+CF_EXPORT const CFStringRef kCFDateFormatterDefaultFormat;	// CFString
+CF_EXPORT const CFStringRef kCFDateFormatterTwoDigitStartDate; // CFDate
+CF_EXPORT const CFStringRef kCFDateFormatterDefaultDate;	// CFDate
+CF_EXPORT const CFStringRef kCFDateFormatterCalendar;		// CFCalendar
+CF_EXPORT const CFStringRef kCFDateFormatterEraSymbols;	// CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterMonthSymbols;	// CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortMonthSymbols; // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterWeekdaySymbols;	// CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortWeekdaySymbols; // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterAMSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFDateFormatterPMSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFDateFormatterLongEraSymbols CF_AVAILABLE(10_5, 2_0);   // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterVeryShortMonthSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterStandaloneMonthSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneMonthSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterVeryShortStandaloneMonthSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterVeryShortWeekdaySymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterStandaloneWeekdaySymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneWeekdaySymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterVeryShortStandaloneWeekdaySymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterQuarterSymbols CF_AVAILABLE(10_5, 2_0); 	// CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortQuarterSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterStandaloneQuarterSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterShortStandaloneQuarterSymbols CF_AVAILABLE(10_5, 2_0); // CFArray of CFString
+CF_EXPORT const CFStringRef kCFDateFormatterGregorianStartDate CF_AVAILABLE(10_5, 2_0); // CFDate
+CF_EXPORT const CFStringRef kCFDateFormatterDoesRelativeDateFormattingKey CF_AVAILABLE(10_6, 4_0); // CFBoolean
 
 // See CFLocale.h for these calendar constants:
 //	const CFStringRef kCFGregorianCalendar;
@@ -170,8 +168,6 @@ CF_EXPORT const CFStringRef kCFDateFormatterDoesRelativeDateFormattingKey AVAILA
 //	const CFStringRef kCFISO8601Calendar;   not yet implemented
 
 CF_EXTERN_C_END
-
-#endif
 
 #endif /* ! __COREFOUNDATION_CFDATEFORMATTER__ */
 

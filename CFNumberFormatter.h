@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFNumberFormatter.h
-	Copyright (c) 2003-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2003-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFNUMBERFORMATTER__)
@@ -32,8 +32,6 @@
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFLocale.h>
 
-#if MAC_OS_X_VERSION_10_3 <= MAC_OS_X_VERSION_MAX_ALLOWED
-
 CF_EXTERN_C_BEGIN
 
 typedef struct __CFNumberFormatter *CFNumberFormatterRef;
@@ -41,7 +39,7 @@ typedef struct __CFNumberFormatter *CFNumberFormatterRef;
 // CFNumberFormatters are not thread-safe.  Do not use one from multiple threads!
 
 CF_EXPORT
-CFTypeID CFNumberFormatterGetTypeID(void) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFTypeID CFNumberFormatterGetTypeID(void);
 
 enum {	// number format styles
 	kCFNumberFormatterNoStyle = 0,
@@ -55,22 +53,22 @@ typedef CFIndex CFNumberFormatterStyle;
 
 
 CF_EXPORT
-CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleRef locale, CFNumberFormatterStyle style) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleRef locale, CFNumberFormatterStyle style);
 	// Returns a CFNumberFormatter, localized to the given locale, which
 	// will format numbers to the given style.
 
 CF_EXPORT
-CFLocaleRef CFNumberFormatterGetLocale(CFNumberFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFLocaleRef CFNumberFormatterGetLocale(CFNumberFormatterRef formatter);
 
 CF_EXPORT
-CFNumberFormatterStyle CFNumberFormatterGetStyle(CFNumberFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFNumberFormatterStyle CFNumberFormatterGetStyle(CFNumberFormatterRef formatter);
 	// Get the properties with which the number formatter was created.
 
 CF_EXPORT
-CFStringRef CFNumberFormatterGetFormat(CFNumberFormatterRef formatter) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFNumberFormatterGetFormat(CFNumberFormatterRef formatter);
 
 CF_EXPORT
-void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef formatString) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef formatString);
 	// Set the format description string of the number formatter.  This
 	// overrides the style settings.  The format of the format string
 	// is as defined by the ICU library, and is similar to that found
@@ -80,10 +78,10 @@ void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef form
 
 
 CF_EXPORT
-CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberRef number) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberRef number);
 
 CF_EXPORT
-CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberType numberType, const void *valuePtr) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberType numberType, const void *valuePtr);
 	// Create a string representation of the given number or value
 	// using the current state of the number formatter.
 
@@ -94,10 +92,10 @@ enum {
 typedef CFOptionFlags CFNumberFormatterOptionFlags;
 
 CF_EXPORT
-CFNumberRef CFNumberFormatterCreateNumberFromString(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFStringRef string, CFRange *rangep, CFOptionFlags options) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFNumberRef CFNumberFormatterCreateNumberFromString(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFStringRef string, CFRange *rangep, CFOptionFlags options);
 
 CF_EXPORT
-Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFStringRef string, CFRange *rangep, CFNumberType numberType, void *valuePtr) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFStringRef string, CFRange *rangep, CFNumberType numberType, void *valuePtr);
 	// Parse a string representation of a number using the current state
 	// of the number formatter.  The range parameter specifies the range
 	// of the string in which the parsing should occur in input, and on
@@ -110,51 +108,51 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
 
 
 CF_EXPORT
-void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef key, CFTypeRef value) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef key, CFTypeRef value);
 
 CF_EXPORT
-CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFStringRef key) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFStringRef key);
 	// Set and get various properties of the number formatter, the set of
 	// which may be expanded in the future.
 
-CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyCode AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterDecimalSeparator AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyDecimalSeparator AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER; // CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterAlwaysShowDecimalSeparator AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER; // CFBoolean
-CF_EXPORT const CFStringRef kCFNumberFormatterGroupingSeparator AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterUseGroupingSeparator AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFBoolean
-CF_EXPORT const CFStringRef kCFNumberFormatterPercentSymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterZeroSymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterNaNSymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterInfinitySymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterMinusSign AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterPlusSign AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterCurrencySymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterExponentSymbol AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterMinIntegerDigits AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterMaxIntegerDigits AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterMinFractionDigits AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterMaxFractionDigits AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterGroupingSize AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterSecondaryGroupingSize AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterRoundingMode AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterRoundingIncrement AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterFormatWidth AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterPaddingPosition AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterPaddingCharacter AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;	// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterDefaultFormat AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterMultiplier AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterPositivePrefix AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterPositiveSuffix AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterNegativePrefix AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterNegativeSuffix AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterPerMillSymbol AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;		// CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterInternationalCurrencySymbol AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER; // CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyGroupingSeparator AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER; // CFString
-CF_EXPORT const CFStringRef kCFNumberFormatterIsLenient AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;		// CFBoolean
-CF_EXPORT const CFStringRef kCFNumberFormatterUseSignificantDigits AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;	// CFBoolean
-CF_EXPORT const CFStringRef kCFNumberFormatterMinSignificantDigits AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;	// CFNumber
-CF_EXPORT const CFStringRef kCFNumberFormatterMaxSignificantDigits AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyCode;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterDecimalSeparator;	// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyDecimalSeparator; // CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterAlwaysShowDecimalSeparator; // CFBoolean
+CF_EXPORT const CFStringRef kCFNumberFormatterGroupingSeparator;	// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterUseGroupingSeparator;	// CFBoolean
+CF_EXPORT const CFStringRef kCFNumberFormatterPercentSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterZeroSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterNaNSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterInfinitySymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterMinusSign;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterPlusSign;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterCurrencySymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterExponentSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterMinIntegerDigits;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterMaxIntegerDigits;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterMinFractionDigits;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterMaxFractionDigits;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterGroupingSize;		// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterSecondaryGroupingSize;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterRoundingMode;		// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterRoundingIncrement;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterFormatWidth;		// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterPaddingPosition;	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterPaddingCharacter;	// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterDefaultFormat;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterMultiplier;		// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterPositivePrefix;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterPositiveSuffix;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterNegativePrefix;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterNegativeSuffix;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterPerMillSymbol;		// CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterInternationalCurrencySymbol; // CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterCurrencyGroupingSeparator CF_AVAILABLE(10_5, 2_0); // CFString
+CF_EXPORT const CFStringRef kCFNumberFormatterIsLenient CF_AVAILABLE(10_5, 2_0);		// CFBoolean
+CF_EXPORT const CFStringRef kCFNumberFormatterUseSignificantDigits CF_AVAILABLE(10_5, 2_0);	// CFBoolean
+CF_EXPORT const CFStringRef kCFNumberFormatterMinSignificantDigits CF_AVAILABLE(10_5, 2_0);	// CFNumber
+CF_EXPORT const CFStringRef kCFNumberFormatterMaxSignificantDigits CF_AVAILABLE(10_5, 2_0);	// CFNumber
 
 enum {
     kCFNumberFormatterRoundCeiling = 0,
@@ -177,7 +175,7 @@ typedef CFIndex CFNumberFormatterPadPosition;
 
 
 CF_EXPORT
-Boolean CFNumberFormatterGetDecimalInfoForCurrencyCode(CFStringRef currencyCode, int32_t *defaultFractionDigits, double *roundingIncrement) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
+Boolean CFNumberFormatterGetDecimalInfoForCurrencyCode(CFStringRef currencyCode, int32_t *defaultFractionDigits, double *roundingIncrement);
 	// Returns the number of fraction digits that should be displayed, and
 	// the rounding increment (or 0.0 if no rounding is done by the currency)
 	// for the given currency.  Returns false if the currency code is unknown
@@ -185,8 +183,6 @@ Boolean CFNumberFormatterGetDecimalInfoForCurrencyCode(CFStringRef currencyCode,
 	// Not localized because these are properties of the currency.
 
 CF_EXTERN_C_END
-
-#endif
 
 #endif /* ! __COREFOUNDATION_CFNUMBERFORMATTER__ */
 

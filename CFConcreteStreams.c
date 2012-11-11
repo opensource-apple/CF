@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*	CFConcreteStreams.c
-	Copyright (c) 2000-2009, Apple Inc. All rights reserved.
-	Responsibility: Becky Willrich
+	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
+	Responsibility: John Iarocci
 */
 
 #include "CFStreamInternal.h"
@@ -35,6 +35,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <sys/time.h>
 #include <unistd.h>
@@ -43,15 +44,6 @@
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
-// On Unix, you can schedule an fd with the RunLoop by creating a CFSocket around it.  On Win32
-// files and sockets are not interchangeable, and we do cheapo scheduling, where the file is
-// always readable and writable until we hit EOF (similar to the way CFData streams are scheduled).
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#define REAL_FILE_SCHEDULING (1)
-#elif DEPLOYMENT_TARGET_WINDOWS
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
-#endif
 
 #define SCHEDULE_AFTER_WRITE  (0)
 #define SCHEDULE_AFTER_READ   (1)
@@ -66,9 +58,9 @@ typedef struct {
     int fd;
 #ifdef REAL_FILE_SCHEDULING
     union {
-        CFSocketRef sock;		// socket created once we open and have an fd
+        CFFileDescriptorRef cffd;	// ref created once we open and have an fd
         CFMutableArrayRef rlArray;	// scheduling information prior to open
-    } rlInfo; // If fd > 0, sock exists.  Otherwise, rlArray.
+    } rlInfo; // If fd > 0, cffd exists.  Otherwise, rlArray.
 #else
     uint16_t scheduled;	// ref count of how many times we've been scheduled
 #endif
@@ -81,15 +73,16 @@ CONST_STRING_DECL(kCFStreamPropertyFileCurrentOffset, "kCFStreamPropertyFileCurr
 
 
 #ifdef REAL_FILE_SCHEDULING
-static void fileCallBack(CFSocketRef s, CFSocketCallBackType type, CFDataRef address, const void *data, void *info);
+extern void _CFFileDescriptorInduceFakeReadCallBack(CFFileDescriptorRef);
+static void fileCallBack(CFFileDescriptorRef f, CFOptionFlags callBackTypes, void *info);
 
-static void constructCFSocket(_CFFileStreamContext *fileStream, Boolean forRead, struct _CFStream *stream) {
-    CFSocketContext context = {0, stream, NULL, NULL, CFCopyDescription};
-    CFSocketRef sock = CFSocketCreateWithNative(CFGetAllocator(stream), fileStream->fd, forRead ? kCFSocketReadCallBack : kCFSocketWriteCallBack, fileCallBack, &context);
-    CFSocketSetSocketFlags(sock, 0);
+static void constructCFFD(_CFFileStreamContext *fileStream, Boolean forRead, struct _CFStream *stream) {
+    CFFileDescriptorContext context = {0, stream, NULL, NULL, (void *)CFCopyDescription};
+    CFFileDescriptorRef cffd = CFFileDescriptorCreate(CFGetAllocator(stream), fileStream->fd, false, fileCallBack, &context);
+    CFFileDescriptorEnableCallBacks(cffd, forRead ? kCFFileDescriptorReadCallBack : kCFFileDescriptorWriteCallBack);
     if (fileStream->rlInfo.rlArray) {
         CFIndex i, c = CFArrayGetCount(fileStream->rlInfo.rlArray);
-        CFRunLoopSourceRef src = CFSocketCreateRunLoopSource(CFGetAllocator(stream), sock, 0);
+        CFRunLoopSourceRef src = CFFileDescriptorCreateRunLoopSource(CFGetAllocator(stream), cffd, 0);
         for (i = 0; i+1 < c; i += 2) {
             CFRunLoopRef rl = (CFRunLoopRef)CFArrayGetValueAtIndex(fileStream->rlInfo.rlArray, i);
             CFStringRef mode = CFArrayGetValueAtIndex(fileStream->rlInfo.rlArray, i+1);
@@ -98,7 +91,7 @@ static void constructCFSocket(_CFFileStreamContext *fileStream, Boolean forRead,
         CFRelease(fileStream->rlInfo.rlArray);
         CFRelease(src);
     }    
-    fileStream->rlInfo.sock = sock;
+    fileStream->rlInfo.cffd = cffd;
 }
 #endif
 
@@ -121,7 +114,7 @@ static Boolean constructFD(_CFFileStreamContext *fileStream, CFStreamError *erro
     }
     if (__CFBitIsSet(fileStream->flags, APPEND)) {
         flags |= O_APPEND;
-        if(_CFExecutableLinkedOnOrAfter(CFSystemVersionPanther)) flags &= ~O_TRUNC;
+        flags &= ~O_TRUNC;
     }
     
     do {
@@ -138,7 +131,7 @@ static Boolean constructFD(_CFFileStreamContext *fileStream, CFStreamError *erro
 
 #ifdef REAL_FILE_SCHEDULING
         if (fileStream->rlInfo.rlArray != NULL) {
-            constructCFSocket(fileStream, forRead, stream);
+            constructCFFD(fileStream, forRead, stream);
         }
 #endif
 
@@ -172,7 +165,7 @@ static Boolean fileOpen(struct _CFStream *stream, CFStreamError *errorCode, Bool
         }
 #ifdef REAL_FILE_SCHEDULING
     } else if (ctxt->rlInfo.rlArray != NULL) {
-        constructCFSocket(ctxt, forRead, stream);
+        constructCFFD(ctxt, forRead, stream);
 #endif
     }
     return TRUE;
@@ -198,8 +191,18 @@ static CFIndex fileRead(CFReadStreamRef stream, UInt8 *buffer, CFIndex bufferLen
 #ifdef REAL_FILE_SCHEDULING
     if (__CFBitIsSet(ctxt->flags, SCHEDULE_AFTER_READ)) {
         __CFBitClear(ctxt->flags, SCHEDULE_AFTER_READ);
-        if (ctxt->rlInfo.sock) {
-            CFSocketEnableCallBacks(ctxt->rlInfo.sock, kCFSocketReadCallBack);
+        if (!*atEOF && ctxt->rlInfo.cffd) {
+            struct stat statbuf;
+            int ret = fstat(ctxt->fd, &statbuf);
+            if (0 <= ret && (S_IFREG == (statbuf.st_mode & S_IFMT))) {
+                off_t offset = lseek(ctxt->fd, 0, SEEK_CUR);
+                if (statbuf.st_size == offset) {
+                    _CFFileDescriptorInduceFakeReadCallBack(ctxt->rlInfo.cffd);
+                }
+            }
+        }
+        if (ctxt->rlInfo.cffd) {
+            CFFileDescriptorEnableCallBacks(ctxt->rlInfo.cffd, kCFFileDescriptorReadCallBack);
         }
     }
 #else
@@ -264,8 +267,8 @@ static CFIndex fileWrite(CFWriteStreamRef stream, const UInt8 *buffer, CFIndex b
 #ifdef REAL_FILE_SCHEDULING
     if (__CFBitIsSet(fileStream->flags, SCHEDULE_AFTER_WRITE)) {
         __CFBitClear(fileStream->flags, SCHEDULE_AFTER_WRITE);
-        if (fileStream->rlInfo.sock) {
-            CFSocketEnableCallBacks(fileStream->rlInfo.sock, kCFSocketWriteCallBack);
+        if (fileStream->rlInfo.cffd) {
+            CFFileDescriptorEnableCallBacks(fileStream->rlInfo.cffd, kCFFileDescriptorWriteCallBack);
         }
     }
 #else
@@ -314,10 +317,10 @@ static void fileClose(struct _CFStream *stream, void *info) {
         close(ctxt->fd);
         ctxt->fd = -1;
 #ifdef REAL_FILE_SCHEDULING
-        if (ctxt->rlInfo.sock) {
-            CFSocketInvalidate(ctxt->rlInfo.sock);
-            CFRelease(ctxt->rlInfo.sock);
-            ctxt->rlInfo.sock = NULL;
+        if (ctxt->rlInfo.cffd) {
+            CFFileDescriptorInvalidate(ctxt->rlInfo.cffd);
+            CFRelease(ctxt->rlInfo.cffd);
+            ctxt->rlInfo.cffd = NULL;
         }
     } else if (ctxt->rlInfo.rlArray) {
         CFRelease(ctxt->rlInfo.rlArray);
@@ -327,15 +330,14 @@ static void fileClose(struct _CFStream *stream, void *info) {
 }
 
 #ifdef REAL_FILE_SCHEDULING
-static void fileCallBack(CFSocketRef s, CFSocketCallBackType type, CFDataRef address, const void *data, void *info) {
+static void fileCallBack(CFFileDescriptorRef f, CFOptionFlags type, void *info) {
     struct _CFStream *stream = (struct _CFStream *)info;
     Boolean isReadStream = (CFGetTypeID(stream) == CFReadStreamGetTypeID());
     _CFFileStreamContext *fileStream = isReadStream ? CFReadStreamGetInfoPointer((CFReadStreamRef)stream) : CFWriteStreamGetInfoPointer((CFWriteStreamRef)stream);
-    if (type == kCFSocketWriteCallBack) {
+    if (type == kCFFileDescriptorWriteCallBack) {
         __CFBitSet(fileStream->flags, SCHEDULE_AFTER_WRITE);
         CFWriteStreamSignalEvent((CFWriteStreamRef)stream, kCFStreamEventCanAcceptBytes, NULL);
     } else {
-        // type == kCFSocketReadCallBack
         __CFBitSet(fileStream->flags, SCHEDULE_AFTER_READ);
         CFReadStreamSignalEvent((CFReadStreamRef)stream, kCFStreamEventHasBytesAvailable, NULL);
     }
@@ -359,10 +361,10 @@ static void fileSchedule(struct _CFStream *stream, CFRunLoopRef runLoop, CFStrin
         CFArrayAppendValue(fileStream->rlInfo.rlArray, runLoopMode);
     } else {
         CFRunLoopSourceRef rlSrc;
-        if (!fileStream->rlInfo.sock) {
-            constructCFSocket(fileStream, isReadStream, stream);
+        if (!fileStream->rlInfo.cffd) {
+            constructCFFD(fileStream, isReadStream, stream);
         }
-        rlSrc = CFSocketCreateRunLoopSource(CFGetAllocator(stream), fileStream->rlInfo.sock, 0);
+        rlSrc = CFFileDescriptorCreateRunLoopSource(CFGetAllocator(stream), fileStream->rlInfo.cffd, 0);
         CFRunLoopAddSource(runLoop, rlSrc, runLoopMode);
         CFRelease(rlSrc);
     }
@@ -395,9 +397,9 @@ static void fileUnschedule(struct _CFStream *stream, CFRunLoopRef runLoop, CFStr
                 }
             }
         }
-    } else if (fileStream->rlInfo.sock) {
+    } else if (fileStream->rlInfo.cffd) {
 		if (__CFBitIsSet(fileStream->flags, USE_RUNLOOP_ARRAY)) {
-			// we know that fileStream->rlInfo.rlArray is non-NULL because it is in a union with fileStream->rlInfo.sock
+			// we know that fileStream->rlInfo.rlArray is non-NULL because it is in a union with fileStream->rlInfo.cffd
             CFMutableArrayRef runloops = fileStream->rlInfo.rlArray;
             CFIndex i, c;
             for (i = 0, c = CFArrayGetCount(runloops); i+1 < c; i += 2) {
@@ -408,9 +410,9 @@ static void fileUnschedule(struct _CFStream *stream, CFRunLoopRef runLoop, CFStr
                 }
             }
         } else {
-			CFRunLoopSourceRef sockSource = CFSocketCreateRunLoopSource(CFGetAllocator(stream), fileStream->rlInfo.sock, 0);
-			CFRunLoopRemoveSource(runLoop, sockSource, runLoopMode);
-			CFRelease(sockSource);
+			CFRunLoopSourceRef rlSrc = CFFileDescriptorCreateRunLoopSource(CFGetAllocator(stream), fileStream->rlInfo.cffd, 0);
+			CFRunLoopRemoveSource(runLoop, rlSrc, runLoopMode);
+			CFRelease(rlSrc);
 		}
     }
 #else
@@ -483,7 +485,7 @@ static void *fileCreate(struct _CFStream *stream, void *info) {
     }
     newCtxt->fd = ctxt->fd;
 #ifdef REAL_FILE_SCHEDULING
-    newCtxt->rlInfo.sock = NULL;
+    newCtxt->rlInfo.cffd = NULL;
 #else
     newCtxt->scheduled = 0;
 #endif
@@ -496,9 +498,10 @@ static void	fileFinalize(struct _CFStream *stream, void *info) {
     _CFFileStreamContext *ctxt = (_CFFileStreamContext *)info;
     if (ctxt->fd > 0) {
 #ifdef REAL_FILE_SCHEDULING
-        if (ctxt->rlInfo.sock) {
-            CFSocketInvalidate(ctxt->rlInfo.sock); 
-            CFRelease(ctxt->rlInfo.sock);
+        if (ctxt->rlInfo.cffd) {
+            CFFileDescriptorInvalidate(ctxt->rlInfo.cffd); 
+            CFRelease(ctxt->rlInfo.cffd);
+            ctxt->rlInfo.cffd = NULL;
         }
 #endif
         close(ctxt->fd);
@@ -805,6 +808,7 @@ CF_EXPORT CFWriteStreamRef CFWriteStreamCreateWithFile(CFAllocatorRef alloc, CFU
     return (CFWriteStreamRef)_CFStreamCreateWithFile(alloc, fileURL, FALSE);
 }
 
+// CFReadStreamRef takes ownership of the fd, and will close() it
 CFReadStreamRef _CFReadStreamCreateFromFileDescriptor(CFAllocatorRef alloc, int fd) {
     _CFFileStreamContext fileContext;
     fileContext.url = NULL;
@@ -812,6 +816,7 @@ CFReadStreamRef _CFReadStreamCreateFromFileDescriptor(CFAllocatorRef alloc, int 
     return (CFReadStreamRef)_CFStreamCreateWithConstantCallbacks(alloc, &fileContext, (struct _CFStreamCallBacks *)(&fileCallBacks), TRUE);
 }
 
+// CFWriteStreamRef takes ownership of the fd, and will close() it
 CFWriteStreamRef _CFWriteStreamCreateFromFileDescriptor(CFAllocatorRef alloc, int fd) {
     _CFFileStreamContext fileContext;
     fileContext.url = NULL;
@@ -858,6 +863,13 @@ CFWriteStreamRef CFWriteStreamCreateWithBuffer(CFAllocatorRef alloc, UInt8 *buff
 }
 
 CF_EXPORT CFWriteStreamRef CFWriteStreamCreateWithAllocatedBuffers(CFAllocatorRef alloc, CFAllocatorRef bufferAllocator) {
+    if (!(bufferAllocator == NULL || bufferAllocator == kCFAllocatorNull)) {
+        // If there is a real bufferAllocator, then we don't allow the
+        // CFStream or the contents to be allocated with one of the special
+        // *GCRefZero allocators for now.
+        bufferAllocator = _CFConvertAllocatorToNonGCRefZeroEquivalent(bufferAllocator);
+        alloc = _CFConvertAllocatorToNonGCRefZeroEquivalent(alloc);
+    }
     _CFWriteDataStreamContext ctxt;
     ctxt.firstBuf = NULL;
     ctxt.currentBuf = NULL;

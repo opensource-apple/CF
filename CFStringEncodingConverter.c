@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingConverter.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -605,7 +605,7 @@ static const _CFEncodingConverter *__CFGetConverter(uint32_t encoding) {
 	case kCFStringEncodingUTF8: commonConverterSlot = (const _CFEncodingConverter **)&(commonConverters[0]); break;
 
 	    /* the swith here should avoid possible bootstrap issues in the default: case below when invoked from CFStringGetSystemEncoding() */
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 	case kCFStringEncodingMacRoman: commonConverterSlot = (const _CFEncodingConverter **)&(commonConverters[1]); break;
 #elif DEPLOYMENT_TARGET_WINDOWS
 	case kCFStringEncodingWindowsLatin1: commonConverterSlot = (const _CFEncodingConverter **)(&(commonConverters[1])); break;
@@ -907,9 +907,9 @@ __private_extern__ CFIndex CFStringEncodingByteLengthForCharacters(uint32_t enco
         if (1 == converter->definition->maxBytesPerChar) return numChars;
 
         if (NULL == converter->definition->toBytesLen) {
-            CFIndex usedCharLen;
+            CFIndex usedByteLen;
 
-            return ((kCFStringEncodingConversionSuccess == CFStringEncodingUnicodeToBytes(encoding, flags, characters, numChars, &usedCharLen, NULL, 0, NULL)) ? usedCharLen : 0);
+            return ((kCFStringEncodingConversionSuccess == CFStringEncodingUnicodeToBytes(encoding, flags, characters, numChars, NULL, NULL, 0, &usedByteLen)) ? usedByteLen : 0);
         } else {
             return converter->definition->toBytesLen(flags, characters, numChars);
         }

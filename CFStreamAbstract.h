@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStreamAbstract.h
-	Copyright (c) 2000-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTREAMABSTRACT__)
@@ -134,10 +134,17 @@ CF_EXPORT
 void *_CFWriteStreamGetClient(CFWriteStreamRef writeStream);
 
 // Returns an array of the runloops and modes on which the stream is currently scheduled
+// Note that these are unretained mutable arrays - use the copy variant instead.
 CF_EXPORT
 CFArrayRef _CFReadStreamGetRunLoopsAndModes(CFReadStreamRef readStream);
 CF_EXPORT
 CFArrayRef _CFWriteStreamGetRunLoopsAndModes(CFWriteStreamRef writeStream);
+
+// Returns an array of the runloops and modes on which the stream is currently scheduled
+CF_EXPORT
+CFArrayRef _CFReadStreamCopyRunLoopsAndModes(CFReadStreamRef readStream);
+CF_EXPORT
+CFArrayRef _CFWriteStreamCopyRunLoopsAndModes(CFWriteStreamRef writeStream);
 
 /* Deprecated versions; here for backwards compatibility. */
 typedef struct {

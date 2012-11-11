@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodings.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -148,7 +148,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
 
     if ((encoding == kCFStringEncodingUTF16) || (encoding == kCFStringEncodingUTF16BE) || (encoding == kCFStringEncodingUTF16LE)) { // UTF-16
         const UTF16Char *src = (const UTF16Char *)bytes;
-	const UTF16Char *limit = src + (len / sizeof(UTF16Char));
+        const UTF16Char *limit = src + (len / sizeof(UTF16Char)); // <rdar://problem/7854378> avoiding odd len issue
         bool swap = false;
 
         if (kCFStringEncodingUTF16 == encoding) {
@@ -228,7 +228,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
         }
     } else if ((encoding == kCFStringEncodingUTF32) || (encoding == kCFStringEncodingUTF32BE) || (encoding == kCFStringEncodingUTF32LE)) {
         const UTF32Char *src = (const UTF32Char *)bytes;
-	const UTF32Char *limit =  src + (len / sizeof(UTF32Char));
+        const UTF32Char *limit =  src + (len / sizeof(UTF32Char)); // <rdar://problem/7854378> avoiding odd len issue
         bool swap = false;
         static bool strictUTF32 = (bool)-1;
 
@@ -474,7 +474,7 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, CFIndex len, CFStringE
                 buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (guessedLength <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : (UniChar *)CFAllocatorAllocate(buffer->allocator, guessedLength * sizeof(UniChar), 0));
 		if (!buffer->chars.unicode) goto memoryErrorExit;
                 
-                if (lossyFlag == (UInt32)-1) lossyFlag = (_CFExecutableLinkedOnOrAfter(CFSystemVersionPanther) ? 0 : kCFStringEncodingAllowLossyConversion);
+                if (lossyFlag == (UInt32)-1) lossyFlag = 0;
                 
                 if (CFStringEncodingBytesToUnicode(encoding, lossyFlag|__CFGetASCIICompatibleFlag(), bytes, len, NULL, buffer->chars.unicode, (guessedLength > MAX_LOCAL_UNICHARS ? guessedLength : MAX_LOCAL_UNICHARS), &(buffer->numChars))) result = FALSE;
             }
@@ -834,6 +834,7 @@ Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CF
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #define MAX_STACK_BUFFER_LEN	(255)
     const UTF16Char *characters = CFStringGetCharactersPtr(string);
+    const char *origBuffer = buffer;
     const char *bufferLimit = buffer + maxBufLen;
     CFIndex length = CFStringGetLength(string);
     CFIndex usedBufLen;
@@ -872,6 +873,11 @@ Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CF
 
     if (buffer < bufferLimit) { // Since the filename has its own limit, this is ok for now
         *buffer = '\0';
+	if (_CFExecutableLinkedOnOrAfter(CFSystemVersionLion)) {
+	    while (origBuffer < buffer) if (*origBuffer++ == 0) {	// There's a zero in there. Now see if the rest are all zeroes.
+		while (origBuffer < buffer) if (*origBuffer++ != 0) return false;	// Embedded NULLs should cause failure: <rdar://problem/5863219>
+            }
+	}
         return true;
     } else {
         return false;
@@ -896,7 +902,7 @@ void _CFStringGetUserDefaultEncoding(UInt32 *oScriptValue, UInt32 *oRegionValue)
     char buffer[__kCFMaxDefaultEncodingFileLength];
     int uid = getuid();
 
-    if ((stringValue = getenv(__kCFUserEncodingEnvVariableName)) != NULL) {
+    if ((stringValue = (char *)__CFgetenv(__kCFUserEncodingEnvVariableName)) != NULL) {
         if ((uid == strtol_l(stringValue, &stringValue, 0, NULL)) && (':' == *stringValue)) {
             ++stringValue;
         } else {
@@ -904,7 +910,7 @@ void _CFStringGetUserDefaultEncoding(UInt32 *oScriptValue, UInt32 *oRegionValue)
         }
     }
 
-    if ((stringValue == NULL) && ((uid > 0) || getenv("HOME"))) {
+    if ((stringValue == NULL) && ((uid > 0) || __CFgetenv("HOME"))) {
         char passwdExtraBuf[1000 + MAXPATHLEN];  // Extra memory buffer for getpwuid_r(); no clue as to how large this should be...
         struct passwd passwdBuf, *passwdp = NULL;
 
@@ -922,7 +928,7 @@ void _CFStringGetUserDefaultEncoding(UInt32 *oScriptValue, UInt32 *oRegionValue)
 
 	    const char *path = NULL;
 	    if (!issetugid()) {
-		path = getenv("CFFIXED_USER_HOME");
+		path = __CFgetenv("CFFIXED_USER_HOME");
 	    }
 	    if (!path) {
 		path = passwdp->pw_dir;
@@ -938,7 +944,7 @@ void _CFStringGetUserDefaultEncoding(UInt32 *oScriptValue, UInt32 *oRegionValue)
                 snprintf(filename, sizeof(filename), "0x%X:0:0", uid);
                 setenv(__kCFUserEncodingEnvVariableName, filename, 1);
             } else {
-                int readSize;
+                ssize_t readSize;
                 readSize = read(fd, buffer, __kCFMaxDefaultEncodingFileLength - 1);
                 buffer[(readSize < 0 ? 0 : readSize)] = '\0';
                 close(fd);
@@ -983,7 +989,7 @@ void _CFStringGetInstallationEncodingAndRegion(uint32_t *encoding, uint32_t *reg
 	int no_hang_fd = __CFProphylacticAutofsAccess ? open("/dev/autofs_nowait", 0) : -1;
 	int fd = open(filename, O_RDONLY, 0);
 	if (0 <= fd) {
-            size_t size = read(fd, buffer, __kCFMaxDefaultEncodingFileLength - 1);
+            ssize_t size = read(fd, buffer, __kCFMaxDefaultEncodingFileLength - 1);
             buffer[(size < 0 ? 0 : size)] = '\0';
             close(fd);
             stringValue = buffer;
@@ -1003,7 +1009,7 @@ Boolean _CFStringSaveUserDefaultEncoding(UInt32 iScriptValue, UInt32 iRegionValu
     if (passwdp) {
 	const char *path = passwdp->pw_dir;
 	if (!issetugid()) {
-	    char *value = getenv("CFFIXED_USER_HOME");
+	    const char *value = __CFgetenv("CFFIXED_USER_HOME");
 	    if (value) path = value; // override
 	}
 

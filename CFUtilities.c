@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,24 +22,35 @@
  */
 
 /*	CFUtilities.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
-	Responsibility: Christopher Kane
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
+	Responsibility: Tony Parker
 */
 
 #include <CoreFoundation/CFPriv.h>
 #include "CFInternal.h"
 #include "CFLocaleInternal.h"
 #include <CoreFoundation/CFPriv.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <CoreFoundation/CFBundle.h>
+#endif
 #include <CoreFoundation/CFURLAccess.h>
 #include <CoreFoundation/CFPropertyList.h>
 #include <CoreFoundation/CFTimeZone.h>
 #include <CoreFoundation/CFCalendar.h>
+#if DEPLOYMENT_TARGET_WINDOWS
+#include <process.h>
+#endif
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 #include <asl.h>
+#else
+#define ASL_LEVEL_EMERG 0
+#define ASL_LEVEL_DEBUG 7
+#endif
+
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <unistd.h>
 #include <sys/uio.h>
@@ -59,12 +70,11 @@
 #include <stdio.h>
 #include <sys/errno.h>
 #include <mach/mach_time.h>
-#include <libkern/OSAtomic.h>
 #include <Block.h>
 #endif
 #if DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    #include <string.h>
-    #include <pthread.h>
+#include <string.h>
+#include <pthread.h>
 #endif
 
 /* Comparator is passed the address of the values. */
@@ -158,6 +168,14 @@ __private_extern__ uintptr_t __CFFindPointer(uintptr_t ptr, uintptr_t start) {
         address += size;
     }
     return 0;
+}
+
+__private_extern__ void __CFDumpAllPointerLocations(uintptr_t ptr) {
+    uintptr_t addr = 0;
+    do {
+        addr = __CFFindPointer(ptr, sizeof(void *) + addr);
+        printf("%p\n", (void *)addr);
+    } while (addr != 0);
 }
 #endif
 
@@ -311,156 +329,12 @@ CONST_STRING_DECL(_kCFSystemVersionBuildVersionKey, "ProductBuildVersion")
 CONST_STRING_DECL(_kCFSystemVersionProductVersionStringKey, "Version")
 CONST_STRING_DECL(_kCFSystemVersionBuildStringKey, "Build")
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || TARGET_IPHONE_SIMULATOR
 
-typedef struct {
-    uint16_t    primaryVersion;
-    uint8_t     secondaryVersion;
-    uint8_t     tertiaryVersion;
-} CFLibraryVersion;
-
-CFLibraryVersion CFGetExecutableLinkedLibraryVersion(CFStringRef libraryName) {
-    CFLibraryVersion ret = {0xFFFF, 0xFF, 0xFF};
-    char library[CFMaxPathSize];	// search specs larger than this are pointless
-    if (!CFStringGetCString(libraryName, library, sizeof(library), kCFStringEncodingUTF8)) return ret;
-    int32_t version = NSVersionOfLinkTimeLibrary(library);
-    if (-1 != version) {
-	ret.primaryVersion = version >> 16;
-	ret.secondaryVersion = (version >> 8) & 0xff;
-	ret.tertiaryVersion = version & 0xff;
-    }
-    return ret;
-}
-
-CFLibraryVersion CFGetExecutingLibraryVersion(CFStringRef libraryName) {
-    CFLibraryVersion ret = {0xFFFF, 0xFF, 0xFF};
-    char library[CFMaxPathSize];	// search specs larger than this are pointless
-    if (!CFStringGetCString(libraryName, library, sizeof(library), kCFStringEncodingUTF8)) return ret;
-    int32_t version = NSVersionOfRunTimeLibrary(library);
-    if (-1 != version) {
-	ret.primaryVersion = version >> 16;
-	ret.secondaryVersion = (version >> 8) & 0xff;
-	ret.tertiaryVersion = version & 0xff;
-    }
-    return ret;
-}
-
-static inline Boolean _CFLibraryVersionLessThan(CFLibraryVersion vers1, CFLibraryVersion vers2) {
-    if (vers1.primaryVersion < vers2.primaryVersion) {
-	return true;
-    } else if (vers1.primaryVersion == vers2.primaryVersion) {
-	if (vers1.secondaryVersion < vers2.secondaryVersion) {
-	    return true;
-	} else if (vers1.secondaryVersion == vers2.secondaryVersion) {
-	    return vers1.tertiaryVersion < vers2.tertiaryVersion;
-	}
-    }
-    return false;
-}
-
-/*
-If
-   (vers != 0xFFFF): We know the version number of the library this app was linked against
-   and (versionInfo[version].VERSIONFIELD != 0xFFFF): And we know what version number started the specified release
-   and ((version == 0) || (versionInfo[version-1].VERSIONFIELD < versionInfo[version].VERSIONFIELD)): And it's distinct from the prev release
-Then
-   If the version the app is linked against is less than the version recorded for the specified release
-   Then stop checking and return false
-   Else stop checking and return YES
-Else
-   Continue checking (the next library)
-*/
-
-#define resultIndex(VERSION) (VERSION)
-
-#define checkLibrary(LIBNAME, VERSIONFIELD) { \
-    uint16_t vers = (NSVersionOfLinkTimeLibrary(LIBNAME) >> 16); \
-    if ((vers != 0xFFFF) && (versionInfo[version].VERSIONFIELD != 0xFFFF) && \
-        ((version == 0) || (versionInfo[version-1].VERSIONFIELD < versionInfo[version].VERSIONFIELD))) \
-        return (results[resultIndex(version)] = ((vers < versionInfo[version].VERSIONFIELD) ? false : true)); \
-}
-
-
-CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
-    // The numbers in the below tables should be the numbers for any version of the framework in the release.
-    // When adding new entries to these tables for a new build train, it's simplest to use the versions of the
-    // first new versions of projects submitted to the new train. These can later be updated. One thing to watch for is that software updates
-    // for the previous release do not increase numbers beyond the number used for the next release!
-    // For a given train, don't ever use the last versions submitted to the previous train! (This to assure room for software updates.)
-    // If versions are the same as previous release, use 0xFFFF; this will assure the answer is a conservative NO.
-    // NOTE: Also update the CFM check below, perhaps to the previous release... (???)
-    static const struct {
-        uint16_t libSystemVersion;
-        uint16_t cocoaVersion;
-        uint16_t appkitVersion;
-        uint16_t fouVersion;
-        uint16_t cfVersion;
-        uint16_t carbonVersion;
-        uint16_t applicationServicesVersion;
-        uint16_t coreServicesVersion;
-        uint16_t iokitVersion;
-    } versionInfo[] = {
-	{50, 5, 577, 397, 196, 113, 16, 9, 52},		/* CFSystemVersionCheetah (used the last versions) */
-	{55, 7, 620, 425, 226, 122, 16, 10, 67},	/* CFSystemVersionPuma (used the last versions) */
-        {56, 8, 631, 431, 232, 122, 17, 11, 73},	/* CFSystemVersionJaguar */
-        {67, 9, 704, 481, 281, 126, 19, 16, 159},	/* CFSystemVersionPanther */
-        {73, 10, 750, 505, 305, 128, 22, 18, 271},	/* CFSystemVersionTiger */
-        {89, 12, 840, 575, 375, 136, 34, 32, 0xFFFF},			/* CFSystemVersionLeopard */
-        {112, 13, 960, 680, 480, 0xFFFF, 0xFFFF, 33, 0xFFFF},	/* CFSystemVersionSnowLeopard */
-    };
-    
-    
-    // !!! When a new release is added to the array, don't forget to bump the size of this array!
-    static char results[CFSystemVersionMax] = {-2, -2, -2, -2, -2, -2};	/* We cache the results per-release; there are only a few of these... */
-    if (version >= CFSystemVersionMax) return false;	/* Actually, we don't know the answer, and something scary is going on */
-    
-    int versionIndex = resultIndex(version);
-    if (results[versionIndex] != -2) return results[versionIndex];
-
-#if DEPLOYMENT_TARGET_MACOSX
-    if (_CFIsCFM()) {
-        results[versionIndex] = (version <= CFSystemVersionJaguar) ? true : false;
-        return results[versionIndex];
-    }
-#endif
-    
-    // Do a sanity check, since sometimes System framework is screwed up, which confuses everything. 
-    // If the currently executing System framework has a version less than that of Leopard, warn.
-    static Boolean called = false;
-    if (!called) {	// We do a check here in case CFLog() recursively calls this function.
-	called = true;
-	int32_t vers = NSVersionOfRunTimeLibrary("System");
-	if ((vers != -1) && (((unsigned int)vers) >> 16) < 89) {    // 89 is the version of libSystem for first version of Leopard
-	    CFLog(__kCFLogAssertion, CFSTR("System.framework version (%x) is wrong, this will break CF and up"), vers);
-	}
-	if (results[versionIndex] != -2) return results[versionIndex];	// If there was a recursive call that figured this out, return
-    }
-    
-#if DEPLOYMENT_TARGET_MACOSX
-    if (version < CFSystemVersionMax) {
-	// Compare the linked library versions of a Mac OS X app to framework versions found on Mac OS X.
-	checkLibrary("System", libSystemVersion);	// Pretty much everyone links with this
-	checkLibrary("Cocoa", cocoaVersion);
-	checkLibrary("AppKit", appkitVersion);
-	checkLibrary("Foundation", fouVersion);
-	checkLibrary("CoreFoundation", cfVersion);
-	checkLibrary("Carbon", carbonVersion);
-	checkLibrary("ApplicationServices", applicationServicesVersion);
-	checkLibrary("CoreServices", coreServicesVersion);
-	checkLibrary("IOKit", iokitVersion);
-    } else {
-    }
-#else 
-#endif
-    
-    /* If not found, then simply return NO to indicate earlier --- compatibility by default, unfortunately */
-    return false;
-}
-#else
 CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
     return true;
 }
-#endif
+
+
 
 
 #if DEPLOYMENT_TARGET_MACOSX
@@ -472,6 +346,20 @@ __private_extern__ void *__CFLookupCarbonCoreFunction(const char *name) {
     void *dyfunc = NULL;
     if (image) {
 	dyfunc = dlsym(image, name);
+    }
+    return dyfunc;
+}
+#endif
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+__private_extern__ void *__CFLookupCoreServicesInternalFunction(const char *name) {
+    static void *image = NULL;
+    if (NULL == image) {
+        image = dlopen("/System/Library/PrivateFrameworks/CoreServicesInternal.framework/CoreServicesInternal", RTLD_LAZY | RTLD_LOCAL);
+    }
+    void *dyfunc = NULL;
+    if (image) {
+        dyfunc = dlsym(image, name);
     }
     return dyfunc;
 }
@@ -523,13 +411,16 @@ __private_extern__ CFIndex __CFActiveProcessorCount() {
     v = (v & 0x3333333333333333ULL) + ((v >> 2) & 0x3333333333333333ULL);
     v = (v + (v >> 4)) & 0xf0f0f0f0f0f0f0fULL;
     pcnt = (v * 0x0101010101010101ULL) >> ((sizeof(v) - 1) * 8);
-#else
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
     int32_t mib[] = {CTL_HW, HW_AVAILCPU};
     size_t len = sizeof(pcnt);
     int32_t result = sysctl(mib, sizeof(mib) / sizeof(int32_t), &pcnt, &len, NULL, 0);
     if (result != 0) {
         pcnt = 0;
     }
+#else
+    // Assume the worst
+    pcnt = 1;
 #endif
     return pcnt;
 }
@@ -585,62 +476,42 @@ static void _CFShowToFile(FILE *file, Boolean flush, const void *obj) {
      }
      cnt = CFStringGetLength(str);
 
-     // iTunes used OutputDebugStringW(theString);
-
-     CFStringInitInlineBuffer(str, &buffer, CFRangeMake(0, cnt));
 #if DEPLOYMENT_TARGET_WINDOWS
-    wchar_t *accumulatedBuffer = (wchar_t *)malloc((cnt+1) * sizeof(wchar_t));
-#endif
+    UniChar *ptr = (UniChar *)CFStringGetCharactersPtr(str);
+    BOOL freePtr = false;
+    if (!ptr) {
+	CFIndex strLen = CFStringGetLength(str);
+	// +2, 1 for newline, 1 for null
+	CFIndex bufSize = sizeof(UniChar *) * (CFStringGetMaximumSizeForEncoding(strLen, kCFStringEncodingUnicode) + 2);
+	CFIndex bytesUsed = 0;
+	ptr = (UniChar *)malloc(bufSize);
+	CFStringGetCharacters(str, CFRangeMake(0, strLen), ptr);
+	ptr[strLen] = L'\n';
+	ptr[strLen+1] = 0;
+	freePtr = true;
+    }
+    OutputDebugStringW((wchar_t *)ptr);
+    if (freePtr) free(ptr);
+#else
+     CFStringInitInlineBuffer(str, &buffer, CFRangeMake(0, cnt));
      for (idx = 0; idx < cnt; idx++) {
          UniChar ch = __CFStringGetCharacterFromInlineBufferQuick(&buffer, idx);
-#if DEPLOYMENT_TARGET_WINDOWS
-         if (file == stderr || file == stdout) {
-             accumulatedBuffer[idx] = ch;
-	         lastNL = (ch == L'\n');
-             if (idx == (cnt - 1)) {
-                accumulatedBuffer[idx+1] = L'\0'; 
-                OutputDebugStringW(accumulatedBuffer);
-                free(accumulatedBuffer);
-             }
-         } else {
-#endif
-
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-		 if (ch < 128) {
+         if (ch < 128) {
              fprintf_l(file, NULL, "%c", ch);
-	     lastNL = (ch == '\n');
+             lastNL = (ch == '\n');
          } else {
              fprintf_l(file, NULL, "\\u%04x", ch);
          }
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-		 if (ch < 128) {
-             _fprintf_l(file, "%c", NULL, ch);
-	     lastNL = (ch == '\n');
-         } else {
-             _fprintf_l(file, "\\u%04x", NULL, ch);
-         }
-#endif
      }
-#if  DEPLOYMENT_TARGET_WINDOWS
-     }
-#endif
      if (!lastNL) {
-#if DEPLOYMENT_TARGET_WINDOWS
-         if (file == stderr || file == stdout) {
-             char outStr[2];
-             outStr[0] = '\n';
-             outStr[1] = '\0';
-             OutputDebugStringA(outStr);
-         } else {
-		 _fprintf_l(file, "\n", NULL);
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
          fprintf_l(file, NULL, "\n");
-#endif
-#if DEPLOYMENT_TARGET_WINDOWS
-         }
+#else
+         fprintf(file, NULL, "\n");
 #endif
          if (flush) fflush(file);
      }
+#endif
 
      if (str) CFRelease(str);
 }
@@ -673,6 +544,8 @@ static Boolean also_do_stderr() {
     return true;
 }
 
+extern char *__CFBundleMainID;
+
 static void __CFLogCString(int32_t lev, const char *message, size_t length, char withBanner) {
     char *banner = NULL;
     char *time = NULL;
@@ -681,6 +554,7 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 #if !(DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
     int bannerLen = 0;
 #endif
+    // The banner path may use CF functions, but the rest of this function should not. It may be called at times when CF is not fully setup or torn down.
     if (withBanner) {
 	CFAbsoluteTime at = CFAbsoluteTimeGetCurrent();
 	CFCalendarRef calendar = CFCalendarCreateWithIdentifier(kCFAllocatorSystemDefault, kCFCalendarIdentifierGregorian);
@@ -701,16 +575,20 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
         asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%x] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), pthread_mach_thread_np(pthread_self()));
 	asprintf(&thread, "%x", pthread_mach_thread_np(pthread_self()));
-#else
+#elif DEPLOYMENT_TARGET_WINDOWS
 	bannerLen = asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%x] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), GetCurrentThreadId());
 	asprintf(&thread, "%x", GetCurrentThreadId());
+#else
+	bannerLen = asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%x] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), (unsigned int)pthread_self());
+	asprintf(&thread, "%x", pthread_self());
 #endif
 	asprintf(&time, "%04d-%02d-%02d %02d:%02d:%02d.%03d", year, month, day, hour, minute, second, ms);
 
     }
     after_banner:;
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     asprintf(&uid, "%d", geteuid());
-    aslclient asl = asl_open(NULL, "com.apple.console", ASL_OPT_NO_DELAY);
+    aslclient asl = asl_open(NULL, __CFBundleMainID[0] ? __CFBundleMainID : "com.apple.console", ASL_OPT_NO_DELAY);
     aslmsg msg = asl_new(ASL_TYPE_MSG);
     asl_set(msg, "CFLog Local Time", time); // not to be documented, not public API
     asl_set(msg, "CFLog Thread", thread);   // not to be documented, not public API
@@ -721,6 +599,7 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
     asl_send(asl, msg);
     asl_free(msg);
     asl_close(asl);
+#endif
 
     if (also_do_stderr()) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
@@ -736,7 +615,7 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 	__CFSpinLock(&lock);
 	writev(STDERR_FILENO, v[0].iov_base ? v : v + 1, nv);
 	__CFSpinUnlock(&lock);
-#else
+#elif DEPLOYMENT_TARGET_WINDOWS
         size_t bufLen = bannerLen + length + 1;
         char *buf = (char *)malloc(sizeof(char) * bufLen);
         if (banner) {
@@ -753,6 +632,21 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 	// This Win32 API call only prints when a debugger is active
 	// OutputDebugStringA(buf);
         free(buf);
+#else
+        size_t bufLen = bannerLen + length + 1;
+        char *buf = (char *)malloc(sizeof(char) * bufLen);
+        if (banner) {
+            // Copy the banner into the debug string
+            memmove(buf, banner, bannerLen);
+            
+            // Copy the message into the debug string
+            strncpy(buf + bannerLen, message, bufLen - bannerLen);
+        } else {
+            strncpy(buf, message, bufLen);
+        }
+        buf[bufLen - 1] = '\0';
+        fprintf(stderr, "%s\n", buf);
+        free(buf);
 #endif
     }
     
@@ -764,8 +658,9 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 
 CF_EXPORT void _CFLogvEx(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, int32_t lev, CFStringRef format, va_list args) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-    if (pthread_getspecific(__CFTSDKeyIsInCFLog)) return;
-    pthread_setspecific(__CFTSDKeyIsInCFLog, (void *)1);
+    uintptr_t val = (uintptr_t)_CFGetTSD(__CFTSDKeyIsInCFLog);
+    if (3 < val) return; // allow up to 4 nested invocations
+    _CFSetTSD(__CFTSDKeyIsInCFLog, (void *)(val + 1), NULL);
 #endif
     CFStringRef str = format ? _CFStringCreateWithFormatAndArgumentsAux(kCFAllocatorSystemDefault, copyDescFunc, formatOptions, (CFStringRef)format, args) : 0;
     CFIndex blen = str ? CFStringGetMaximumSizeForEncoding(CFStringGetLength(str), kCFStringEncodingUTF8) + 1 : 0;
@@ -781,8 +676,20 @@ CF_EXPORT void _CFLogvEx(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, co
     if (buf) free(buf);
     if (str) CFRelease(str);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-    pthread_setspecific(__CFTSDKeyIsInCFLog, 0);
+    _CFSetTSD(__CFTSDKeyIsInCFLog, (void *)val, NULL);
 #endif
+}
+
+// This CF-only log function uses no CF functionality, so it may be called anywhere within CF - including thread teardown or prior to full CF setup
+__private_extern__ void _CFLogSimple(int32_t lev, char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    char formattedMessage[1024];
+    int length = vsnprintf(formattedMessage, 1024, format, args);
+    if (length > 0) {
+        __CFLogCString(lev, formattedMessage, length, 0);
+    }
+    va_end(args);
 }
 
 void CFLog(int32_t lev, CFStringRef format, ...) {

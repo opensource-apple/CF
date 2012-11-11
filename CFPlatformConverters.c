@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPlatformConverters.c
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -62,9 +62,7 @@ static const CFStringEncodingConverter __CFPlatformBootstrap = {
 
 __private_extern__ const CFStringEncodingConverter *__CFStringEncodingGetExternalConverter(uint32_t encoding) {
 
-    if (NULL != __CFStringEncodingGetICUName(encoding)) return &__CFICUBootstrap;
-    
-    return (__CFIsPlatformConverterAvailable(encoding) ? &__CFPlatformBootstrap : NULL);
+    return (__CFIsPlatformConverterAvailable(encoding) ? &__CFPlatformBootstrap : (__CFStringEncodingGetICUName(encoding) ? &__CFICUBootstrap : NULL)); // we prefer Text Encoding Converter ICU since it's more reliable
 }
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
@@ -119,9 +117,11 @@ __private_extern__ CFIndex __CFStringEncodingPlatformUnicodeToBytes(uint32_t enc
     WORD dwFlags = 0;
     CFIndex usedLen;
 
-    dwFlags |= (flags & (kCFStringEncodingAllowLossyConversion|kCFStringEncodingSubstituteCombinings) ? WC_DEFAULTCHAR : 0);
-    dwFlags |= (flags & kCFStringEncodingComposeCombinings ? WC_COMPOSITECHECK : 0);
-    dwFlags |= (flags & kCFStringEncodingIgnoreCombinings ? WC_DISCARDNS : 0);
+    if ((kCFStringEncodingUTF7 != encoding) && (kCFStringEncodingGB_18030_2000 != encoding) && (0x0800 != (encoding & 0x0F00))) { // not UTF-7/GB18030/ISO-2022-*
+        dwFlags |= (flags & (kCFStringEncodingAllowLossyConversion|kCFStringEncodingSubstituteCombinings) ? WC_DEFAULTCHAR : 0);
+        dwFlags |= (flags & kCFStringEncodingComposeCombinings ? WC_COMPOSITECHECK : 0);
+        dwFlags |= (flags & kCFStringEncodingIgnoreCombinings ? WC_DISCARDNS : 0);
+    }
 
     if ((usedLen = WideCharToMultiByte(CFStringConvertEncodingToWindowsCodepage(encoding), dwFlags, (LPCWSTR)characters, numChars, (LPSTR)bytes, maxByteLen, NULL, NULL)) == 0) {
         if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
@@ -168,8 +168,10 @@ __private_extern__ CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t enc
     WORD dwFlags = 0;
     CFIndex usedLen;
 
-    dwFlags |= (flags & (kCFStringEncodingAllowLossyConversion|kCFStringEncodingSubstituteCombinings) ? 0 : MB_ERR_INVALID_CHARS);
-    dwFlags |= (flags & (kCFStringEncodingUseCanonical|kCFStringEncodingUseHFSPlusCanonical) ? MB_COMPOSITE : MB_PRECOMPOSED);
+    if ((kCFStringEncodingUTF7 != encoding) && (kCFStringEncodingGB_18030_2000 != encoding) && (0x0800 != (encoding & 0x0F00))) { // not UTF-7/GB18030/ISO-2022-*
+        dwFlags |= (flags & (kCFStringEncodingAllowLossyConversion|kCFStringEncodingSubstituteCombinings) ? 0 : MB_ERR_INVALID_CHARS);
+        dwFlags |= (flags & (kCFStringEncodingUseCanonical|kCFStringEncodingUseHFSPlusCanonical) ? MB_COMPOSITE : MB_PRECOMPOSED);
+    }
 
     if ((usedLen = MultiByteToWideChar(CFStringConvertEncodingToWindowsCodepage(encoding), dwFlags, (LPCSTR)bytes, numBytes, (LPWSTR)characters, maxCharLen) == 0)) {
         if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringScanner.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -227,7 +227,7 @@ __private_extern__ Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFTyp
             return true;
         }
     }
-#endif 0
+#endif // 0
     // Get characters until one not in __CFNumberSet[] is encountered
     while ((ch < 128) && (__CFNumberSet[ch >> 3] & (1 << (ch & 7)))) {
         if (numChars >= capacity - 1) {

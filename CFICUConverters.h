@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -26,7 +26,7 @@
  *  CoreFoundation
  *
  *  Created by Aki Inoue on 07/12/04.
- *  Copyright (c) 2007-2009, Apple Inc. All rights reserved.
+ *  Copyright (c) 2007-2011, Apple Inc. All rights reserved.
  *
  */
 
@@ -45,7 +45,4 @@ __private_extern__ CFIndex __CFStringEncodingICUByteLength(const char *icuName, 
 // The caller is responsible for freeing the memory (use CFAllocatorDeallocate)
 __private_extern__ CFStringEncoding *__CFStringEncodingCreateICUEncodings(CFAllocatorRef allocator, CFIndex *numberOfIndex);
 
-#if DEPLOYMENT_TARGET_WINDOWS
-__private_extern__ void __CFStringEncodingICUThreadDataCleaner(void *context);
-#endif
 

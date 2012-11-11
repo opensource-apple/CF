@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStream.h
-	Copyright (c) 2000-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTREAM__)
@@ -105,17 +105,13 @@ CFWriteStreamRef CFWriteStreamCreateWithFile(CFAllocatorRef alloc, CFURLRef file
 CF_EXPORT
 void CFStreamCreateBoundPair(CFAllocatorRef alloc, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream, CFIndex transferBufferSize);
 
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 /* Property for file write streams; value should be a CFBoolean.  Set to TRUE to append to a file, rather than to replace its contents */
 CF_EXPORT
 const CFStringRef kCFStreamPropertyAppendToFile;
-#endif
 
-#if MAC_OS_X_VERSION_10_3 <= MAC_OS_X_VERSION_MAX_ALLOWED
+CF_EXPORT
+const CFStringRef kCFStreamPropertyFileCurrentOffset;   // Value is a CFNumber
 
-CF_EXPORT const CFStringRef kCFStreamPropertyFileCurrentOffset AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;   // Value is a CFNumber
-
-#endif
 
 /* Socket stream properties */
 
@@ -136,10 +132,8 @@ CF_EXPORT
 void CFStreamCreatePairWithSocket(CFAllocatorRef alloc, CFSocketNativeHandle sock, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
 CF_EXPORT
 void CFStreamCreatePairWithSocketToHost(CFAllocatorRef alloc, CFStringRef host, UInt32 port, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 CF_EXPORT
 void CFStreamCreatePairWithPeerSocketSignature(CFAllocatorRef alloc, const CFSocketSignature *signature, CFReadStreamRef *readStream, CFWriteStreamRef *writeStream);
-#endif
 
 
 /* Returns the current state of the stream */
@@ -150,9 +144,9 @@ CFStreamStatus CFWriteStreamGetStatus(CFWriteStreamRef stream);
 
 /* Returns NULL if no error has occurred; otherwise returns the error. */
 CF_EXPORT
-CFErrorRef CFReadStreamCopyError(CFReadStreamRef stream) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFErrorRef CFReadStreamCopyError(CFReadStreamRef stream) CF_AVAILABLE(10_5, 2_0);
 CF_EXPORT
-CFErrorRef CFWriteStreamCopyError(CFWriteStreamRef stream) AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+CFErrorRef CFWriteStreamCopyError(CFWriteStreamRef stream) CF_AVAILABLE(10_5, 2_0);
 
 /* Returns success/failure.  Opening a stream causes it to reserve all the system
    resources it requires.  If the stream can open non-blocking, this will always 
@@ -225,14 +219,12 @@ CFTypeRef CFReadStreamCopyProperty(CFReadStreamRef stream, CFStringRef propertyN
 CF_EXPORT
 CFTypeRef CFWriteStreamCopyProperty(CFWriteStreamRef stream, CFStringRef propertyName);
 
-#if MAC_OS_X_VERSION_10_2 <= MAC_OS_X_VERSION_MAX_ALLOWED
 /* Returns TRUE if the stream recognizes and accepts the given property-value pair; 
    FALSE otherwise. */
 CF_EXPORT
 Boolean CFReadStreamSetProperty(CFReadStreamRef stream, CFStringRef propertyName, CFTypeRef propertyValue);
 CF_EXPORT
 Boolean CFWriteStreamSetProperty(CFWriteStreamRef stream, CFStringRef propertyName, CFTypeRef propertyValue);
-#endif
 
 /* Asynchronous processing - If you wish to neither poll nor block, you may register 
    a client to hear about interesting events that occur on a stream.  Only one client

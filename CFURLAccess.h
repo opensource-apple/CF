@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFURLAccess.h
-	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2011, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -63,7 +63,7 @@ large files.
 
 */
 CF_EXPORT
-Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
 
 /* Attempts to write the given data and properties to the given URL.
 If dataToWrite is NULL, only properties are written out (use
@@ -74,17 +74,17 @@ Returns success or failure; errorCode is set as for
 CFURLCreateDataAndPropertiesFromResource(), above.
 */
 CF_EXPORT
-Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
 
 /* Destroys the resource indicated by url. */
 /* Returns success or failure; errorCode set as above. */
 CF_EXPORT
-Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
 
 /* Convenience method which calls through to CFURLCreateDataAndPropertiesFromResource(). */
 /* Returns NULL on error and sets errorCode accordingly. */
 CF_EXPORT
-CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
 
 
 /* Common error codes (returned only by the older APIs that predate CFError) */
@@ -104,21 +104,21 @@ typedef CFIndex CFURLError;
 /* Older property keys */
 
 CF_EXPORT
-const CFStringRef kCFURLFileExists AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFileExists CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLFileDirectoryContents AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFileDirectoryContents CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLFileLength AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFileLength CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT 
-const CFStringRef kCFURLFileLastModificationTime AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFileLastModificationTime CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLFilePOSIXMode AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFilePOSIXMode CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLFileOwnerID AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLFileOwnerID CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusCode AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLHTTPStatusCode CF_AVAILABLE(10_0, 2_0);
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusLine AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+const CFStringRef kCFURLHTTPStatusLine CF_AVAILABLE(10_0, 2_0);
 
 /* The value of kCFURLFileExists is a CFBoolean */
 /* The value of kCFURLFileDirectoryContents is a CFArray containing CFURLs.  An empty array means the directory exists, but is empty */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBasicHash.m
-	Copyright (c) 2008-2009, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2011, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -30,7 +30,6 @@
 #import <CoreFoundation/CFRuntime.h>
 #import <CoreFoundation/CFSet.h>
 #import <Block.h>
-#import <objc/objc.h>
 #import <math.h>
 
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -47,10 +46,15 @@
 #define ENABLE_DTRACE_PROBES 0
 #define ENABLE_MEMORY_COUNTERS 0
 
+#if defined(DTRACE_PROBES_DISABLED) && DTRACE_PROBES_DISABLED
+#undef ENABLE_DTRACE_PROBES
+#define ENABLE_DTRACE_PROBES 0
+#endif
 
 /*
 // dtrace -h -s foo.d
-// Note: output then changed by putting do/while around macro bodies and adding a cast of the arguments
+// Note: output then changed by casts of the arguments
+// dtrace macros last generated 2010-09-08 on 10.7 prerelease (11A259)
 
 provider Cocoa_HashTable {
         probe hash_key(unsigned long table, unsigned long key, unsigned long hash);
@@ -83,77 +87,91 @@ do { \
         __dtrace_probe$Cocoa_HashTable$rehash_end$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1), (unsigned long)(arg2)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_REHASH_END_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$rehash_end$v1()
+#define	COCOA_HASHTABLE_REHASH_END_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$rehash_end$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_REHASH_START(arg0, arg1, arg2) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$rehash_start$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1), (unsigned long)(arg2)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_REHASH_START_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$rehash_start$v1()
+#define	COCOA_HASHTABLE_REHASH_START_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$rehash_start$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_HASH_KEY(arg0, arg1, arg2) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$hash_key$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1), (unsigned long)(arg2)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_HASH_KEY_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$hash_key$v1()
+#define	COCOA_HASHTABLE_HASH_KEY_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$hash_key$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_PROBE_DELETED(arg0, arg1) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$probe_deleted$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_PROBE_DELETED_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$probe_deleted$v1()
+#define	COCOA_HASHTABLE_PROBE_DELETED_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$probe_deleted$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_PROBE_EMPTY(arg0, arg1) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$probe_empty$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_PROBE_EMPTY_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$probe_empty$v1()
+#define	COCOA_HASHTABLE_PROBE_EMPTY_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$probe_empty$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_PROBE_VALID(arg0, arg1) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$probe_valid$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_PROBE_VALID_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$probe_valid$v1()
+#define	COCOA_HASHTABLE_PROBE_VALID_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$probe_valid$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_PROBING_END(arg0, arg1) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$probing_end$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_PROBING_END_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$probing_end$v1()
+#define	COCOA_HASHTABLE_PROBING_END_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$probing_end$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_PROBING_START(arg0, arg1) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$probing_start$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_PROBING_START_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$probing_start$v1()
+#define	COCOA_HASHTABLE_PROBING_START_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$probing_start$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 #define COCOA_HASHTABLE_TEST_EQUAL(arg0, arg1, arg2) \
 do { \
         __asm__ volatile(".reference " COCOA_HASHTABLE_TYPEDEFS); \
         __dtrace_probe$Cocoa_HashTable$test_equal$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67((unsigned long)(arg0), (unsigned long)(arg1), (unsigned long)(arg2)); \
         __asm__ volatile(".reference " COCOA_HASHTABLE_STABILITY); \
 } while (0)
-#define COCOA_HASHTABLE_TEST_EQUAL_ENABLED() \
-        __dtrace_isenabled$Cocoa_HashTable$test_equal$v1()
+#define	COCOA_HASHTABLE_TEST_EQUAL_ENABLED() \
+	({ int _r = __dtrace_isenabled$Cocoa_HashTable$test_equal$v1(); \
+		__asm__ volatile(""); \
+		_r; })
 
-extern void __dtrace_probe$Cocoa_HashTable$rehash_end$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
-extern int __dtrace_isenabled$Cocoa_HashTable$rehash_end$v1(void);
-extern void __dtrace_probe$Cocoa_HashTable$rehash_start$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
-extern int __dtrace_isenabled$Cocoa_HashTable$rehash_start$v1(void);
 extern void __dtrace_probe$Cocoa_HashTable$hash_key$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
 extern int __dtrace_isenabled$Cocoa_HashTable$hash_key$v1(void);
 extern void __dtrace_probe$Cocoa_HashTable$probe_deleted$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long);
@@ -166,6 +184,10 @@ extern void __dtrace_probe$Cocoa_HashTable$probing_end$v1$756e7369676e6564206c6f
 extern int __dtrace_isenabled$Cocoa_HashTable$probing_end$v1(void);
 extern void __dtrace_probe$Cocoa_HashTable$probing_start$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long);
 extern int __dtrace_isenabled$Cocoa_HashTable$probing_start$v1(void);
+extern void __dtrace_probe$Cocoa_HashTable$rehash_end$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
+extern int __dtrace_isenabled$Cocoa_HashTable$rehash_end$v1(void);
+extern void __dtrace_probe$Cocoa_HashTable$rehash_start$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
+extern int __dtrace_isenabled$Cocoa_HashTable$rehash_start$v1(void);
 extern void __dtrace_probe$Cocoa_HashTable$test_equal$v1$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67$756e7369676e6564206c6f6e67(unsigned long, unsigned long, unsigned long);
 extern int __dtrace_isenabled$Cocoa_HashTable$test_equal$v1(void);
 
@@ -197,244 +219,6 @@ extern int __dtrace_isenabled$Cocoa_HashTable$test_equal$v1(void);
 #define __LP64__ 0
 #endif
 
-enum {
-#if __LP64__
-    __CFBasicHashMarkerShift = 40 // 64 - 24
-#else
-    __CFBasicHashMarkerShift = 8  // 32 - 24
-#endif
-};
-
-typedef union {
-    uintptr_t weak;
-    id strong;
-} CFBasicHashValue;
-
-struct __CFBasicHash {
-    CFRuntimeBase base;
-    struct { // 128 bits
-        uint64_t hash_style:2;
-        uint64_t values2_offset:1;
-        uint64_t keys_offset:2;
-        uint64_t keys2_offset:2;
-        uint64_t counts_offset:3;
-        uint64_t orders_offset:3;
-        uint64_t hashes_offset:3;
-        uint64_t num_buckets_idx:6; /* index to number of buckets */
-        uint64_t used_buckets:42;   /* number of used buckets */
-        uint64_t __0:2;
-        uint64_t finalized:1;
-        uint64_t fast_grow:1;
-        uint64_t strong_values:1;
-        uint64_t strong_values2:1;
-        uint64_t strong_keys:1;
-        uint64_t strong_keys2:1;
-        uint64_t marker:24;
-        uint64_t deleted:16;
-        uint64_t mutations:16;
-    } bits;
-    __strong const CFBasicHashCallbacks *callbacks;
-    void *pointers[1];
-};
-
-CF_INLINE CFBasicHashValue *__CFBasicHashGetValues(CFBasicHashRef ht) {
-    return (CFBasicHashValue *)ht->pointers[0];
-}
-
-CF_INLINE void __CFBasicHashSetValues(CFBasicHashRef ht, CFBasicHashValue *ptr) {
-    __AssignWithWriteBarrier(&ht->pointers[0], ptr);
-}
-
-CF_INLINE CFBasicHashValue *__CFBasicHashGetValues2(CFBasicHashRef ht) {
-    if (0 == ht->bits.values2_offset) HALT;
-    return (CFBasicHashValue *)ht->pointers[ht->bits.values2_offset];
-}
-
-CF_INLINE void __CFBasicHashSetValues2(CFBasicHashRef ht, CFBasicHashValue *ptr) {
-    if (0 == ht->bits.values2_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.values2_offset], ptr);
-}
-
-CF_INLINE CFBasicHashValue *__CFBasicHashGetKeys(CFBasicHashRef ht) {
-    if (0 == ht->bits.keys_offset) HALT;
-    return (CFBasicHashValue *)ht->pointers[ht->bits.keys_offset];
-}
-
-CF_INLINE void __CFBasicHashSetKeys(CFBasicHashRef ht, CFBasicHashValue *ptr) {
-    if (0 == ht->bits.keys_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.keys_offset], ptr);
-}
-
-CF_INLINE CFBasicHashValue *__CFBasicHashGetKeys2(CFBasicHashRef ht) {
-    if (0 == ht->bits.keys2_offset) HALT;
-    return (CFBasicHashValue *)ht->pointers[ht->bits.keys2_offset];
-}
-
-CF_INLINE void __CFBasicHashSetKeys2(CFBasicHashRef ht, CFBasicHashValue *ptr) {
-    if (0 == ht->bits.keys2_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.keys2_offset], ptr);
-}
-
-CF_INLINE uintptr_t *__CFBasicHashGetCounts(CFBasicHashRef ht) {
-    if (0 == ht->bits.counts_offset) HALT;
-    return (uintptr_t *)ht->pointers[ht->bits.counts_offset];
-}
-
-CF_INLINE void __CFBasicHashSetCounts(CFBasicHashRef ht, uintptr_t *ptr) {
-    if (0 == ht->bits.counts_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.counts_offset], ptr);
-}
-
-CF_INLINE uintptr_t *__CFBasicHashGetOrders(CFBasicHashRef ht) {
-    if (0 == ht->bits.orders_offset) HALT;
-    return (uintptr_t *)ht->pointers[ht->bits.orders_offset];
-}
-
-CF_INLINE void __CFBasicHashSetOrders(CFBasicHashRef ht, uintptr_t *ptr) {
-    if (0 == ht->bits.orders_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.orders_offset], ptr);
-}
-
-CF_INLINE uintptr_t *__CFBasicHashGetHashes(CFBasicHashRef ht) {
-    if (0 == ht->bits.hashes_offset) HALT;
-    return (uintptr_t *)ht->pointers[ht->bits.hashes_offset];
-}
-
-CF_INLINE void __CFBasicHashSetHashes(CFBasicHashRef ht, uintptr_t *ptr) {
-    if (0 == ht->bits.hashes_offset) HALT;
-    __AssignWithWriteBarrier(&ht->pointers[ht->bits.hashes_offset], ptr);
-}
-
-static uintptr_t __CFBasicHashNullCallback(CFBasicHashRef ht, uint8_t op, uintptr_t a1, uintptr_t a2, const CFBasicHashCallbacks *cb) {
-    switch (op) {
-    case kCFBasicHashCallbackOpCopyCallbacks: return (uintptr_t)&CFBasicHashNullCallbacks;
-    case kCFBasicHashCallbackOpFreeCallbacks: return 0;
-    case kCFBasicHashCallbackOpRetainValue:
-    case kCFBasicHashCallbackOpRetainValue2:
-    case kCFBasicHashCallbackOpRetainKey:
-    case kCFBasicHashCallbackOpRetainKey2:   return a1;
-    case kCFBasicHashCallbackOpReleaseValue:
-    case kCFBasicHashCallbackOpReleaseValue2:
-    case kCFBasicHashCallbackOpReleaseKey:
-    case kCFBasicHashCallbackOpReleaseKey2:  return 0;
-    case kCFBasicHashCallbackOpValueEqual:
-    case kCFBasicHashCallbackOpValue2Equal:
-    case kCFBasicHashCallbackOpKeyEqual:
-    case kCFBasicHashCallbackOpKey2Equal:    return a1 == a2;
-    case kCFBasicHashCallbackOpHashKey:
-    case kCFBasicHashCallbackOpHashKey2:     return a1;
-    case kCFBasicHashCallbackOpDescribeValue:
-    case kCFBasicHashCallbackOpDescribeValue2:
-    case kCFBasicHashCallbackOpDescribeKey:
-    case kCFBasicHashCallbackOpDescribeKey2: return (uintptr_t)CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)a1);
-    }
-    return 0;
-}
-
-static uintptr_t __CFBasicHashStandardCallback(CFBasicHashRef ht, uint8_t op, uintptr_t a1, uintptr_t a2, const CFBasicHashCallbacks *cb) {
-    switch (op) {
-    case kCFBasicHashCallbackOpCopyCallbacks: return (uintptr_t)&CFBasicHashStandardCallbacks;
-    case kCFBasicHashCallbackOpFreeCallbacks: return 0;
-    case kCFBasicHashCallbackOpRetainValue:   return (ht->bits.strong_values) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)a1) : (uintptr_t)CFRetain((CFTypeRef)a1);
-    case kCFBasicHashCallbackOpRetainValue2:  return (ht->bits.strong_values2) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)a1) : (uintptr_t)CFRetain((CFTypeRef)a1);
-    case kCFBasicHashCallbackOpRetainKey:     return (ht->bits.strong_keys) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)a1) : (uintptr_t)CFRetain((CFTypeRef)a1);
-    case kCFBasicHashCallbackOpRetainKey2:    return (ht->bits.strong_keys2) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)a1) : (uintptr_t)CFRetain((CFTypeRef)a1);
-    case kCFBasicHashCallbackOpReleaseValue:  if (ht->bits.strong_values) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)a1); else CFRelease((CFTypeRef)a1); return 0;
-    case kCFBasicHashCallbackOpReleaseValue2: if (ht->bits.strong_values2) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)a1); else CFRelease((CFTypeRef)a1); return 0;
-    case kCFBasicHashCallbackOpReleaseKey:    if (ht->bits.strong_keys) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)a1); else CFRelease((CFTypeRef)a1); return 0;
-    case kCFBasicHashCallbackOpReleaseKey2:   if (ht->bits.strong_keys2) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)a1); else CFRelease((CFTypeRef)a1); return 0;
-    case kCFBasicHashCallbackOpValueEqual:
-    case kCFBasicHashCallbackOpValue2Equal:
-    case kCFBasicHashCallbackOpKeyEqual:
-    case kCFBasicHashCallbackOpKey2Equal:     return CFEqual((CFTypeRef)a1, (CFTypeRef)a2);
-    case kCFBasicHashCallbackOpHashKey:
-    case kCFBasicHashCallbackOpHashKey2:      return (uintptr_t)CFHash((CFTypeRef)a1);
-    case kCFBasicHashCallbackOpDescribeValue:
-    case kCFBasicHashCallbackOpDescribeValue2:
-    case kCFBasicHashCallbackOpDescribeKey:
-    case kCFBasicHashCallbackOpDescribeKey2:  return (uintptr_t)CFCopyDescription((CFTypeRef)a1);
-    }
-    return 0;
-}
-
-__private_extern__ const CFBasicHashCallbacks CFBasicHashNullCallbacks = {__CFBasicHashNullCallback};
-__private_extern__ const CFBasicHashCallbacks CFBasicHashStandardCallbacks = {__CFBasicHashStandardCallback};
-
-CF_INLINE uintptr_t __CFBasicHashImportValue(CFBasicHashRef ht, uintptr_t stack_value) {
-    return ht->callbacks->func(ht, kCFBasicHashCallbackOpRetainValue, stack_value, 0, ht->callbacks);
-}
-
-CF_INLINE uintptr_t __CFBasicHashImportValue2(CFBasicHashRef ht, uintptr_t stack_value) {
-    return ht->callbacks->func(ht, kCFBasicHashCallbackOpRetainValue2, stack_value, 0, ht->callbacks);
-}
-
-CF_INLINE uintptr_t __CFBasicHashImportKey(CFBasicHashRef ht, uintptr_t stack_key) {
-    return ht->callbacks->func(ht, kCFBasicHashCallbackOpRetainKey, stack_key, 0, ht->callbacks);
-}
-
-CF_INLINE uintptr_t __CFBasicHashImportKey2(CFBasicHashRef ht, uintptr_t stack_key) {
-    return ht->callbacks->func(ht, kCFBasicHashCallbackOpRetainKey2, stack_key, 0, ht->callbacks);
-}
-
-CF_INLINE void __CFBasicHashEjectValue(CFBasicHashRef ht, uintptr_t stack_value) {
-    ht->callbacks->func(ht, kCFBasicHashCallbackOpReleaseValue, stack_value, 0, ht->callbacks);
-}
-
-CF_INLINE void __CFBasicHashEjectValue2(CFBasicHashRef ht, uintptr_t stack_value) {
-    ht->callbacks->func(ht, kCFBasicHashCallbackOpReleaseValue2, stack_value, 0, ht->callbacks);
-}
-
-CF_INLINE void __CFBasicHashEjectKey(CFBasicHashRef ht, uintptr_t stack_key) {
-    ht->callbacks->func(ht, kCFBasicHashCallbackOpReleaseKey, stack_key, 0, ht->callbacks);
-}
-
-CF_INLINE void __CFBasicHashEjectKey2(CFBasicHashRef ht, uintptr_t stack_key) {
-    ht->callbacks->func(ht, kCFBasicHashCallbackOpReleaseKey2, stack_key, 0, ht->callbacks);
-}
-
-CF_INLINE Boolean __CFBasicHashTestEqualValue(CFBasicHashRef ht, uintptr_t stack_value_a, uintptr_t stack_value_b) {
-    return (Boolean)ht->callbacks->func(ht, kCFBasicHashCallbackOpValueEqual, stack_value_a, stack_value_b, ht->callbacks);
-}
-
-CF_INLINE Boolean __CFBasicHashTestEqualValue2(CFBasicHashRef ht, uintptr_t stack_value_a, uintptr_t stack_value_b) {
-    return (Boolean)ht->callbacks->func(ht, kCFBasicHashCallbackOpValue2Equal, stack_value_a, stack_value_b, ht->callbacks);
-}
-
-CF_INLINE Boolean __CFBasicHashTestEqualKey(CFBasicHashRef ht, uintptr_t stack_key_a, uintptr_t stack_key_b) {
-    COCOA_HASHTABLE_TEST_EQUAL(ht, stack_key_a, stack_key_b);
-    return (Boolean)ht->callbacks->func(ht, kCFBasicHashCallbackOpKeyEqual, stack_key_a, stack_key_b, ht->callbacks);
-}
-
-CF_INLINE Boolean __CFBasicHashTestEqualKey2(CFBasicHashRef ht, uintptr_t stack_key_a, uintptr_t stack_key_b) {
-    COCOA_HASHTABLE_TEST_EQUAL(ht, stack_key_a, stack_key_b);
-    return (Boolean)ht->callbacks->func(ht, kCFBasicHashCallbackOpKey2Equal, stack_key_a, stack_key_b, ht->callbacks);
-}
-
-CF_INLINE CFHashCode __CFBasicHashHashKey(CFBasicHashRef ht, uintptr_t stack_key) {
-    CFHashCode hash_code = (CFHashCode)ht->callbacks->func(ht, kCFBasicHashCallbackOpHashKey, stack_key, 0, ht->callbacks);
-    COCOA_HASHTABLE_HASH_KEY(ht, stack_key, hash_code);
-    return hash_code;
-}
-
-CF_INLINE CFHashCode __CFBasicHashHashKey2(CFBasicHashRef ht, uintptr_t stack_key) {
-    CFHashCode hash_code = (CFHashCode)ht->callbacks->func(ht, kCFBasicHashCallbackOpHashKey2, stack_key, 0, ht->callbacks);
-    COCOA_HASHTABLE_HASH_KEY(ht, stack_key, hash_code);
-    return hash_code;
-}
-
-CF_INLINE void *__CFBasicHashAllocateMemory(CFBasicHashRef ht, CFIndex count, CFIndex elem_size, Boolean strong) {
-    CFAllocatorRef allocator = CFGetAllocator(ht);
-    void *new_mem = NULL;
-    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
-        new_mem = auto_zone_allocate_object(auto_zone(), count * elem_size, strong ? AUTO_MEMORY_SCANNED : AUTO_UNSCANNED, false, false);
-    } else {
-        new_mem = CFAllocatorAllocate(allocator, count * elem_size, 0);
-    }
-    if (!new_mem) HALT;
-    return new_mem;
-}
-
-
 // Prime numbers. Values above 100 have been adjusted up so that the
 // malloced block size will be just below a multiple of 512; values
 // above 1200 have been adjusted up to just below a multiple of 4096.
@@ -446,11 +230,31 @@ static const uintptr_t __CFBasicHashTableSizes[64] = {
     111638519, 180634607, 292272623, 472907251,
 #if __LP64__
     765180413UL, 1238087663UL, 2003267557UL, 3241355263UL, 5244622819UL,
+#if 0
     8485977589UL, 13730600407UL, 22216578047UL, 35947178479UL,
     58163756537UL, 94110934997UL, 152274691561UL, 246385626107UL,
     398660317687UL, 645045943807UL, 1043706260983UL, 1688752204787UL,
     2732458465769UL, 4421210670577UL, 7153669136377UL,
     11574879807461UL, 18728548943849UL, 30303428750843UL
+#endif
+#endif
+};
+
+static const uintptr_t __CFBasicHashTableCapacities[64] = {
+    0, 3, 6, 11, 19, 32, 52, 85, 118, 155, 237, 390, 672, 1065,
+    1732, 2795, 4543, 7391, 12019, 19302, 31324, 50629, 81956,
+    132580, 214215, 346784, 561026, 907847, 1468567, 2376414,
+    3844982, 6221390, 10066379, 16287773, 26354132, 42641916,
+    68996399, 111638327, 180634415, 292272755,
+#if __LP64__
+    472907503UL, 765180257UL, 1238087439UL, 2003267722UL, 3241355160UL,
+#if 0
+    5244622578UL, 8485977737UL, 13730600347UL, 22216578100UL,
+    35947178453UL, 58163756541UL, 94110935011UL, 152274691274UL,
+    246385626296UL, 398660317578UL, 645045943559UL, 1043706261135UL,
+    1688752204693UL, 2732458465840UL, 4421210670552UL,
+    7153669136706UL, 11574879807265UL, 18728548943682UL
+#endif
 #endif
 };
 
@@ -471,100 +275,378 @@ static const uintptr_t __CFBasicHashPrimitiveRoots[64] = {
 #endif
 };
 
-/* Primitive roots under 100 for the primes above
-3: 2
-7: 3 5
-13: 2 6 7 11
-23: 5 7 10 11 14 15 17 19 20 21
-41: 6 7 11 12 13 15 17 19 22 24 26 28 29 30 34 35
-71: 7 11 13 21 22 28 31 33 35 42 44 47 52 53 55 56 59 61 62 63 65 67 68 69
-127: 3 6 7 12 14 23 29 39 43 45 46 48 53 55 56 57 58 65 67 78 83 85 86 91 92 93 96 97
-191: 19 21 22 28 29 33 35 42 44 47 53 56 57 58 61 62 63 71 73 74 76 83 87 88 89 91 93 94 95 99
-251: 6 11 14 18 19 24 26 29 30 33 34 37 42 43 44 46 53 54 55 56 57 59 61 62 70 71 72 76 77 78 82 87 90 95 96 97 98 99
-383: 5 10 11 13 15 20 22 26 30 33 35 37 39 40 41 44 45 47 52 53 59 60 61 66 70 74 77 78 79 80 82 83 85 88 89 90 91 94 95 97 99
-631: 3 7 12 13 14 15 19 26 51 53 54 56 59 60 61 63 65 70 75 76 87 93 95 96 99
-1087: 3 10 12 13 14 20 22 24 28 29 31 38 44 45 46 51 52 53 54 58 59 61 62 63 67 74 75 76 80 89 90 92 94 96 97 99
-1723: 3 12 17 18 29 30 38 45 46 48 55 63 74 75 77 78 82 83 86 88 94 95
-2803: 2 11 12 18 20 21 29 30 32 34 35 38 41 46 48 50 52 56 66 67 74 78 79 80 83 84 86 91 93 94 98 99
-4523: 5 6 7 15 18 20 22 24 26 31 34 41 45 54 55 57 60 65 66 70 72 74 76 77 83 85 88 93 94 96 98
-7351: 6 7 12 15 17 22 28 31 35 38 44 52 54 55 56 60 65 69 71 75 96
-11959: 3 6 12 24 29 33 37 39 41 47 48 51 53 57 58 59 66 67 69 73 74 75 78 82 94 96
-19447: 3 5 6 7 10 12 14 20 23 24 28 29 37 39 45 46 47 51 55 56 58 65 71 73 74 75 78 79 80 82 83 90 91 92 94 96
-31231: 6 7 24 29 30 33 41 43 48 52 53 54 56 57 59 60 62 65 69 70 73 75 77 83 86
-50683: 2 3 12 14 17 18 20 32 33 35 39 41 45 50 55 56 57 58 61 62 65 68 69 71 72 74 75 80 84 86 88 93 95
-81919: 3 12 23 24 26 30 33 43 52 53 54 57 59 60 65 66 75 84 86 87 91 92 93 96 97
-132607: 3 5 6 17 19 20 21 23 24 26 29 33 34 35 38 40 42 45 48 52 54 61 62 67 71 73 75 79 82 86 89 90 92
-214519: 3 7 12 15 19 24 26 28 30 33 35 38 41 52 54 56 61 65 69 70 73 77 86 87 89 93 96 97
-346607: 5 10 14 15 17 19 20 21 28 30 34 38 40 41 42 45 51 55 56 57 59 60 63 65 67 68 76 77 80 82 84 89 90 91 97
-561109: 10 11 18 21 26 30 33 35 38 40 41 43 46 47 50 51 53 61 62 72 73 74 84 85 91 96
-907759: 3 6 12 13 17 24 26 33 34 41 47 48 52 57 61 66 68 71 75 79 82 87 89 93 94
-1468927: 3 5 6 11 20 21 22 23 24 26 35 40 42 45 48 51 52 54 58 71 73 75 77 79 86 88 90 92 93 94 95
-2376191: 22 29 31 33 37 43 44 47 55 58 59 62 66 77 86 87 88 93 99
-3845119: 3 11 12 13 15 23 24 30 37 42 43 44 51 52 53 54 55 57 65 73 84 86 87 88 89 92 94 96 97
-6221311: 3 12 13 15 21 24 30 31 33 46 54 57 61 66 67 74 82 84 87 89 91 92 96
-10066421: 3 10 11 12 17 18 19 21 23 27 39 40 41 48 50 56 58 60 61 66 68 71 72 73 74 75 76 77 83 85 86 87 92 94 95 97
-16287743: 5 10 15 20 30 31 35 40 43 45 47 53 55 59 60 61 62 65 70 73 79 80 85 86 89 90 93 94 95
-26354171: 2 6 7 8 10 17 18 21 22 23 24 26 30 35 38 40 50 51 53 59 62 63 66 67 68 69 71 72 74 77 78 83 84 85 87 88 90 91 96 98
-42641881: 22 31 38 44 46 57 59 62 67 69 73 76 77 83 92 99
-68996069: 2 3 8 10 11 12 14 15 17 18 21 26 27 32 37 38 40 43 44 46 47 48 50 53 55 56 58 60 61 62 66 67 68 69 70 72 75 77 82 84 85 87 89 90 93 98 99
-111638519: 11 13 17 22 26 29 33 34 39 41 44 51 52 53 55 58 59 61 65 66 67 68 71 77 78 79 82 83 85 87 88 91 97 99
-180634607: 5 10 15 19 20 23 30 31 35 37 38 40 43 45 46 47 55 57 60 62 65 69 70 74 76 79 80 85 86 89 90 92 93 94
-292272623: 5 10 11 13 15 20 22 23 26 30 31 33 35 39 40 44 45 46 47 52 59 60 61 62 66 67 69 70 71 77 78 79 80 83 85 88 90 91 92 93 94 95 97 99
-472907251: 2 10 12 14 17 18 29 31 37 46 50 60 61 65 68 70 78 82 84 85 90 91 94 98
-765180413: 3 5 11 12 14 18 20 21 23 26 27 29 30 34 35 38 39 44 45 47 48 50 51 56 57 59 62 66 67 71 72 73 74 75 77 80 82 84 85 86 89 92 93 95 97 98 99
-1238087663: 10 13 14 15 20 21 23 28 38 40 41 42 43 45 46 52 55 56 57 60 63 67 69 71 76 78 80 82 84 85 86 89 90 92
-2003267557: 2 13 14 18 20 22 23 24 31 32 34 37 38 41 43 47 50 54 59 60 67 69 79 80 85 87 91 93 96
-3241355263: 3 6 10 11 20 21 22 24 34 42 43 45 46 48 54 57 61 65 68 70 71 75 77 78 80 83 86 87 88 92 93 94
-5244622819: 10 15 17 23 29 31 35 38 40 50 57 60 65 67 68 71 73 74 75 79 90 92 94
-8485977589: 2 6 10 17 18 19 22 28 30 31 32 35 37 40 47 51 52 54 57 58 59 61 65 66 76 77 79 84 85 86 88 90 93 96 98
-13730600407: 3 5 10 12 19 24 33 35 40 42 43 45 46 51 54 55 65 73 75 76 78 80 82 84 87 89 92 93 94 96
-22216578047: 5 10 11 15 17 20 22 30 33 34 35 40 44 45 51 59 60 61 65 66 68 70 73 77 79 80 88 90 95 99
-35947178479: 3 12 14 15 22 24 29 30 38 41 44 51 54 55 56 58 63 69 70 73 76 78 89 91 95 96 97 99
-58163756537: 3 5 6 7 10 11 12 14 17 20 22 23 24 27 28 31 39 40 43 44 45 46 47 48 53 54 56 57 59 61 62 63 65 68 71 73 75 78 79 80 86 87 88 89 90 91 92 94 95 96 97 99
-94110934997: 2 3 5 8 11 12 14 18 19 20 21 23 26 27 29 30 32 34 35 39 41 43 44 48 51 56 59 62 66 67 71 72 74 75 76 77 79 80 84 85 92 93 94 98 99
-152274691561: 7 17 26 35 37 39 41 42 43 53 56 62 63 65 67 74 82 84 85 89 93 94
-246385626107UL: 2 5 6 8 11 14 15 18 20 23 24 26 29 31 32 33 34 35 37 38 42 43 44 45 50 54 56 60 61 65 67 69 71 72 77 78 80 82 83 85 87 89 92 93 94 95 96 98 99
-398660317687UL: 3 5 6 7 11 13 20 24 26 28 40 44 45 48 54 56 59 63 69 75 79 85 88 89 90 93 95 99
-645045943807UL: 3 5 10 12 21 22 23 24 26 35 37 40 41 44 45 47 51 52 53 59 70 75 79 85 87 92 93 95 96 97 99
-1043706260983UL: 3 7 11 24 28 29 (<= 32)
-1688752204787UL: 2 5 6 7 8 13 18 20 21 22 23 24 28 32 (<= 32)
-2732458465769UL: 3 6 11 12 13 15 17 19 21 22 23 24 26 27 30 31 (<= 32)
-4421210670577UL: 5 (<= 9)
+CF_INLINE void *__CFBasicHashAllocateMemory(CFConstBasicHashRef ht, CFIndex count, CFIndex elem_size, Boolean strong, Boolean compactable) {
+    CFAllocatorRef allocator = CFGetAllocator(ht);
+    void *new_mem = NULL;
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        new_mem = auto_zone_allocate_object(objc_collectableZone(), count * elem_size, strong ? (compactable ? AUTO_POINTERS_ONLY : AUTO_MEMORY_SCANNED) : AUTO_UNSCANNED, false, false);
+    } else {
+        new_mem = CFAllocatorAllocate(allocator, count * elem_size, 0);
+    }
+    if (!new_mem) HALT;
+    return new_mem;
+}
 
-*/
+#define __CFBasicHashSubABZero 0xa7baadb1
+#define __CFBasicHashSubABOne 0xa5baadb9
 
-static const uintptr_t __CFBasicHashTableCapacities[64] = {
-    0, 3, 6, 11, 19, 32, 52, 85, 118, 155, 237, 390, 672, 1065,
-    1732, 2795, 4543, 7391, 12019, 19302, 31324, 50629, 81956,
-    132580, 214215, 346784, 561026, 907847, 1468567, 2376414,
-    3844982, 6221390, 10066379, 16287773, 26354132, 42641916,
-    68996399, 111638327, 180634415, 292272755,
-#if __LP64__
-    472907503UL, 765180257UL, 1238087439UL, 2003267722UL, 3241355160UL,
-    5244622578UL, 8485977737UL, 13730600347UL, 22216578100UL,
-    35947178453UL, 58163756541UL, 94110935011UL, 152274691274UL,
-    246385626296UL, 398660317578UL, 645045943559UL, 1043706261135UL,
-    1688752204693UL, 2732458465840UL, 4421210670552UL,
-    7153669136706UL, 11574879807265UL, 18728548943682UL
-#endif
+typedef union {
+    uintptr_t neutral;
+    id strong;
+    id weak;
+} CFBasicHashValue;
+
+struct __CFBasicHash {
+    CFRuntimeBase base;
+    struct { // 128 bits
+        uint8_t hash_style:2;
+        uint8_t fast_grow:1;
+        uint8_t keys_offset:1;
+        uint8_t counts_offset:2;
+        uint8_t counts_width:2;
+        uint8_t hashes_offset:2;
+        uint8_t strong_values:1;
+        uint8_t strong_keys:1;
+        uint8_t weak_values:1;
+        uint8_t weak_keys:1;
+        uint8_t int_values:1;
+        uint8_t int_keys:1;
+        uint8_t indirect_keys:1;
+        uint8_t compactable_keys:1;
+        uint8_t compactable_values:1;
+        uint8_t finalized:1;
+        uint8_t __2:4;
+        uint8_t num_buckets_idx;  /* index to number of buckets */
+        uint32_t used_buckets;    /* number of used buckets */
+        uint8_t __8:8;
+        uint8_t __9:8;
+        uint16_t special_bits;
+        uint16_t deleted;
+        uint16_t mutations;
+    } bits;
+    __strong CFBasicHashCallbacks *callbacks;
+    void *pointers[1];
 };
 
-// to expose the load factor, expose this function to customization
-CF_INLINE CFIndex __CFBasicHashGetCapacityForNumBuckets(CFBasicHashRef ht, CFIndex num_buckets_idx) {
-    return __CFBasicHashTableCapacities[num_buckets_idx];
-#if 0
-    CFIndex num_buckets = __CFBasicHashTableSizes[num_buckets_idx];
-    if (num_buckets_idx < 8) {
-        double dep = 0.0545665730357293074; // (1 - (sqrt(5) - 1) / 2) / 7
-        double factor = 1.0 - (num_buckets_idx - 1) * dep;
-        return (CFIndex)floor(num_buckets * factor + 0.375); // 0.375 is intentional
-    }
-    double factor = 0.6180339887498948482; // (sqrt(5) - 1) / 2
-    return (CFIndex)floor(num_buckets * factor + 0.5);
+__private_extern__ Boolean CFBasicHashHasStrongValues(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.strong_values ? true : false;
 #endif
 }
 
-CF_INLINE CFIndex __CFBasicHashGetNumBucketsIndexForCapacity(CFBasicHashRef ht, CFIndex capacity) {
+__private_extern__ Boolean CFBasicHashHasStrongKeys(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.strong_keys ? true : false;
+#endif
+}
+
+CF_INLINE Boolean __CFBasicHashHasCompactableKeys(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.compactable_keys ? true : false;
+#endif
+}
+
+CF_INLINE Boolean __CFBasicHashHasCompactableValues(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.compactable_values ? true : false;
+#endif
+}
+
+CF_INLINE Boolean __CFBasicHashHasWeakValues(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.weak_values ? true : false;
+#endif
+}
+
+CF_INLINE Boolean __CFBasicHashHasWeakKeys(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.weak_keys ? true : false;
+#endif
+}
+
+CF_INLINE Boolean __CFBasicHashHasHashCache(CFConstBasicHashRef ht) {
+#if defined(__arm__)
+    return false;
+#else
+    return ht->bits.hashes_offset ? true : false;
+#endif
+}
+
+CF_INLINE uintptr_t __CFBasicHashImportValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
+    return ht->callbacks->retainValue(ht, stack_value);
+}
+
+CF_INLINE uintptr_t __CFBasicHashImportKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    return ht->callbacks->retainKey(ht, stack_key);
+}
+
+CF_INLINE void __CFBasicHashEjectValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
+    ht->callbacks->releaseValue(ht, stack_value);
+}
+
+CF_INLINE void __CFBasicHashEjectKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    ht->callbacks->releaseKey(ht, stack_key);
+}
+
+CF_INLINE Boolean __CFBasicHashTestEqualValue(CFConstBasicHashRef ht, uintptr_t stack_value_a, uintptr_t stack_value_b) {
+    return ht->callbacks->equateValues(ht, stack_value_a, stack_value_b);
+}
+
+CF_INLINE Boolean __CFBasicHashTestEqualKey(CFConstBasicHashRef ht, uintptr_t in_coll_key, uintptr_t stack_key) {
+    COCOA_HASHTABLE_TEST_EQUAL(ht, in_coll_key, stack_key);
+    return ht->callbacks->equateKeys(ht, in_coll_key, stack_key);
+}
+
+CF_INLINE CFHashCode __CFBasicHashHashKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    CFHashCode hash_code = (CFHashCode)ht->callbacks->hashKey(ht, stack_key);
+    COCOA_HASHTABLE_HASH_KEY(ht, stack_key, hash_code);
+    return hash_code;
+}
+
+CF_INLINE CFBasicHashValue *__CFBasicHashGetValues(CFConstBasicHashRef ht) {
+    return (CFBasicHashValue *)ht->pointers[0];
+}
+
+CF_INLINE void __CFBasicHashSetValues(CFBasicHashRef ht, CFBasicHashValue *ptr) {
+    __AssignWithWriteBarrier(&ht->pointers[0], ptr);
+}
+
+CF_INLINE CFBasicHashValue *__CFBasicHashGetKeys(CFConstBasicHashRef ht) {
+    return (CFBasicHashValue *)ht->pointers[ht->bits.keys_offset];
+}
+
+CF_INLINE void __CFBasicHashSetKeys(CFBasicHashRef ht, CFBasicHashValue *ptr) {
+    __AssignWithWriteBarrier(&ht->pointers[ht->bits.keys_offset], ptr);
+}
+
+CF_INLINE void *__CFBasicHashGetCounts(CFConstBasicHashRef ht) {
+    return (void *)ht->pointers[ht->bits.counts_offset];
+}
+
+CF_INLINE void __CFBasicHashSetCounts(CFBasicHashRef ht, void *ptr) {
+    __AssignWithWriteBarrier(&ht->pointers[ht->bits.counts_offset], ptr);
+}
+
+CF_INLINE uintptr_t __CFBasicHashGetValue(CFConstBasicHashRef ht, CFIndex idx) {
+    uintptr_t val = __CFBasicHashGetValues(ht)[idx].neutral;
+    if (__CFBasicHashSubABZero == val) return 0UL;
+    if (__CFBasicHashSubABOne == val) return ~0UL;
+    return val;
+}
+
+CF_INLINE void __CFBasicHashSetValue(CFBasicHashRef ht, CFIndex idx, uintptr_t stack_value, Boolean ignoreOld, Boolean literal) {
+    CFBasicHashValue *valuep = &(__CFBasicHashGetValues(ht)[idx]);
+    uintptr_t old_value = ignoreOld ? 0 : valuep->neutral;
+    if (!literal) {
+        if (0UL == stack_value) stack_value = __CFBasicHashSubABZero;
+        if (~0UL == stack_value) stack_value = __CFBasicHashSubABOne;
+    }
+    if (CFBasicHashHasStrongValues(ht)) valuep->strong = (id)stack_value; else valuep->neutral = stack_value;
+    if (!ignoreOld) {
+        if (!(old_value == 0UL || old_value == ~0UL)) {
+            if (__CFBasicHashSubABZero == old_value) old_value = 0UL;
+            if (__CFBasicHashSubABOne == old_value) old_value = ~0UL;
+            __CFBasicHashEjectValue(ht, old_value);
+        }
+    }
+}
+
+CF_INLINE uintptr_t __CFBasicHashGetKey(CFConstBasicHashRef ht, CFIndex idx) {
+    if (ht->bits.keys_offset) {
+        uintptr_t key = __CFBasicHashGetKeys(ht)[idx].neutral;
+        if (__CFBasicHashSubABZero == key) return 0UL;
+        if (__CFBasicHashSubABOne == key) return ~0UL;
+        return key;
+    }
+    if (ht->bits.indirect_keys) {
+        uintptr_t stack_value = __CFBasicHashGetValue(ht, idx);
+        return ht->callbacks->getIndirectKey(ht, stack_value);
+    }
+    return __CFBasicHashGetValue(ht, idx);
+}
+
+CF_INLINE void __CFBasicHashSetKey(CFBasicHashRef ht, CFIndex idx, uintptr_t stack_key, Boolean ignoreOld, Boolean literal) {
+    if (0 == ht->bits.keys_offset) HALT;
+    CFBasicHashValue *keyp = &(__CFBasicHashGetKeys(ht)[idx]);
+    uintptr_t old_key = ignoreOld ? 0 : keyp->neutral;
+    if (!literal) {
+        if (0UL == stack_key) stack_key = __CFBasicHashSubABZero;
+        if (~0UL == stack_key) stack_key = __CFBasicHashSubABOne;
+    }
+    if (CFBasicHashHasStrongKeys(ht)) keyp->strong = (id)stack_key; else keyp->neutral = stack_key;
+    if (!ignoreOld) {
+        if (!(old_key == 0UL || old_key == ~0UL)) {
+            if (__CFBasicHashSubABZero == old_key) old_key = 0UL;
+            if (__CFBasicHashSubABOne == old_key) old_key = ~0UL;
+            __CFBasicHashEjectKey(ht, old_key);
+        }
+    }
+}
+
+CF_INLINE uintptr_t __CFBasicHashIsEmptyOrDeleted(CFConstBasicHashRef ht, CFIndex idx) {
+    uintptr_t stack_value = __CFBasicHashGetValues(ht)[idx].neutral;
+    return (0UL == stack_value || ~0UL == stack_value);
+}
+
+CF_INLINE uintptr_t __CFBasicHashIsDeleted(CFConstBasicHashRef ht, CFIndex idx) {
+    uintptr_t stack_value = __CFBasicHashGetValues(ht)[idx].neutral;
+    return (~0UL == stack_value);
+}
+
+CF_INLINE uintptr_t __CFBasicHashGetSlotCount(CFConstBasicHashRef ht, CFIndex idx) {
+    void *counts = __CFBasicHashGetCounts(ht);
+    switch (ht->bits.counts_width) {
+    case 0: return ((uint8_t *)counts)[idx];
+    case 1: return ((uint16_t *)counts)[idx];
+    case 2: return ((uint32_t *)counts)[idx];
+    case 3: return ((uint64_t *)counts)[idx];
+    }
+    return 0;
+}
+
+CF_INLINE void __CFBasicHashBumpCounts(CFBasicHashRef ht) {
+    void *counts = __CFBasicHashGetCounts(ht);
+    CFAllocatorRef allocator = CFGetAllocator(ht);
+    switch (ht->bits.counts_width) {
+    case 0: {
+        uint8_t *counts08 = (uint8_t *)counts;
+        ht->bits.counts_width = 1;
+        CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+        uint16_t *counts16 = (uint16_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 2, false, false);
+        __SetLastAllocationEventName(counts16, "CFBasicHash (count-store)");
+        for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
+            counts16[idx2] = counts08[idx2];
+        }
+        __CFBasicHashSetCounts(ht, counts16);
+        if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+            CFAllocatorDeallocate(allocator, counts08);
+        }
+        break;
+    }
+    case 1: {
+        uint16_t *counts16 = (uint16_t *)counts;
+        ht->bits.counts_width = 2;
+        CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+        uint32_t *counts32 = (uint32_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 4, false, false);
+        __SetLastAllocationEventName(counts32, "CFBasicHash (count-store)");
+        for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
+            counts32[idx2] = counts16[idx2];
+        }
+        __CFBasicHashSetCounts(ht, counts32);
+         if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+            CFAllocatorDeallocate(allocator, counts16);
+        }
+        break;
+    }
+    case 2: {
+        uint32_t *counts32 = (uint32_t *)counts;
+        ht->bits.counts_width = 3;
+        CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+        uint64_t *counts64 = (uint64_t *)__CFBasicHashAllocateMemory(ht, num_buckets, 8, false, false);
+        __SetLastAllocationEventName(counts64, "CFBasicHash (count-store)");
+        for (CFIndex idx2 = 0; idx2 < num_buckets; idx2++) {
+            counts64[idx2] = counts32[idx2];
+        }
+        __CFBasicHashSetCounts(ht, counts64);
+         if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+            CFAllocatorDeallocate(allocator, counts32);
+        }
+        break;
+    }
+    case 3: {
+        HALT;
+        break;
+    }
+    }
+}
+
+static void __CFBasicHashIncSlotCount(CFBasicHashRef ht, CFIndex idx) {
+    void *counts = __CFBasicHashGetCounts(ht);
+    switch (ht->bits.counts_width) {
+    case 0: {
+        uint8_t *counts08 = (uint8_t *)counts;
+        uint8_t val = counts08[idx];
+        if (val < INT8_MAX) {
+            counts08[idx] = val + 1;
+            return;
+        }
+        __CFBasicHashBumpCounts(ht);
+        __CFBasicHashIncSlotCount(ht, idx);
+        break;
+    }
+    case 1: {
+        uint16_t *counts16 = (uint16_t *)counts;
+        uint16_t val = counts16[idx];
+        if (val < INT16_MAX) {
+            counts16[idx] = val + 1;
+            return;
+        }
+        __CFBasicHashBumpCounts(ht);
+        __CFBasicHashIncSlotCount(ht, idx);
+        break;
+    }
+    case 2: {
+        uint32_t *counts32 = (uint32_t *)counts;
+        uint32_t val = counts32[idx];
+        if (val < INT32_MAX) {
+            counts32[idx] = val + 1;
+            return;
+        }
+        __CFBasicHashBumpCounts(ht);
+        __CFBasicHashIncSlotCount(ht, idx);
+        break;
+    }
+    case 3: {
+        uint64_t *counts64 = (uint64_t *)counts;
+        uint64_t val = counts64[idx];
+        if (val < INT64_MAX) {
+            counts64[idx] = val + 1;
+            return;
+        }
+        __CFBasicHashBumpCounts(ht);
+        __CFBasicHashIncSlotCount(ht, idx);
+        break;
+    }
+    }
+}
+
+CF_INLINE void __CFBasicHashDecSlotCount(CFBasicHashRef ht, CFIndex idx) {
+    void *counts = __CFBasicHashGetCounts(ht);
+    switch (ht->bits.counts_width) {
+    case 0: ((uint8_t  *)counts)[idx]--; return;
+    case 1: ((uint16_t *)counts)[idx]--; return;
+    case 2: ((uint32_t *)counts)[idx]--; return;
+    case 3: ((uint64_t *)counts)[idx]--; return;
+    }
+}
+
+CF_INLINE uintptr_t *__CFBasicHashGetHashes(CFConstBasicHashRef ht) {
+    return (uintptr_t *)ht->pointers[ht->bits.hashes_offset];
+}
+
+CF_INLINE void __CFBasicHashSetHashes(CFBasicHashRef ht, uintptr_t *ptr) {
+    __AssignWithWriteBarrier(&ht->pointers[ht->bits.hashes_offset], ptr);
+}
+
+
+// to expose the load factor, expose this function to customization
+CF_INLINE CFIndex __CFBasicHashGetCapacityForNumBuckets(CFConstBasicHashRef ht, CFIndex num_buckets_idx) {
+    return __CFBasicHashTableCapacities[num_buckets_idx];
+}
+
+CF_INLINE CFIndex __CFBasicHashGetNumBucketsIndexForCapacity(CFConstBasicHashRef ht, CFIndex capacity) {
     for (CFIndex idx = 0; idx < 64; idx++) {
         if (capacity <= __CFBasicHashGetCapacityForNumBuckets(ht, idx)) return idx;
     }
@@ -572,11 +654,11 @@ CF_INLINE CFIndex __CFBasicHashGetNumBucketsIndexForCapacity(CFBasicHashRef ht, 
     return 0;
 }
 
-__private_extern__ CFIndex CFBasicHashGetNumBuckets(CFBasicHashRef ht) {
+__private_extern__ CFIndex CFBasicHashGetNumBuckets(CFConstBasicHashRef ht) {
     return __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
 }
 
-__private_extern__ CFIndex CFBasicHashGetCapacity(CFBasicHashRef ht) {
+__private_extern__ CFIndex CFBasicHashGetCapacity(CFConstBasicHashRef ht) {
     return __CFBasicHashGetCapacityForNumBuckets(ht, ht->bits.num_buckets_idx);
 }
 
@@ -585,280 +667,252 @@ __private_extern__ CFIndex CFBasicHashGetCapacity(CFBasicHashRef ht) {
 // the found bucket or the index of the bucket which should be filled by
 // an add operation. For a set or multiset, the .weak_key and .weak_value
 // are the same.
-__private_extern__ CFBasicHashBucket CFBasicHashGetBucket(CFBasicHashRef ht, CFIndex idx) {
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
+__private_extern__ CFBasicHashBucket CFBasicHashGetBucket(CFConstBasicHashRef ht, CFIndex idx) {
     CFBasicHashBucket result;
     result.idx = idx;
-    result.weak_value = __CFBasicHashGetValues(ht)[idx].weak;
-    result.weak_value2 = (0 != ht->bits.values2_offset) ? __CFBasicHashGetValues2(ht)[idx].weak : 0;
-    result.weak_key = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht)[idx].weak : result.weak_value;
-    result.weak_key2 = (0 != ht->bits.keys2_offset) ? __CFBasicHashGetKeys2(ht)[idx].weak : 0;
-    result.count = (0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht)[idx] : ((result.weak_key == empty || result.weak_key == deleted) ? 0 : 1);
-    result.order = (0 != ht->bits.orders_offset) ? __CFBasicHashGetOrders(ht)[idx] : 0;
+    if (__CFBasicHashIsEmptyOrDeleted(ht, idx)) {
+        result.count = 0;
+        result.weak_value = 0;
+        result.weak_key = 0;
+    } else {
+        result.count = (ht->bits.counts_offset) ? __CFBasicHashGetSlotCount(ht, idx) : 1;
+        result.weak_value = __CFBasicHashGetValue(ht, idx);
+        result.weak_key = __CFBasicHashGetKey(ht, idx);
+    }
     return result;
 }
 
-// During rehashing of a mutable CFBasicHash, we know that there are no
-// deleted slots and the keys have already been uniqued. When rehashing,
-// if key_hash is non-0, we use it as the hash code.
-static CFBasicHashBucket ___CFBasicHashFindBucket1(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t key_hash, Boolean rehashing) {
-    CFHashCode hash_code = key_hash ? key_hash : __CFBasicHashHashKey(ht, stack_key);
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *keys = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : __CFBasicHashGetValues(ht);
-    uintptr_t *hashes = (0 != ht->bits.hashes_offset) ? __CFBasicHashGetHashes(ht) : NULL;
-    uintptr_t num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-    CFBasicHashBucket result = {kCFNotFound, deleted, 0, deleted, 0, 0, 0};
-
-    uintptr_t h1 = 0;
-        // Linear probing, with c = 1
-        // probe[0] = h1(k)
-        // probe[i] = (h1(k) + i * c) mod num_buckets, i = 1 .. num_buckets - 1
-        // h1(k) = k mod num_buckets
-        h1 = hash_code % num_buckets;
-
-    COCOA_HASHTABLE_PROBING_START(ht, num_buckets);
-    uintptr_t probe = h1;
-    for (CFIndex idx = 0; idx < num_buckets; idx++) {
-        uintptr_t stack_curr = keys[probe].weak;
-        if (stack_curr == empty) {
-            COCOA_HASHTABLE_PROBE_EMPTY(ht, probe);
-            if (kCFNotFound == result.idx) {
-                result.idx = probe;
-                result.weak_value = empty;
-                result.weak_key = empty;
-            }
-            COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-            return result;
-        } else if (__builtin_expect(!rehashing, 0)) {
-            if (stack_curr == deleted) {
-                COCOA_HASHTABLE_PROBE_DELETED(ht, probe);
-                if (kCFNotFound == result.idx) {
-                    result.idx = probe;
-                }
-            } else {
-                COCOA_HASHTABLE_PROBE_VALID(ht, probe);
-                if (stack_curr == stack_key || ((!hashes || hashes[probe] == hash_code) && __CFBasicHashTestEqualKey(ht, stack_curr, stack_key))) {
-                    COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-                    result.idx = probe;
-                    result.weak_value = (0 != ht->bits.keys_offset) ? __CFBasicHashGetValues(ht)[probe].weak : stack_curr;
-                    result.weak_value2 = (0 != ht->bits.values2_offset) ? __CFBasicHashGetValues2(ht)[probe].weak : 0;
-                    result.weak_key = stack_curr;
-                    result.weak_key2 = (0 != ht->bits.keys2_offset) ? __CFBasicHashGetKeys2(ht)[probe].weak : 0;
-                    result.count = (0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht)[probe] : 1;
-                    result.order = (0 != ht->bits.orders_offset) ? __CFBasicHashGetOrders(ht)[probe] : 1;
-                    return result;
-                }
-            }
-        }
-        // Linear probing, with c = 1
-            probe += 1;
-            if (__builtin_expect(num_buckets <= probe, 0)) {
-                probe -= num_buckets;
-            }
-    }
-    COCOA_HASHTABLE_PROBING_END(ht, num_buckets);
-    return result; // all buckets full or deleted, return first deleted element which was found
-}
-
-static CFBasicHashBucket ___CFBasicHashFindBucket2(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t key_hash, Boolean rehashing) {
-    CFHashCode hash_code = key_hash ? key_hash : __CFBasicHashHashKey(ht, stack_key);
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *keys = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : __CFBasicHashGetValues(ht);
-    uintptr_t *hashes = (0 != ht->bits.hashes_offset) ? __CFBasicHashGetHashes(ht) : NULL;
-    uintptr_t num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-    CFBasicHashBucket result = {kCFNotFound, deleted, 0, deleted, 0, 0, 0};
-
-    uintptr_t h1 = 0, h2 = 0;
-        // Double hashing
-        // probe[0] = h1(k)
-        // probe[i] = (h1(k) + i * h2(k)) mod num_buckets, i = 1 .. num_buckets - 1
-        // h1(k) = k mod num_buckets
-        // h2(k) = floor(k / num_buckets) mod num_buckets
-        h1 = hash_code % num_buckets;
-        h2 = (hash_code / num_buckets) % num_buckets;
-        if (0 == h2) h2 = num_buckets - 1;
-
-    COCOA_HASHTABLE_PROBING_START(ht, num_buckets);
-    uintptr_t probe = h1;
-    for (CFIndex idx = 0; idx < num_buckets; idx++) {
-        uintptr_t stack_curr = keys[probe].weak;
-        if (stack_curr == empty) {
-            COCOA_HASHTABLE_PROBE_EMPTY(ht, probe);
-            if (kCFNotFound == result.idx) {
-                result.idx = probe;
-                result.weak_value = empty;
-                result.weak_key = empty;
-            }
-            COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-            return result;
-        } else if (__builtin_expect(!rehashing, 0)) {
-            if (stack_curr == deleted) {
-                COCOA_HASHTABLE_PROBE_DELETED(ht, probe);
-                if (kCFNotFound == result.idx) {
-                    result.idx = probe;
-                }
-            } else {
-                COCOA_HASHTABLE_PROBE_VALID(ht, probe);
-                if (stack_curr == stack_key || ((!hashes || hashes[probe] == hash_code) && __CFBasicHashTestEqualKey(ht, stack_curr, stack_key))) {
-                    COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-                    result.idx = probe;
-                    result.weak_value = (0 != ht->bits.keys_offset) ? __CFBasicHashGetValues(ht)[probe].weak : stack_curr;
-                    result.weak_value2 = (0 != ht->bits.values2_offset) ? __CFBasicHashGetValues2(ht)[probe].weak : 0;
-                    result.weak_key = stack_curr;
-                    result.weak_key2 = (0 != ht->bits.keys2_offset) ? __CFBasicHashGetKeys2(ht)[probe].weak : 0;
-                    result.count = (0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht)[probe] : 1;
-                    result.order = (0 != ht->bits.orders_offset) ? __CFBasicHashGetOrders(ht)[probe] : 1;
-                    return result;
-                }
-            }
-        }
-        // Double hashing
-            probe += h2;
-            if (__builtin_expect(num_buckets <= probe, 1)) {
-                probe -= num_buckets;
-            }
-    }
-    COCOA_HASHTABLE_PROBING_END(ht, num_buckets);
-    return result; // all buckets full or deleted, return first deleted element which was found
-}
-
-static CFBasicHashBucket ___CFBasicHashFindBucket3(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t key_hash, Boolean rehashing) {
-    CFHashCode hash_code = key_hash ? key_hash : __CFBasicHashHashKey(ht, stack_key);
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *keys = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : __CFBasicHashGetValues(ht);
-    uintptr_t *hashes = (0 != ht->bits.hashes_offset) ? __CFBasicHashGetHashes(ht) : NULL;
-    uintptr_t num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-    CFBasicHashBucket result = {kCFNotFound, deleted, 0, deleted, 0, 0, 0};
-
-    uintptr_t h1 = 0, h2 = 0, pr = 0;
-        // Improved exponential hashing
-        // probe[0] = h1(k)
-        // probe[i] = (h1(k) + pr(k)^i * h2(k)) mod num_buckets, i = 1 .. num_buckets - 1
-        // h1(k) = k mod num_buckets
-        // h2(k) = floor(k / num_buckets) mod num_buckets
-        // note: h2(k) has the effect of rotating the sequence if it is constant
-        // note: pr(k) is any primitive root of num_buckets, varying this gives different sequences
-        h1 = hash_code % num_buckets;
-        h2 = (hash_code / num_buckets) % num_buckets;
-        if (0 == h2) h2 = num_buckets - 1;
-        pr = __CFBasicHashPrimitiveRoots[ht->bits.num_buckets_idx];
-
-    COCOA_HASHTABLE_PROBING_START(ht, num_buckets);
-    uintptr_t probe = h1, acc = pr;
-    for (CFIndex idx = 0; idx < num_buckets; idx++) {
-        uintptr_t stack_curr = keys[probe].weak;
-        if (stack_curr == empty) {
-            COCOA_HASHTABLE_PROBE_EMPTY(ht, probe);
-            if (kCFNotFound == result.idx) {
-                result.idx = probe;
-                result.weak_value = empty;
-                result.weak_key = empty;
-            }
-            COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-            return result;
-        } else if (__builtin_expect(!rehashing, 0)) {
-            if (stack_curr == deleted) {
-                COCOA_HASHTABLE_PROBE_DELETED(ht, probe);
-                if (kCFNotFound == result.idx) {
-                    result.idx = probe;
-                }
-            } else {
-                COCOA_HASHTABLE_PROBE_VALID(ht, probe);
-                if (stack_curr == stack_key || ((!hashes || hashes[probe] == hash_code) && __CFBasicHashTestEqualKey(ht, stack_curr, stack_key))) {
-                    COCOA_HASHTABLE_PROBING_END(ht, idx + 1);
-                    result.idx = probe;
-                    result.weak_value = (0 != ht->bits.keys_offset) ? __CFBasicHashGetValues(ht)[probe].weak : stack_curr;
-                    result.weak_value2 = (0 != ht->bits.values2_offset) ? __CFBasicHashGetValues2(ht)[probe].weak : 0;
-                    result.weak_key = stack_curr;
-                    result.weak_key2 = (0 != ht->bits.keys2_offset) ? __CFBasicHashGetKeys2(ht)[probe].weak : 0;
-                    result.count = (0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht)[probe] : 1;
-                    result.order = (0 != ht->bits.orders_offset) ? __CFBasicHashGetOrders(ht)[probe] : 1;
-                    return result;
-                }
-            }
-        }
-        // Improved exponential hashing
-            probe = h1 + h2 * acc;
-            if (__builtin_expect(num_buckets <= probe, 1)) {
-                probe = probe % num_buckets;
-            }
-            acc = acc * pr;
-            if (__builtin_expect(num_buckets <= acc, 1)) {
-                acc = acc % num_buckets;
-            }
-    }
-    COCOA_HASHTABLE_PROBING_END(ht, num_buckets);
-    return result; // all buckets full or deleted, return first deleted element which was found
-}
-
-CF_INLINE CFBasicHashBucket ___CFBasicHashFindBucket(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t key_hash, Boolean rehashing) {
-    switch (ht->bits.hash_style) {
-    case __kCFBasicHashLinearHashingValue:
-        return ___CFBasicHashFindBucket1(ht, stack_key, 0, rehashing);
-    case __kCFBasicHashDoubleHashingValue:
-        return ___CFBasicHashFindBucket2(ht, stack_key, 0, rehashing);
-    case __kCFBasicHashExponentialHashingValue:
-        return ___CFBasicHashFindBucket3(ht, stack_key, 0, rehashing);
+#if defined(__arm__)
+static uintptr_t __CFBasicHashFold(uintptr_t dividend, uint8_t idx) {
+    switch (idx) {
+    case 1: return dividend % 3;
+    case 2: return dividend % 7;
+    case 3: return dividend % 13;
+    case 4: return dividend % 23;
+    case 5: return dividend % 41;
+    case 6: return dividend % 71;
+    case 7: return dividend % 127;
+    case 8: return dividend % 191;
+    case 9: return dividend % 251;
+    case 10: return dividend % 383;
+    case 11: return dividend % 631;
+    case 12: return dividend % 1087;
+    case 13: return dividend % 1723;
+    case 14: return dividend % 2803;
+    case 15: return dividend % 4523;
+    case 16: return dividend % 7351;
+    case 17: return dividend % 11959;
+    case 18: return dividend % 19447;
+    case 19: return dividend % 31231;
+    case 20: return dividend % 50683;
+    case 21: return dividend % 81919;
+    case 22: return dividend % 132607;
+    case 23: return dividend % 214519;
+    case 24: return dividend % 346607;
+    case 25: return dividend % 561109;
+    case 26: return dividend % 907759;
+    case 27: return dividend % 1468927;
+    case 28: return dividend % 2376191;
+    case 29: return dividend % 3845119;
+    case 30: return dividend % 6221311;
+    case 31: return dividend % 10066421;
+    case 32: return dividend % 16287743;
+    case 33: return dividend % 26354171;
+    case 34: return dividend % 42641881;
+    case 35: return dividend % 68996069;
+    case 36: return dividend % 111638519;
+    case 37: return dividend % 180634607;
+    case 38: return dividend % 292272623;
+    case 39: return dividend % 472907251;
     }
     HALT;
-    CFBasicHashBucket result = {kCFNotFound, 0, 0, 0};
+    return ~0;
+}
+#endif
+
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Linear
+#define FIND_BUCKET_HASH_STYLE		1
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Linear_NoCollision
+#define FIND_BUCKET_HASH_STYLE		1
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Linear_Indirect
+#define FIND_BUCKET_HASH_STYLE		1
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Linear_Indirect_NoCollision
+#define FIND_BUCKET_HASH_STYLE		1
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Double
+#define FIND_BUCKET_HASH_STYLE		2
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Double_NoCollision
+#define FIND_BUCKET_HASH_STYLE		2
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Double_Indirect
+#define FIND_BUCKET_HASH_STYLE		2
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Double_Indirect_NoCollision
+#define FIND_BUCKET_HASH_STYLE		2
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Exponential
+#define FIND_BUCKET_HASH_STYLE		3
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Exponential_NoCollision
+#define FIND_BUCKET_HASH_STYLE		3
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	0
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Exponential_Indirect
+#define FIND_BUCKET_HASH_STYLE		3
+#define FIND_BUCKET_FOR_REHASH		0
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+#define FIND_BUCKET_NAME		___CFBasicHashFindBucket_Exponential_Indirect_NoCollision
+#define FIND_BUCKET_HASH_STYLE		3
+#define FIND_BUCKET_FOR_REHASH		1
+#define FIND_BUCKET_FOR_INDIRECT_KEY	1
+#include "CFBasicHashFindBucket.m"
+
+
+CF_INLINE CFBasicHashBucket __CFBasicHashFindBucket(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    if (0 == ht->bits.num_buckets_idx) {
+        CFBasicHashBucket result = {kCFNotFound, 0UL, 0UL, 0};
+        return result;
+    }
+    if (ht->bits.indirect_keys) {
+        switch (ht->bits.hash_style) {
+        case __kCFBasicHashLinearHashingValue: return ___CFBasicHashFindBucket_Linear_Indirect(ht, stack_key);
+        case __kCFBasicHashDoubleHashingValue: return ___CFBasicHashFindBucket_Double_Indirect(ht, stack_key);
+        case __kCFBasicHashExponentialHashingValue: return ___CFBasicHashFindBucket_Exponential_Indirect(ht, stack_key);
+        }
+    } else {
+        switch (ht->bits.hash_style) {
+        case __kCFBasicHashLinearHashingValue: return ___CFBasicHashFindBucket_Linear(ht, stack_key);
+        case __kCFBasicHashDoubleHashingValue: return ___CFBasicHashFindBucket_Double(ht, stack_key);
+        case __kCFBasicHashExponentialHashingValue: return ___CFBasicHashFindBucket_Exponential(ht, stack_key);
+        }
+    }
+    HALT;
+    CFBasicHashBucket result = {kCFNotFound, 0UL, 0UL, 0};
     return result;
 }
 
-CF_INLINE CFBasicHashBucket __CFBasicHashFindBucket(CFBasicHashRef ht, uintptr_t stack_key) {
+CF_INLINE CFIndex __CFBasicHashFindBucket_NoCollision(CFConstBasicHashRef ht, uintptr_t stack_key, uintptr_t key_hash) {
     if (0 == ht->bits.num_buckets_idx) {
-        uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift);
-        CFBasicHashBucket result = {kCFNotFound, empty, empty, 0};
-        return result;
+        return kCFNotFound;
     }
-    return ___CFBasicHashFindBucket(ht, stack_key, 0, false);
+    if (ht->bits.indirect_keys) {
+        switch (ht->bits.hash_style) {
+        case __kCFBasicHashLinearHashingValue: return ___CFBasicHashFindBucket_Linear_Indirect_NoCollision(ht, stack_key, key_hash);
+        case __kCFBasicHashDoubleHashingValue: return ___CFBasicHashFindBucket_Double_Indirect_NoCollision(ht, stack_key, key_hash);
+        case __kCFBasicHashExponentialHashingValue: return ___CFBasicHashFindBucket_Exponential_Indirect_NoCollision(ht, stack_key, key_hash);
+        }
+    } else {
+        switch (ht->bits.hash_style) {
+        case __kCFBasicHashLinearHashingValue: return ___CFBasicHashFindBucket_Linear_NoCollision(ht, stack_key, key_hash);
+        case __kCFBasicHashDoubleHashingValue: return ___CFBasicHashFindBucket_Double_NoCollision(ht, stack_key, key_hash);
+        case __kCFBasicHashExponentialHashingValue: return ___CFBasicHashFindBucket_Exponential_NoCollision(ht, stack_key, key_hash);
+        }
+    }
+    HALT;
+    return kCFNotFound;
 }
 
-__private_extern__ CFBasicHashBucket CFBasicHashFindBucket(CFBasicHashRef ht, uintptr_t stack_key) {
+__private_extern__ CFBasicHashBucket CFBasicHashFindBucket(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    if (__CFBasicHashSubABZero == stack_key || __CFBasicHashSubABOne == stack_key) {
+        CFBasicHashBucket result = {kCFNotFound, 0UL, 0UL, 0};
+        return result;
+    }
     return __CFBasicHashFindBucket(ht, stack_key);
 }
 
-__private_extern__ CFOptionFlags CFBasicHashGetFlags(CFBasicHashRef ht) {
+__private_extern__ uint16_t CFBasicHashGetSpecialBits(CFConstBasicHashRef ht) {
+    return ht->bits.special_bits;
+}
+
+__private_extern__ uint16_t CFBasicHashSetSpecialBits(CFBasicHashRef ht, uint16_t bits) {
+    uint16_t old =  ht->bits.special_bits;
+    ht->bits.special_bits = bits;
+    return old;
+}
+
+__private_extern__ CFOptionFlags CFBasicHashGetFlags(CFConstBasicHashRef ht) {
     CFOptionFlags flags = (ht->bits.hash_style << 13);
-    if (ht->bits.strong_values) flags |= kCFBasicHashStrongValues;
-    if (ht->bits.strong_values2) flags |= kCFBasicHashStrongValues2;
-    if (ht->bits.strong_keys) flags |= kCFBasicHashStrongKeys;
-    if (ht->bits.strong_keys2) flags |= kCFBasicHashStrongKeys2;
+    if (CFBasicHashHasStrongValues(ht)) flags |= kCFBasicHashStrongValues;
+    if (CFBasicHashHasStrongKeys(ht)) flags |= kCFBasicHashStrongKeys;
+    if (__CFBasicHashHasCompactableKeys(ht)) flags |= kCFBasicHashCompactableKeys;
+    if (__CFBasicHashHasCompactableValues(ht)) flags |= kCFBasicHashCompactableValues;
     if (ht->bits.fast_grow) flags |= kCFBasicHashAggressiveGrowth;
-    if (ht->bits.values2_offset) flags |= kCFBasicHashHasValues2;
     if (ht->bits.keys_offset) flags |= kCFBasicHashHasKeys;
-    if (ht->bits.keys2_offset) flags |= kCFBasicHashHasKeys2;
     if (ht->bits.counts_offset) flags |= kCFBasicHashHasCounts;
-    if (ht->bits.orders_offset) flags |= kCFBasicHashHasOrder;
-    if (ht->bits.hashes_offset) flags |= kCFBasicHashHasHashCache;
+    if (__CFBasicHashHasHashCache(ht)) flags |= kCFBasicHashHasHashCache;
     return flags;
 }
 
-__private_extern__ CFIndex CFBasicHashGetCount(CFBasicHashRef ht) {
-    if (0 != ht->bits.counts_offset) {
+__private_extern__ const CFBasicHashCallbacks *CFBasicHashGetCallbacks(CFConstBasicHashRef ht) {
+    return ht->callbacks;
+}
+
+__private_extern__ CFIndex CFBasicHashGetCount(CFConstBasicHashRef ht) {
+    if (ht->bits.counts_offset) {
         CFIndex total = 0L;
         CFIndex cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-        uintptr_t *counts = __CFBasicHashGetCounts(ht);
         for (CFIndex idx = 0; idx < cnt; idx++) {
-            total += counts[idx];
+            total += __CFBasicHashGetSlotCount(ht, idx);
         }
         return total;
     }
     return (CFIndex)ht->bits.used_buckets;
 }
 
-__private_extern__ CFIndex CFBasicHashGetCountOfKey(CFBasicHashRef ht, uintptr_t stack_key) {
+__private_extern__ CFIndex CFBasicHashGetCountOfKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
+    if (__CFBasicHashSubABZero == stack_key || __CFBasicHashSubABOne == stack_key) {
+        return 0L;
+    }
     if (0L == ht->bits.used_buckets) {
         return 0L;
     }
     return __CFBasicHashFindBucket(ht, stack_key).count;
 }
 
-__private_extern__ CFIndex CFBasicHashGetCountOfValue(CFBasicHashRef ht, uintptr_t stack_value) {
+__private_extern__ CFIndex CFBasicHashGetCountOfValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
+    if (__CFBasicHashSubABZero == stack_value) {
+        return 0L;
+    }
     if (0L == ht->bits.used_buckets) {
         return 0L;
     }
-    if (!(0 != ht->bits.keys_offset)) {
+    if (!(ht->bits.keys_offset)) {
         return __CFBasicHashFindBucket(ht, stack_value).count;
     }
     __block CFIndex total = 0L;
@@ -869,7 +923,7 @@ __private_extern__ CFIndex CFBasicHashGetCountOfValue(CFBasicHashRef ht, uintptr
     return total;
 }
 
-__private_extern__ Boolean CFBasicHashesAreEqual(CFBasicHashRef ht1, CFBasicHashRef ht2) {
+__private_extern__ Boolean CFBasicHashesAreEqual(CFConstBasicHashRef ht1, CFConstBasicHashRef ht2) {
     CFIndex cnt1 = CFBasicHashGetCount(ht1);
     if (cnt1 != CFBasicHashGetCount(ht2)) return false;
     if (0 == cnt1) return true;
@@ -880,7 +934,7 @@ __private_extern__ Boolean CFBasicHashesAreEqual(CFBasicHashRef ht1, CFBasicHash
                 equal = false;
                 return (Boolean)false;
             }
-            if ((0 != ht1->bits.keys_offset) && (bkt1.weak_value != bkt2.weak_value) && !__CFBasicHashTestEqualValue(ht1, bkt1.weak_value, bkt2.weak_value)) {
+            if ((ht1->bits.keys_offset) && (bkt1.weak_value != bkt2.weak_value) && !__CFBasicHashTestEqualValue(ht1, bkt1.weak_value, bkt2.weak_value)) {
                 equal = false;
                 return (Boolean)false;
             }
@@ -889,7 +943,7 @@ __private_extern__ Boolean CFBasicHashesAreEqual(CFBasicHashRef ht1, CFBasicHash
     return equal;
 }
 
-__private_extern__ void CFBasicHashApply(CFBasicHashRef ht, Boolean (^block)(CFBasicHashBucket)) {
+__private_extern__ void CFBasicHashApply(CFConstBasicHashRef ht, Boolean (^block)(CFBasicHashBucket)) {
     CFIndex used = (CFIndex)ht->bits.used_buckets, cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
     for (CFIndex idx = 0; 0 < used && idx < cnt; idx++) {
         CFBasicHashBucket bkt = CFBasicHashGetBucket(ht, idx);
@@ -902,32 +956,38 @@ __private_extern__ void CFBasicHashApply(CFBasicHashRef ht, Boolean (^block)(CFB
     }
 }
 
-__private_extern__ void CFBasicHashGetElements(CFBasicHashRef ht, CFIndex bufferslen, uintptr_t *weak_values, uintptr_t *weak_values2, uintptr_t *weak_keys, uintptr_t *weak_keys2) {
+__private_extern__ void CFBasicHashApplyIndexed(CFConstBasicHashRef ht, CFRange range, Boolean (^block)(CFBasicHashBucket)) {
+    if (range.length < 0) HALT;
+    if (range.length == 0) return;
+    CFIndex cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+    if (cnt < range.location + range.length) HALT;
+    for (CFIndex idx = 0; idx < range.length; idx++) {
+        CFBasicHashBucket bkt = CFBasicHashGetBucket(ht, range.location + idx);
+        if (0 < bkt.count) {
+            if (!block(bkt)) {
+                return;
+            }
+        }
+    }
+}
+
+__private_extern__ void CFBasicHashGetElements(CFConstBasicHashRef ht, CFIndex bufferslen, uintptr_t *weak_values, uintptr_t *weak_keys) {
     CFIndex used = (CFIndex)ht->bits.used_buckets, cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *values = __CFBasicHashGetValues(ht);
-    CFBasicHashValue *values2 = (0 != ht->bits.values2_offset) ? __CFBasicHashGetValues2(ht) : NULL;
-    CFBasicHashValue *keys = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : NULL;
-    CFBasicHashValue *keys2 = (0 != ht->bits.keys2_offset) ? __CFBasicHashGetKeys2(ht) : NULL;
-    uintptr_t *counts = (0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht) : NULL;
     CFIndex offset = 0;
     for (CFIndex idx = 0; 0 < used && idx < cnt && offset < bufferslen; idx++) {
-        uintptr_t weak_key = keys ? keys[idx].weak : values[idx].weak;
-        uintptr_t count = counts ? counts[idx] : ((weak_key == empty || weak_key == deleted) ? 0 : 1);
-        if (0 < count) {
+        CFBasicHashBucket bkt = CFBasicHashGetBucket(ht, idx);
+        if (0 < bkt.count) {
             used--;
-            for (CFIndex cnt = count; cnt-- && offset < bufferslen;) {
-                if (weak_values) { weak_values[offset] = values[idx].weak; }
-                if (weak_values2) { weak_values2[offset] = values2 ? values2[idx].weak : 0; }
-                if (weak_keys) { weak_keys[offset] = weak_key; }
-                if (weak_keys2) { weak_keys2[offset] = keys2 ? keys2[idx].weak : 0; }
+            for (CFIndex cnt = bkt.count; cnt-- && offset < bufferslen;) {
+                if (weak_values) { weak_values[offset] = bkt.weak_value; }
+                if (weak_keys) { weak_keys[offset] = bkt.weak_key; }
                 offset++;
             }
         }
     }
 }
 
-__private_extern__ unsigned long __CFBasicHashFastEnumeration(CFBasicHashRef ht, struct __objcFastEnumerationStateEquivalent2 *state, void *stackbuffer, unsigned long count) {
+__private_extern__ unsigned long __CFBasicHashFastEnumeration(CFConstBasicHashRef ht, struct __objcFastEnumerationStateEquivalent2 *state, void *stackbuffer, unsigned long count) {
     /* copy as many as count items over */
     if (0 == state->state) {        /* first time */
         state->mutationsPtr = (unsigned long *)&ht->bits + (__LP64__ ? 1 : 3);
@@ -959,38 +1019,26 @@ static void __CFBasicHashDrain(CFBasicHashRef ht, Boolean forFinalization) {
     OSAtomicAdd64Barrier(-1 * (int64_t) CFBasicHashGetSize(ht, true), & __CFBasicHashTotalSize);
 #endif
 
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
     CFIndex old_num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
 
     CFAllocatorRef allocator = CFGetAllocator(ht);
     Boolean nullify = (!forFinalization || !CF_IS_COLLECTABLE_ALLOCATOR(allocator));
 
-    CFBasicHashValue *old_values = NULL, *old_values2 = NULL, *old_keys = NULL, *old_keys2 = NULL;
-    uintptr_t *old_counts = NULL, *old_orders = NULL, *old_hashes = NULL;
+    CFBasicHashValue *old_values = NULL, *old_keys = NULL;
+    void *old_counts = NULL;
+    uintptr_t *old_hashes = NULL;
 
     old_values = __CFBasicHashGetValues(ht);
     if (nullify) __CFBasicHashSetValues(ht, NULL);
-    if (0 != ht->bits.values2_offset) {
-        old_values2 = __CFBasicHashGetValues2(ht);
-        if (nullify) __CFBasicHashSetValues2(ht, NULL);
-    }
-    if (0 != ht->bits.keys_offset) {
+    if (ht->bits.keys_offset) {
         old_keys = __CFBasicHashGetKeys(ht);
         if (nullify) __CFBasicHashSetKeys(ht, NULL);
     }
-    if (0 != ht->bits.keys2_offset) {
-        old_keys2 = __CFBasicHashGetKeys2(ht);
-        if (nullify) __CFBasicHashSetKeys2(ht, NULL);
-    }
-    if (0 != ht->bits.counts_offset) {
+    if (ht->bits.counts_offset) {
         old_counts = __CFBasicHashGetCounts(ht);
         if (nullify) __CFBasicHashSetCounts(ht, NULL);
     }
-    if (0 != ht->bits.orders_offset) {
-        old_orders = __CFBasicHashGetOrders(ht);
-        if (nullify) __CFBasicHashSetOrders(ht, NULL);
-    }
-    if (0 != ht->bits.hashes_offset) {
+    if (__CFBasicHashHasHashCache(ht)) {
         old_hashes = __CFBasicHashGetHashes(ht);
         if (nullify) __CFBasicHashSetHashes(ht, NULL);
     }
@@ -999,40 +1047,33 @@ static void __CFBasicHashDrain(CFBasicHashRef ht, Boolean forFinalization) {
         ht->bits.mutations++;
         ht->bits.num_buckets_idx = 0;
         ht->bits.used_buckets = 0;
-        ht->bits.marker = 0;
         ht->bits.deleted = 0;
     }
     
-    if (ht->callbacks != &CFBasicHashNullCallbacks) {
-        CFBasicHashValue *keys = old_keys ? old_keys : old_values;
         for (CFIndex idx = 0; idx < old_num_buckets; idx++) {
-            uintptr_t stack_key = keys[idx].weak;
-            if (stack_key != empty && stack_key != deleted) {
-                __CFBasicHashEjectValue(ht, old_values[idx].weak);
-                if (old_values2) {
-                    __CFBasicHashEjectValue2(ht, old_values2[idx].weak);
-                }
+            uintptr_t stack_value = old_values[idx].neutral;
+            if (stack_value != 0UL && stack_value != ~0UL) {
+                uintptr_t old_value = stack_value;
+                if (__CFBasicHashSubABZero == old_value) old_value = 0UL;
+                if (__CFBasicHashSubABOne == old_value) old_value = ~0UL;
+                __CFBasicHashEjectValue(ht, old_value);
                 if (old_keys) {
-                    __CFBasicHashEjectKey(ht, old_keys[idx].weak);
-                }
-                if (old_keys2) {
-                    __CFBasicHashEjectKey2(ht, old_keys2[idx].weak);
+                    uintptr_t old_key = old_keys[idx].neutral;
+                    if (__CFBasicHashSubABZero == old_key) old_key = 0UL;
+                    if (__CFBasicHashSubABOne == old_key) old_key = ~0UL;
+                    __CFBasicHashEjectKey(ht, old_key);
                 }
             }
         }
-    }
 
     if (forFinalization) {
-        ht->callbacks->func(ht, kCFBasicHashCallbackOpFreeCallbacks, (uintptr_t)allocator, 0, ht->callbacks);
+        ht->callbacks->freeCallbacks(ht, allocator, ht->callbacks);
     }
 
     if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
         CFAllocatorDeallocate(allocator, old_values);
-        CFAllocatorDeallocate(allocator, old_values2);
         CFAllocatorDeallocate(allocator, old_keys);
-        CFAllocatorDeallocate(allocator, old_keys2);
         CFAllocatorDeallocate(allocator, old_counts);
-        CFAllocatorDeallocate(allocator, old_orders);
         CFAllocatorDeallocate(allocator, old_hashes);
     }
 
@@ -1063,114 +1104,83 @@ static void __CFBasicHashRehash(CFBasicHashRef ht, CFIndex newItemCount) {
     CFIndex new_num_buckets = __CFBasicHashTableSizes[new_num_buckets_idx];
     CFIndex old_num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
 
-    CFBasicHashValue *new_values = NULL, *new_values2 = NULL, *new_keys = NULL, *new_keys2 = NULL;
-    uintptr_t *new_counts = NULL, *new_orders = NULL, *new_hashes = NULL;
+    CFBasicHashValue *new_values = NULL, *new_keys = NULL;
+    void *new_counts = NULL;
+    uintptr_t *new_hashes = NULL;
 
     if (0 < new_num_buckets) {
-        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_values);
+        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongValues(ht), __CFBasicHashHasCompactableValues(ht));
         __SetLastAllocationEventName(new_values, "CFBasicHash (value-store)");
-        if (0 != ht->bits.values2_offset) {
-            new_values2 = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_values2);
-            __SetLastAllocationEventName(new_values2, "CFBasicHash (value2-store)");
-        }
-        if (0 != ht->bits.keys_offset) {
-            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_keys);
+        memset(new_values, 0, new_num_buckets * sizeof(CFBasicHashValue));
+        if (ht->bits.keys_offset) {
+            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongKeys(ht), __CFBasicHashHasCompactableKeys(ht));
             __SetLastAllocationEventName(new_keys, "CFBasicHash (key-store)");
+            memset(new_keys, 0, new_num_buckets * sizeof(CFBasicHashValue));
         }
-        if (0 != ht->bits.keys2_offset) {
-            new_keys2 = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_keys2);
-            __SetLastAllocationEventName(new_keys2, "CFBasicHash (key2-store)");
-        }
-        if (0 != ht->bits.counts_offset) {
-            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
+        if (ht->bits.counts_offset) {
+            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, (1 << ht->bits.counts_width), false, false);
             __SetLastAllocationEventName(new_counts, "CFBasicHash (count-store)");
-            memset(new_counts, 0, new_num_buckets * sizeof(uintptr_t));
+            memset(new_counts, 0, new_num_buckets * (1 << ht->bits.counts_width));
         }
-        if (0 != ht->bits.orders_offset) {
-            new_orders = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
-            __SetLastAllocationEventName(new_orders, "CFBasicHash (order-store)");
-            memset(new_orders, 0, new_num_buckets * sizeof(uintptr_t));
-        }
-        if (0 != ht->bits.hashes_offset) {
-            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
+        if (__CFBasicHashHasHashCache(ht)) {
+            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false, false);
             __SetLastAllocationEventName(new_hashes, "CFBasicHash (hash-store)");
             memset(new_hashes, 0, new_num_buckets * sizeof(uintptr_t));
-        }
-    }
-
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    // if we knew the allocations were coming from already-cleared memory, and the marker was still 0, we could skip all this next stuff
-    for (CFIndex idx = 0; idx < new_num_buckets; idx++) {
-        if (ht->bits.strong_values) new_values[idx].strong = (id)empty; else new_values[idx].weak = empty;
-        if (new_values2) {
-            if (ht->bits.strong_values2) new_values2[idx].strong = (id)empty; else new_values2[idx].weak = empty;
-        }
-        if (new_keys) {
-            if (ht->bits.strong_keys) new_keys[idx].strong = (id)empty; else new_keys[idx].weak = empty;
-        }
-        if (new_keys2) {
-            if (ht->bits.strong_keys2) new_keys2[idx].strong = (id)empty; else new_keys2[idx].weak = empty;
         }
     }
 
     ht->bits.num_buckets_idx = new_num_buckets_idx;
     ht->bits.deleted = 0;
 
-    CFBasicHashValue *old_values = NULL, *old_values2 = NULL, *old_keys = NULL, *old_keys2 = NULL;
-    uintptr_t *old_counts = NULL, *old_orders = NULL, *old_hashes = NULL;
+    CFBasicHashValue *old_values = NULL, *old_keys = NULL;
+    void *old_counts = NULL;
+    uintptr_t *old_hashes = NULL;
 
     old_values = __CFBasicHashGetValues(ht);
     __CFBasicHashSetValues(ht, new_values);
-    if (0 != ht->bits.values2_offset) {
-        old_values2 = __CFBasicHashGetValues2(ht);
-        __CFBasicHashSetValues2(ht, new_values2);
-    }
-    if (0 != ht->bits.keys_offset) {
+    if (ht->bits.keys_offset) {
         old_keys = __CFBasicHashGetKeys(ht);
         __CFBasicHashSetKeys(ht, new_keys);
     }
-    if (0 != ht->bits.keys2_offset) {
-        old_keys2 = __CFBasicHashGetKeys2(ht);
-        __CFBasicHashSetKeys2(ht, new_keys2);
-    }
-    if (0 != ht->bits.counts_offset) {
+    if (ht->bits.counts_offset) {
         old_counts = __CFBasicHashGetCounts(ht);
         __CFBasicHashSetCounts(ht, new_counts);
     }
-    if (0 != ht->bits.orders_offset) {
-        old_orders = __CFBasicHashGetOrders(ht);
-        __CFBasicHashSetOrders(ht, new_orders);
-    }
-    if (0 != ht->bits.hashes_offset) {
+    if (__CFBasicHashHasHashCache(ht)) {
         old_hashes = __CFBasicHashGetHashes(ht);
         __CFBasicHashSetHashes(ht, new_hashes);
     }
 
     if (0 < old_num_buckets) {
-        CFBasicHashValue *keys = old_keys ? old_keys : old_values;
         for (CFIndex idx = 0; idx < old_num_buckets; idx++) {
-            uintptr_t stack_key = keys[idx].weak;
-            if (stack_key != empty && stack_key != deleted) {
-                CFBasicHashBucket bkt = ___CFBasicHashFindBucket(ht, stack_key, old_hashes ? old_hashes[idx] : 0, true);
-                uintptr_t stack_value = old_values[idx].weak;
-                if (ht->bits.strong_values) new_values[bkt.idx].strong = (id)stack_value; else new_values[bkt.idx].weak = stack_value;
-                if (old_values2) {
-                    if (ht->bits.strong_values2) new_values2[bkt.idx].strong = (id)old_values2[idx].weak; else new_values2[bkt.idx].weak = old_values2[idx].weak;
+            uintptr_t stack_value = old_values[idx].neutral;
+            if (stack_value != 0UL && stack_value != ~0UL) {
+                if (__CFBasicHashSubABZero == stack_value) stack_value = 0UL;
+                if (__CFBasicHashSubABOne == stack_value) stack_value = ~0UL;
+                uintptr_t stack_key = stack_value;
+                if (ht->bits.keys_offset) {
+                    stack_key = old_keys[idx].neutral;
+                    if (__CFBasicHashSubABZero == stack_key) stack_key = 0UL;
+                    if (__CFBasicHashSubABOne == stack_key) stack_key = ~0UL;
                 }
+                if (ht->bits.indirect_keys) {
+                    stack_key = ht->callbacks->getIndirectKey(ht, stack_value);
+                }
+                CFIndex bkt_idx = __CFBasicHashFindBucket_NoCollision(ht, stack_key, old_hashes ? old_hashes[idx] : 0UL);
+                __CFBasicHashSetValue(ht, bkt_idx, stack_value, false, false);
                 if (old_keys) {
-                    if (ht->bits.strong_keys) new_keys[bkt.idx].strong = (id)stack_key; else new_keys[bkt.idx].weak = stack_key;
-                }
-                if (old_keys2) {
-                    if (ht->bits.strong_keys2) new_keys2[bkt.idx].strong = (id)old_keys2[idx].weak; else new_keys2[bkt.idx].weak = old_keys2[idx].weak;
+                    __CFBasicHashSetKey(ht, bkt_idx, stack_key, false, false);
                 }
                 if (old_counts) {
-                    new_counts[bkt.idx] = old_counts[idx];
-                }
-                if (old_orders) {
-                    new_orders[bkt.idx] = old_orders[idx];
+                    switch (ht->bits.counts_width) {
+                    case 0: ((uint8_t *)new_counts)[bkt_idx] = ((uint8_t *)old_counts)[idx]; break;
+                    case 1: ((uint16_t *)new_counts)[bkt_idx] = ((uint16_t *)old_counts)[idx]; break;
+                    case 2: ((uint32_t *)new_counts)[bkt_idx] = ((uint32_t *)old_counts)[idx]; break;
+                    case 3: ((uint64_t *)new_counts)[bkt_idx] = ((uint64_t *)old_counts)[idx]; break;
+                    }
                 }
                 if (old_hashes) {
-                    new_hashes[bkt.idx] = old_hashes[idx];
+                    new_hashes[bkt_idx] = old_hashes[idx];
                 }
             }
         }
@@ -1179,11 +1189,8 @@ static void __CFBasicHashRehash(CFBasicHashRef ht, CFIndex newItemCount) {
     CFAllocatorRef allocator = CFGetAllocator(ht);
     if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
         CFAllocatorDeallocate(allocator, old_values);
-        CFAllocatorDeallocate(allocator, old_values2);
         CFAllocatorDeallocate(allocator, old_keys);
-        CFAllocatorDeallocate(allocator, old_keys2);
         CFAllocatorDeallocate(allocator, old_counts);
-        CFAllocatorDeallocate(allocator, old_orders);
         CFAllocatorDeallocate(allocator, old_hashes);
     }
 
@@ -1204,164 +1211,58 @@ __private_extern__ void CFBasicHashSetCapacity(CFBasicHashRef ht, CFIndex capaci
     }
 }
 
-static void __CFBasicHashFindNewMarker(CFBasicHashRef ht, uintptr_t stack_key) {
-    uintptr_t marker = ht->bits.marker;
-    uintptr_t empty = (marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *keys = (0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : __CFBasicHashGetValues(ht);
-    Boolean strong = (0 != ht->bits.keys_offset) ? ht->bits.strong_keys : ht->bits.strong_values;
-    CFIndex cnt = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
-    if (0 == marker) marker = 4096;
-
-    again:;
-    marker++;
-    if ((1UL << 26) <= marker) HALT;
-    uintptr_t new_empty = (marker << __CFBasicHashMarkerShift), new_deleted = ~new_empty;
-    if (stack_key == new_empty || stack_key == new_deleted) {
-        goto again;
-    }
-    for (CFIndex idx = 0; idx < cnt; idx++) {
-        uintptr_t stack_curr = strong ? (uintptr_t)keys[idx].strong : keys[idx].weak;
-        if (stack_curr == new_empty || stack_curr == new_deleted) {
-            goto again;
-        }
-    }
-    for (CFIndex idx = 0; idx < cnt; idx++) {
-        uintptr_t stack_curr = strong ? (uintptr_t)keys[idx].strong : keys[idx].weak;
-        if (stack_curr == empty) {
-            if (strong) keys[idx].strong = (id)new_empty; else keys[idx].weak = new_empty;
-        } else if (stack_curr == deleted) {
-            if (strong) keys[idx].strong = (id)new_deleted; else keys[idx].weak = new_deleted;
-        }
-    }
-    ht->bits.marker = marker;
-}
-
-static void __CFBasicHashAddValue(CFBasicHashRef ht, CFBasicHashBucket bkt, uintptr_t stack_key, uintptr_t stack_key2, uintptr_t stack_value, uintptr_t stack_value2) {
+static void __CFBasicHashAddValue(CFBasicHashRef ht, CFIndex bkt_idx, uintptr_t stack_key, uintptr_t stack_value) {
     ht->bits.mutations++;
-    stack_value = __CFBasicHashImportValue(ht, stack_value);
-    if (0 != ht->bits.keys_offset) {
-        stack_key = __CFBasicHashImportKey(ht, stack_key);
-    } else {
-        stack_key = stack_value;
-    }
-    if (0 != ht->bits.values2_offset) {
-        stack_value2 = __CFBasicHashImportValue2(ht, stack_value2);
-    }
-    if (0 != ht->bits.keys2_offset) {
-        stack_key2 = __CFBasicHashImportKey2(ht, stack_key2);
-    }
     if (CFBasicHashGetCapacity(ht) < ht->bits.used_buckets + 1) {
         __CFBasicHashRehash(ht, 1);
-        bkt = ___CFBasicHashFindBucket(ht, stack_key, 0, true);
-    }
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    if (bkt.weak_key == deleted) {
+        bkt_idx = __CFBasicHashFindBucket_NoCollision(ht, stack_key, 0);
+    } else if (__CFBasicHashIsDeleted(ht, bkt_idx)) {
         ht->bits.deleted--;
     }
-    if (stack_key == empty || stack_key == deleted) {
-        __CFBasicHashFindNewMarker(ht, stack_key);
+    uintptr_t key_hash = 0;
+    if (__CFBasicHashHasHashCache(ht)) {
+        key_hash = __CFBasicHashHashKey(ht, stack_key);
     }
-    CFBasicHashValue *value = &(__CFBasicHashGetValues(ht)[bkt.idx]);
-    if (ht->bits.strong_values) value->strong = (id)stack_value; else value->weak = stack_value;
-    if (0 != ht->bits.values2_offset) {
-        CFBasicHashValue *value2 = &(__CFBasicHashGetValues2(ht)[bkt.idx]);
-        if (ht->bits.strong_values2) value2->strong = (id)stack_value2; else value2->weak = stack_value2;
+    stack_value = __CFBasicHashImportValue(ht, stack_value);
+    if (ht->bits.keys_offset) {
+        stack_key = __CFBasicHashImportKey(ht, stack_key);
     }
-    if (0 != ht->bits.keys_offset) {
-        CFBasicHashValue *key = &(__CFBasicHashGetKeys(ht)[bkt.idx]);
-        if (ht->bits.strong_keys) key->strong = (id)stack_key; else key->weak = stack_key;
+    __CFBasicHashSetValue(ht, bkt_idx, stack_value, false, false);
+    if (ht->bits.keys_offset) {
+        __CFBasicHashSetKey(ht, bkt_idx, stack_key, false, false);
     }
-    if (0 != ht->bits.keys2_offset) {
-        CFBasicHashValue *key2 = &(__CFBasicHashGetKeys2(ht)[bkt.idx]);
-        if (ht->bits.strong_keys2) key2->strong = (id)stack_key2; else key2->weak = stack_key2;
+    if (ht->bits.counts_offset) {
+        __CFBasicHashIncSlotCount(ht, bkt_idx);
     }
-    if (0 != ht->bits.counts_offset) {
-        __CFBasicHashGetCounts(ht)[bkt.idx] = 1;
-    }
-    if (0 != ht->bits.orders_offset) {
-        __CFBasicHashGetOrders(ht)[bkt.idx] = 0;
-    }
-    if (ht->bits.hashes_offset) {
-        __CFBasicHashGetHashes(ht)[bkt.idx] = __CFBasicHashHashKey(ht, stack_key);
+    if (__CFBasicHashHasHashCache(ht)) {
+        __CFBasicHashGetHashes(ht)[bkt_idx] = key_hash;
     }
     ht->bits.used_buckets++;
 }
 
-static void __CFBasicHashReplaceValue(CFBasicHashRef ht, CFBasicHashBucket bkt, uintptr_t stack_key, uintptr_t stack_key2, uintptr_t stack_value, uintptr_t stack_value2) {
+static void __CFBasicHashReplaceValue(CFBasicHashRef ht, CFIndex bkt_idx, uintptr_t stack_key, uintptr_t stack_value) {
     ht->bits.mutations++;
     stack_value = __CFBasicHashImportValue(ht, stack_value);
-    if (0 != ht->bits.keys_offset) {
+    if (ht->bits.keys_offset) {
         stack_key = __CFBasicHashImportKey(ht, stack_key);
-    } else {
-        stack_key = stack_value;
     }
-    if (0 != ht->bits.values2_offset) {
-        stack_value2 = __CFBasicHashImportValue2(ht, stack_value2);
-    }
-    if (0 != ht->bits.keys2_offset) {
-        stack_key2 = __CFBasicHashImportKey2(ht, stack_key2);
-    }
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    if (stack_key == empty || stack_key == deleted) {
-        __CFBasicHashFindNewMarker(ht, stack_key);
-    }
-    CFBasicHashValue *value = &(__CFBasicHashGetValues(ht)[bkt.idx]);
-    uintptr_t old_value = value->weak;
-    if (ht->bits.strong_values) value->strong = (id)stack_value; else value->weak = stack_value;
-    __CFBasicHashEjectValue(ht, old_value);
-    if (0 != ht->bits.values2_offset) {
-        CFBasicHashValue *value2 = &(__CFBasicHashGetValues2(ht)[bkt.idx]);
-        uintptr_t old_value2 = value2->weak;
-        if (ht->bits.strong_values2) value2->strong = (id)stack_value2; else value2->weak = stack_value2;
-        __CFBasicHashEjectValue2(ht, old_value2);
-    }
-    if (0 != ht->bits.keys_offset) {
-        CFBasicHashValue *key = &(__CFBasicHashGetKeys(ht)[bkt.idx]);
-        uintptr_t old_key = key->weak;
-        if (ht->bits.strong_keys) key->strong = (id)stack_key; else key->weak = stack_key;
-        __CFBasicHashEjectKey(ht, old_key);
-    }
-    if (0 != ht->bits.keys2_offset) {
-        CFBasicHashValue *key2 = &(__CFBasicHashGetKeys2(ht)[bkt.idx]);
-        uintptr_t old_key2 = key2->weak;
-        if (ht->bits.strong_keys2) key2->strong = (id)stack_key2; else key2->weak = stack_key2;
-        __CFBasicHashEjectKey2(ht, old_key2);
+    __CFBasicHashSetValue(ht, bkt_idx, stack_value, false, false);
+    if (ht->bits.keys_offset) {
+        __CFBasicHashSetKey(ht, bkt_idx, stack_key, false, false);
     }
 }
 
-static void __CFBasicHashRemoveValue(CFBasicHashRef ht, CFBasicHashBucket bkt, uintptr_t stack_key, uintptr_t stack_key2) {
+static void __CFBasicHashRemoveValue(CFBasicHashRef ht, CFIndex bkt_idx) {
     ht->bits.mutations++;
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *value = &(__CFBasicHashGetValues(ht)[bkt.idx]);
-    uintptr_t old_value = value->weak;
-    if (ht->bits.strong_values) value->strong = (id)deleted; else value->weak = deleted;
-    __CFBasicHashEjectValue(ht, old_value);
-    if (0 != ht->bits.values2_offset) {
-        CFBasicHashValue *value2 = &(__CFBasicHashGetValues2(ht)[bkt.idx]);
-        uintptr_t old_value2 = value2->weak;
-        if (ht->bits.strong_values2) value2->strong = (id)deleted; else value2->weak = deleted;
-        __CFBasicHashEjectValue2(ht, old_value2);
+    __CFBasicHashSetValue(ht, bkt_idx, ~0UL, false, true);
+    if (ht->bits.keys_offset) {
+        __CFBasicHashSetKey(ht, bkt_idx, ~0UL, false, true);
     }
-    if (0 != ht->bits.keys_offset) {
-        CFBasicHashValue *key = &(__CFBasicHashGetKeys(ht)[bkt.idx]);
-        uintptr_t old_key = key->weak;
-        if (ht->bits.strong_keys) key->strong = (id)deleted; else key->weak = deleted;
-        __CFBasicHashEjectKey(ht, old_key);
+    if (ht->bits.counts_offset) {
+        __CFBasicHashDecSlotCount(ht, bkt_idx);
     }
-    if (0 != ht->bits.keys2_offset) {
-        CFBasicHashValue *key2 = &(__CFBasicHashGetKeys2(ht)[bkt.idx]);
-        uintptr_t old_key2 = key2->weak;
-        if (ht->bits.strong_keys2) key2->strong = (id)deleted; else key2->weak = deleted;
-        __CFBasicHashEjectKey2(ht, old_key2);
-    }
-    if (0 != ht->bits.counts_offset) {
-        __CFBasicHashGetCounts(ht)[bkt.idx] = 0;
-    }
-    if (0 != ht->bits.orders_offset) {
-        __CFBasicHashGetOrders(ht)[bkt.idx] = 0;
-    }
-    if (ht->bits.hashes_offset) {
-        __CFBasicHashGetHashes(ht)[bkt.idx] = 0;
+    if (__CFBasicHashHasHashCache(ht)) {
+        __CFBasicHashGetHashes(ht)[bkt_idx] = 0;
     }
     ht->bits.used_buckets--;
     ht->bits.deleted++;
@@ -1383,47 +1284,77 @@ static void __CFBasicHashRemoveValue(CFBasicHashRef ht, CFBasicHashBucket bkt, u
     }
 }
 
-__private_extern__ void CFBasicHashAddValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value) {
+__private_extern__ Boolean CFBasicHashAddValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value) {
     if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == stack_key) HALT;
+    if (__CFBasicHashSubABOne == stack_key) HALT;
+    if (__CFBasicHashSubABZero == stack_value) HALT;
+    if (__CFBasicHashSubABOne == stack_value) HALT;
     CFBasicHashBucket bkt = __CFBasicHashFindBucket(ht, stack_key);
     if (0 < bkt.count) {
         ht->bits.mutations++;
-        if (0 != ht->bits.counts_offset) {
-            __CFBasicHashGetCounts(ht)[bkt.idx]++;
+        if (ht->bits.counts_offset && bkt.count < LONG_MAX) { // if not yet as large as a CFIndex can be... otherwise clamp and do nothing
+            __CFBasicHashIncSlotCount(ht, bkt.idx);
+            return true;
         }
     } else {
-        __CFBasicHashAddValue(ht, bkt, stack_key, 0, stack_value, 0);
+        __CFBasicHashAddValue(ht, bkt.idx, stack_key, stack_value);
+        return true;
     }
+    return false;
 }
 
 __private_extern__ void CFBasicHashReplaceValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value) {
     if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == stack_key) HALT;
+    if (__CFBasicHashSubABOne == stack_key) HALT;
+    if (__CFBasicHashSubABZero == stack_value) HALT;
+    if (__CFBasicHashSubABOne == stack_value) HALT;
     CFBasicHashBucket bkt = __CFBasicHashFindBucket(ht, stack_key);
     if (0 < bkt.count) {
-        __CFBasicHashReplaceValue(ht, bkt, stack_key, 0, stack_value, 0);
+        __CFBasicHashReplaceValue(ht, bkt.idx, stack_key, stack_value);
     }
 }
 
 __private_extern__ void CFBasicHashSetValue(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t stack_value) {
     if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == stack_key) HALT;
+    if (__CFBasicHashSubABOne == stack_key) HALT;
+    if (__CFBasicHashSubABZero == stack_value) HALT;
+    if (__CFBasicHashSubABOne == stack_value) HALT;
     CFBasicHashBucket bkt = __CFBasicHashFindBucket(ht, stack_key);
     if (0 < bkt.count) {
-        __CFBasicHashReplaceValue(ht, bkt, stack_key, 0, stack_value, 0);
+        __CFBasicHashReplaceValue(ht, bkt.idx, stack_key, stack_value);
     } else {
-        __CFBasicHashAddValue(ht, bkt, stack_key, 0, stack_value, 0);
+        __CFBasicHashAddValue(ht, bkt.idx, stack_key, stack_value);
     }
 }
 
 __private_extern__ CFIndex CFBasicHashRemoveValue(CFBasicHashRef ht, uintptr_t stack_key) {
     if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == stack_key || __CFBasicHashSubABOne == stack_key) return 0;
     CFBasicHashBucket bkt = __CFBasicHashFindBucket(ht, stack_key);
     if (1 < bkt.count) {
         ht->bits.mutations++;
-        if (0 != ht->bits.counts_offset) {
-            __CFBasicHashGetCounts(ht)[bkt.idx]--;
+        if (ht->bits.counts_offset && bkt.count < LONG_MAX) { // if not as large as a CFIndex can be... otherwise clamp and do nothing
+            __CFBasicHashDecSlotCount(ht, bkt.idx);
         }
     } else if (0 < bkt.count) {
-        __CFBasicHashRemoveValue(ht, bkt, stack_key, 0);
+        __CFBasicHashRemoveValue(ht, bkt.idx);
+    }
+    return bkt.count;
+}
+
+__private_extern__ CFIndex CFBasicHashRemoveValueAtIndex(CFBasicHashRef ht, CFIndex idx) {
+    if (!CFBasicHashIsMutable(ht)) HALT;
+    CFBasicHashBucket bkt = CFBasicHashGetBucket(ht, idx);
+    if (1 < bkt.count) {
+        ht->bits.mutations++;
+        if (ht->bits.counts_offset && bkt.count < LONG_MAX) { // if not as large as a CFIndex can be... otherwise clamp and do nothing
+            __CFBasicHashDecSlotCount(ht, bkt.idx);
+        }
+    } else if (0 < bkt.count) {
+        __CFBasicHashRemoveValue(ht, bkt.idx);
     }
     return bkt.count;
 }
@@ -1434,61 +1365,108 @@ __private_extern__ void CFBasicHashRemoveAllValues(CFBasicHashRef ht) {
     __CFBasicHashDrain(ht, false);
 }
 
-__private_extern__ size_t CFBasicHashGetSize(CFBasicHashRef ht, Boolean total) {
+Boolean CFBasicHashAddIntValueAndInc(CFBasicHashRef ht, uintptr_t stack_key, uintptr_t int_value) {
+    if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == stack_key) HALT;
+    if (__CFBasicHashSubABOne == stack_key) HALT;
+    if (__CFBasicHashSubABZero == int_value) HALT;
+    if (__CFBasicHashSubABOne == int_value) HALT;
+    CFBasicHashBucket bkt = __CFBasicHashFindBucket(ht, stack_key);
+    if (0 < bkt.count) {
+        ht->bits.mutations++;
+    } else {
+        // must rehash before renumbering
+        if (CFBasicHashGetCapacity(ht) < ht->bits.used_buckets + 1) {
+            __CFBasicHashRehash(ht, 1);
+            bkt.idx = __CFBasicHashFindBucket_NoCollision(ht, stack_key, 0);
+        }
+        CFIndex cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+        for (CFIndex idx = 0; idx < cnt; idx++) {
+            if (!__CFBasicHashIsEmptyOrDeleted(ht, idx)) {
+                uintptr_t stack_value = __CFBasicHashGetValue(ht, idx);
+                if (int_value <= stack_value) {
+                    stack_value++;
+                    __CFBasicHashSetValue(ht, idx, stack_value, true, false);
+                    ht->bits.mutations++;
+                }
+            }
+        }
+        __CFBasicHashAddValue(ht, bkt.idx, stack_key, int_value);
+        return true;
+    }
+    return false;
+}
+
+void CFBasicHashRemoveIntValueAndDec(CFBasicHashRef ht, uintptr_t int_value) {
+    if (!CFBasicHashIsMutable(ht)) HALT;
+    if (__CFBasicHashSubABZero == int_value) HALT;
+    if (__CFBasicHashSubABOne == int_value) HALT;
+    uintptr_t bkt_idx = ~0UL;
+    CFIndex cnt = (CFIndex)__CFBasicHashTableSizes[ht->bits.num_buckets_idx];
+    for (CFIndex idx = 0; idx < cnt; idx++) {
+        if (!__CFBasicHashIsEmptyOrDeleted(ht, idx)) {
+            uintptr_t stack_value = __CFBasicHashGetValue(ht, idx);
+            if (int_value == stack_value) {
+                bkt_idx = idx;
+            }
+            if (int_value < stack_value) {
+                stack_value--;
+                __CFBasicHashSetValue(ht, idx, stack_value, true, false);
+                ht->bits.mutations++;
+            }
+        }
+    }
+    __CFBasicHashRemoveValue(ht, bkt_idx);
+}
+
+__private_extern__ size_t CFBasicHashGetSize(CFConstBasicHashRef ht, Boolean total) {
     size_t size = sizeof(struct __CFBasicHash);
-    if (0 != ht->bits.values2_offset) size += sizeof(CFBasicHashValue *);
-    if (0 != ht->bits.keys_offset) size += sizeof(CFBasicHashValue *);
-    if (0 != ht->bits.keys2_offset) size += sizeof(CFBasicHashValue *);
-    if (0 != ht->bits.counts_offset) size += sizeof(uintptr_t *);
-    if (0 != ht->bits.orders_offset) size += sizeof(uintptr_t *);
-    if (0 != ht->bits.hashes_offset) size += sizeof(uintptr_t *);
+    if (ht->bits.keys_offset) size += sizeof(CFBasicHashValue *);
+    if (ht->bits.counts_offset) size += sizeof(void *);
+    if (__CFBasicHashHasHashCache(ht)) size += sizeof(uintptr_t *);
     if (total) {
         CFIndex num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
         if (0 < num_buckets) {
             size += malloc_size(__CFBasicHashGetValues(ht));
-            if (0 != ht->bits.values2_offset) size += malloc_size(__CFBasicHashGetValues2(ht));
-            if (0 != ht->bits.keys_offset) size += malloc_size(__CFBasicHashGetKeys(ht));
-            if (0 != ht->bits.keys2_offset) size += malloc_size(__CFBasicHashGetKeys2(ht));
-            if (0 != ht->bits.counts_offset) size += malloc_size(__CFBasicHashGetCounts(ht));
-            if (0 != ht->bits.orders_offset) size += malloc_size(__CFBasicHashGetOrders(ht));
-            if (0 != ht->bits.hashes_offset) size += malloc_size(__CFBasicHashGetHashes(ht));
+            if (ht->bits.keys_offset) size += malloc_size(__CFBasicHashGetKeys(ht));
+            if (ht->bits.counts_offset) size += malloc_size(__CFBasicHashGetCounts(ht));
+            if (__CFBasicHashHasHashCache(ht)) size += malloc_size(__CFBasicHashGetHashes(ht));
             size += malloc_size((void *)ht->callbacks);
         }
     }
     return size;
 }
 
-__private_extern__ CFStringRef CFBasicHashCopyDescription(CFBasicHashRef ht, Boolean detailed, CFStringRef prefix, CFStringRef entryPrefix, Boolean describeElements) {
+__private_extern__ CFStringRef CFBasicHashCopyDescription(CFConstBasicHashRef ht, Boolean detailed, CFStringRef prefix, CFStringRef entryPrefix, Boolean describeElements) {
     CFMutableStringRef result = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
-    CFStringAppendFormat(result, NULL, CFSTR("%@{type = %s %s%s, count = %ld,\n"), prefix, (CFBasicHashIsMutable(ht) ? "mutable" : "immutable"), ((0 != ht->bits.counts_offset) ? "multi" : ""), ((0 != ht->bits.keys_offset) ? "dict" : "set"), CFBasicHashGetCount(ht));
+    CFStringAppendFormat(result, NULL, CFSTR("%@{type = %s %s%s, count = %ld,\n"), prefix, (CFBasicHashIsMutable(ht) ? "mutable" : "immutable"), ((ht->bits.counts_offset) ? "multi" : ""), ((ht->bits.keys_offset) ? "dict" : "set"), CFBasicHashGetCount(ht));
     if (detailed) {
         const char *cb_type = "custom";
-        if (&CFBasicHashNullCallbacks == ht->callbacks) {
-            cb_type = "null";
-        } else if (&CFBasicHashStandardCallbacks == ht->callbacks) {
-            cb_type = "standard";
-        }
-        CFStringAppendFormat(result, NULL, CFSTR("%@hash cache = %s, strong values = %s, strong keys = %s, cb = %s,\n"), prefix, ((0 != ht->bits.hashes_offset) ? "yes" : "no"), (ht->bits.strong_values ? "yes" : "no"), (ht->bits.strong_keys ? "yes" : "no"), cb_type);
-        CFStringAppendFormat(result, NULL, CFSTR("%@num bucket index = %d, num buckets = %ld, capacity = %ld, num buckets used = %ld,\n"), prefix, ht->bits.num_buckets_idx, CFBasicHashGetNumBuckets(ht), CFBasicHashGetCapacity(ht), ht->bits.used_buckets);
-        uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-        CFStringAppendFormat(result, NULL, CFSTR("%@empty marker = 0x%lx, deleted marker = 0x%lx, finalized = %s,\n"), prefix, empty, deleted, (ht->bits.finalized ? "yes" : "no"));
+        CFStringAppendFormat(result, NULL, CFSTR("%@hash cache = %s, strong values = %s, strong keys = %s, cb = %s,\n"), prefix, (__CFBasicHashHasHashCache(ht) ? "yes" : "no"), (CFBasicHashHasStrongValues(ht) ? "yes" : "no"), (CFBasicHashHasStrongKeys(ht) ? "yes" : "no"), cb_type);
+        CFStringAppendFormat(result, NULL, CFSTR("%@num bucket index = %d, num buckets = %ld, capacity = %d, num buckets used = %u,\n"), prefix, ht->bits.num_buckets_idx, CFBasicHashGetNumBuckets(ht), CFBasicHashGetCapacity(ht), ht->bits.used_buckets);
+        CFStringAppendFormat(result, NULL, CFSTR("%@counts width = %d, finalized = %s,\n"), prefix,((ht->bits.counts_offset) ? (1 << ht->bits.counts_width) : 0), (ht->bits.finalized ? "yes" : "no"));
         CFStringAppendFormat(result, NULL, CFSTR("%@num mutations = %ld, num deleted = %ld, size = %ld, total size = %ld,\n"), prefix, ht->bits.mutations, ht->bits.deleted, CFBasicHashGetSize(ht, false), CFBasicHashGetSize(ht, true));
-        CFStringAppendFormat(result, NULL, CFSTR("%@values ptr = %p, keys ptr = %p, counts ptr = %p, hashes ptr = %p,\n"), prefix, __CFBasicHashGetValues(ht), ((0 != ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : NULL), ((0 != ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht) : NULL), ((0 != ht->bits.hashes_offset) ? __CFBasicHashGetHashes(ht) : NULL));
+        CFStringAppendFormat(result, NULL, CFSTR("%@values ptr = %p, keys ptr = %p, counts ptr = %p, hashes ptr = %p,\n"), prefix, __CFBasicHashGetValues(ht), ((ht->bits.keys_offset) ? __CFBasicHashGetKeys(ht) : NULL), ((ht->bits.counts_offset) ? __CFBasicHashGetCounts(ht) : NULL), (__CFBasicHashHasHashCache(ht) ? __CFBasicHashGetHashes(ht) : NULL));
     }
     CFStringAppendFormat(result, NULL, CFSTR("%@entries =>\n"), prefix);
     CFBasicHashApply(ht, ^(CFBasicHashBucket bkt) {
             CFStringRef vDesc = NULL, kDesc = NULL;
-            CFBasicHashCallbackType cb = ht->callbacks->func;
-            if (!describeElements) cb = __CFBasicHashNullCallback;
-            vDesc = (CFStringRef)cb(ht, kCFBasicHashCallbackOpDescribeValue, bkt.weak_value, 0, ht->callbacks);
-            if (0 != ht->bits.keys_offset) {
-                kDesc = (CFStringRef)cb(ht, kCFBasicHashCallbackOpDescribeKey, bkt.weak_key, 0, ht->callbacks);
+            if (!describeElements) {
+                vDesc = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)bkt.weak_value);
+                if (ht->bits.keys_offset) {
+                    kDesc = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)bkt.weak_key);
+                }
+            } else {
+                vDesc = ht->callbacks->copyValueDescription(ht, bkt.weak_value);
+                if (ht->bits.keys_offset) {
+                    kDesc = ht->callbacks->copyKeyDescription(ht, bkt.weak_key);
+                }
             }
-            if ((0 != ht->bits.keys_offset) && (0 != ht->bits.counts_offset)) {
+            if (ht->bits.keys_offset && ht->bits.counts_offset) {
                 CFStringAppendFormat(result, NULL, CFSTR("%@%ld : %@ = %@ (%ld)\n"), entryPrefix, bkt.idx, kDesc, vDesc, bkt.count);
-            } else if (0 != ht->bits.keys_offset) {
+            } else if (ht->bits.keys_offset) {
                 CFStringAppendFormat(result, NULL, CFSTR("%@%ld : %@ = %@\n"), entryPrefix, bkt.idx, kDesc, vDesc);
-            } else if (0 != ht->bits.counts_offset) {
+            } else if (ht->bits.counts_offset) {
                 CFStringAppendFormat(result, NULL, CFSTR("%@%ld : %@ (%ld)\n"), entryPrefix, bkt.idx, vDesc, bkt.count);
             } else {
                 CFStringAppendFormat(result, NULL, CFSTR("%@%ld : %@\n"), entryPrefix, bkt.idx, vDesc);
@@ -1501,7 +1479,7 @@ __private_extern__ CFStringRef CFBasicHashCopyDescription(CFBasicHashRef ht, Boo
     return result;
 }
 
-__private_extern__ void CFBasicHashShow(CFBasicHashRef ht) {
+__private_extern__ void CFBasicHashShow(CFConstBasicHashRef ht) {
     CFStringRef str = CFBasicHashCopyDescription(ht, true, CFSTR(""), CFSTR("\t"), false);
     CFShow(str);
     CFRelease(str);
@@ -1559,36 +1537,55 @@ __private_extern__ CFTypeID CFBasicHashGetTypeID(void) {
 
 CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, const CFBasicHashCallbacks *cb) {
     size_t size = sizeof(struct __CFBasicHash) - sizeof(CFRuntimeBase);
-    if (flags & kCFBasicHashHasValues2) size += sizeof(CFBasicHashValue *); // values2
     if (flags & kCFBasicHashHasKeys) size += sizeof(CFBasicHashValue *); // keys
-    if (flags & kCFBasicHashHasKeys2) size += sizeof(CFBasicHashValue *); // keys2
-    if (flags & kCFBasicHashHasCounts) size += sizeof(uintptr_t *); // counts
-    if (flags & kCFBasicHashHasOrder) size += sizeof(uintptr_t *); // order
+    if (flags & kCFBasicHashHasCounts) size += sizeof(void *); // counts
     if (flags & kCFBasicHashHasHashCache) size += sizeof(uintptr_t *); // hashes
     CFBasicHashRef ht = (CFBasicHashRef)_CFRuntimeCreateInstance(allocator, CFBasicHashGetTypeID(), size, NULL);
     if (NULL == ht) HALT;
 
     ht->bits.finalized = 0;
-    ht->bits.strong_values = (flags & kCFBasicHashStrongValues) ? 1 : 0;
-    ht->bits.strong_values2 = 0;
-    ht->bits.strong_keys = (flags & kCFBasicHashStrongKeys) ? 1 : 0;
-    ht->bits.strong_keys2 = 0;
     ht->bits.hash_style = (flags >> 13) & 0x3;
     ht->bits.fast_grow = (flags & kCFBasicHashAggressiveGrowth) ? 1 : 0;
-    ht->bits.__0 = 0;
+    ht->bits.counts_width = 0;
+    ht->bits.strong_values = (flags & kCFBasicHashStrongValues) ? 1 : 0;
+    ht->bits.strong_keys = (flags & kCFBasicHashStrongKeys) ? 1 : 0;
+    ht->bits.weak_values = (flags & kCFBasicHashWeakValues) ? 1 : 0;
+    ht->bits.weak_keys = (flags & kCFBasicHashWeakKeys) ? 1 : 0;
+    ht->bits.int_values = (flags & kCFBasicHashIntegerValues) ? 1 : 0;
+    ht->bits.int_keys = (flags & kCFBasicHashIntegerKeys) ? 1 : 0;
+    ht->bits.indirect_keys = (flags & kCFBasicHashIndirectKeys) ? 1 : 0;
+    ht->bits.compactable_keys = (flags & kCFBasicHashCompactableKeys) ? 1 : 0;
+    ht->bits.compactable_values = (flags & kCFBasicHashCompactableValues) ? 1 : 0;
+    ht->bits.__2 = 0;
+    ht->bits.__8 = 0;
+    ht->bits.__9 = 0;
     ht->bits.num_buckets_idx = 0;
     ht->bits.used_buckets = 0;
-    ht->bits.marker = 0;
     ht->bits.deleted = 0;
     ht->bits.mutations = 1;
 
+    if (ht->bits.strong_values && ht->bits.weak_values) HALT;
+    if (ht->bits.strong_values && ht->bits.int_values) HALT;
+    if (ht->bits.strong_keys && ht->bits.weak_keys) HALT;
+    if (ht->bits.strong_keys && ht->bits.int_keys) HALT;
+    if (ht->bits.weak_values && ht->bits.int_values) HALT;
+    if (ht->bits.weak_keys && ht->bits.int_keys) HALT;
+    if (ht->bits.indirect_keys && ht->bits.strong_keys) HALT;
+    if (ht->bits.indirect_keys && ht->bits.weak_keys) HALT;
+    if (ht->bits.indirect_keys && ht->bits.int_keys) HALT;
+
     uint64_t offset = 1;
-    ht->bits.values2_offset = 0;
     ht->bits.keys_offset = (flags & kCFBasicHashHasKeys) ? offset++ : 0;
-    ht->bits.keys2_offset = 0;
     ht->bits.counts_offset = (flags & kCFBasicHashHasCounts) ? offset++ : 0;
-    ht->bits.orders_offset = 0;
     ht->bits.hashes_offset = (flags & kCFBasicHashHasHashCache) ? offset++ : 0;
+
+#if defined(__arm__)
+    ht->bits.hashes_offset = 0;
+    ht->bits.strong_values = 0;
+    ht->bits.strong_keys = 0;
+    ht->bits.weak_values = 0;
+    ht->bits.weak_keys = 0;
+#endif
 
     __AssignWithWriteBarrier(&ht->callbacks, cb);
     for (CFIndex idx = 0; idx < offset; idx++) {
@@ -1606,7 +1603,7 @@ CFBasicHashRef CFBasicHashCreate(CFAllocatorRef allocator, CFOptionFlags flags, 
     return ht;
 }
 
-CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFBasicHashRef src_ht) {
+CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFConstBasicHashRef src_ht) {
     size_t size = CFBasicHashGetSize(src_ht, false) - sizeof(CFRuntimeBase);
     CFBasicHashRef ht = (CFBasicHashRef)_CFRuntimeCreateInstance(allocator, CFBasicHashGetTypeID(), size, NULL);
     if (NULL == ht) HALT;
@@ -1614,14 +1611,15 @@ CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFBasicHashRef sr
     memmove((uint8_t *)ht + sizeof(CFRuntimeBase), (uint8_t *)src_ht + sizeof(CFRuntimeBase), sizeof(ht->bits));
     if (kCFUseCollectableAllocator && !CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
         ht->bits.strong_values = 0;
-        ht->bits.strong_values2 = 0;
         ht->bits.strong_keys = 0;
-        ht->bits.strong_keys2 = 0;
+        ht->bits.weak_values = 0;
+        ht->bits.weak_keys = 0;
     }
     ht->bits.finalized = 0;
     ht->bits.mutations = 1;
-    __AssignWithWriteBarrier(&ht->callbacks, src_ht->callbacks->func(ht, kCFBasicHashCallbackOpCopyCallbacks, (uintptr_t)allocator, 0, src_ht->callbacks));
-    if (NULL == ht->callbacks) HALT;
+    CFBasicHashCallbacks *newcb = src_ht->callbacks->copyCallbacks(src_ht, allocator, src_ht->callbacks);
+    if (NULL == newcb) HALT;
+    __AssignWithWriteBarrier(&ht->callbacks, newcb);
 
     CFIndex new_num_buckets = __CFBasicHashTableSizes[ht->bits.num_buckets_idx];
     if (0 == new_num_buckets) {
@@ -1635,115 +1633,75 @@ CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFBasicHashRef sr
         return ht;
     }
 
-    CFBasicHashValue *new_values = NULL, *new_values2 = NULL, *new_keys = NULL, *new_keys2 = NULL;
-    uintptr_t *new_counts = NULL, *new_orders = NULL, *new_hashes = NULL;
+    CFBasicHashValue *new_values = NULL, *new_keys = NULL;
+    void *new_counts = NULL;
+    uintptr_t *new_hashes = NULL;
 
     if (0 < new_num_buckets) {
-        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_values);
+        new_values = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongValues(ht), __CFBasicHashHasCompactableValues(ht));
         __SetLastAllocationEventName(new_values, "CFBasicHash (value-store)");
-        if (0 != ht->bits.values2_offset) {
-            new_values2 = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_values2);
-            __SetLastAllocationEventName(new_values2, "CFBasicHash (value2-store)");
-        }
-        if (0 != ht->bits.keys_offset) {
-            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_keys);
+        if (ht->bits.keys_offset) {
+            new_keys = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), CFBasicHashHasStrongKeys(ht), false);
             __SetLastAllocationEventName(new_keys, "CFBasicHash (key-store)");
         }
-        if (0 != ht->bits.keys2_offset) {
-            new_keys2 = (CFBasicHashValue *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(CFBasicHashValue), ht->bits.strong_keys2);
-            __SetLastAllocationEventName(new_keys2, "CFBasicHash (key2-store)");
-        }
-        if (0 != ht->bits.counts_offset) {
-            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
+        if (ht->bits.counts_offset) {
+            new_counts = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, (1 << ht->bits.counts_width), false, false);
             __SetLastAllocationEventName(new_counts, "CFBasicHash (count-store)");
         }
-        if (0 != ht->bits.orders_offset) {
-            new_orders = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
-            __SetLastAllocationEventName(new_orders, "CFBasicHash (order-store)");
-        }
-        if (0 != ht->bits.hashes_offset) {
-            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false);
+        if (__CFBasicHashHasHashCache(ht)) {
+            new_hashes = (uintptr_t *)__CFBasicHashAllocateMemory(ht, new_num_buckets, sizeof(uintptr_t), false, false);
             __SetLastAllocationEventName(new_hashes, "CFBasicHash (hash-store)");
         }
     }
 
-    uintptr_t empty = ((uintptr_t)ht->bits.marker << __CFBasicHashMarkerShift), deleted = ~empty;
-    CFBasicHashValue *old_values = NULL, *old_values2 = NULL, *old_keys = NULL, *old_keys2 = NULL;
-    uintptr_t *old_counts = NULL, *old_orders = NULL, *old_hashes = NULL;
+    CFBasicHashValue *old_values = NULL, *old_keys = NULL;
+    void *old_counts = NULL;
+    uintptr_t *old_hashes = NULL;
+
     old_values = __CFBasicHashGetValues(src_ht);
-    if (0 != src_ht->bits.values2_offset) {
-        old_values2 = __CFBasicHashGetValues2(src_ht);
-    }
-    if (0 != src_ht->bits.keys_offset) {
+    if (src_ht->bits.keys_offset) {
         old_keys = __CFBasicHashGetKeys(src_ht);
     }
-    if (0 != src_ht->bits.keys2_offset) {
-        old_keys2 = __CFBasicHashGetKeys2(src_ht);
-    }
-    if (0 != src_ht->bits.counts_offset) {
+    if (src_ht->bits.counts_offset) {
         old_counts = __CFBasicHashGetCounts(src_ht);
     }
-    if (0 != src_ht->bits.orders_offset) {
-        old_orders = __CFBasicHashGetOrders(src_ht);
-    }
-    if (0 != src_ht->bits.hashes_offset) {
+    if (__CFBasicHashHasHashCache(src_ht)) {
         old_hashes = __CFBasicHashGetHashes(src_ht);
     }
 
-    CFBasicHashValue *keys = old_keys ? old_keys : old_values;
-    for (CFIndex idx = 0; idx < new_num_buckets; idx++) {
-        uintptr_t stack_key = keys[idx].weak;
-        if (stack_key != empty && stack_key != deleted) {
-            uintptr_t stack_value = __CFBasicHashImportValue(ht, old_values[idx].weak);
-            if (ht->bits.strong_values) new_values[idx].strong = (id)stack_value; else new_values[idx].weak = stack_value;
-            if (new_values2) {
-                uintptr_t stack_value2 = __CFBasicHashImportValue2(ht, old_values2[idx].weak);
-                if (ht->bits.strong_values2) new_values2[idx].strong = (id)stack_value2; else new_values2[idx].weak = stack_value2;
-            }
-            if (new_keys) {
-                uintptr_t stack_key = __CFBasicHashImportKey(ht, old_keys[idx].weak);
-                if (ht->bits.strong_keys) new_keys[idx].strong = (id)stack_key; else new_keys[idx].weak = stack_key;
-            }
-            if (new_keys2) {
-                uintptr_t stack_key2 = __CFBasicHashImportKey2(ht, old_keys2[idx].weak);
-                if (ht->bits.strong_keys2) new_keys2[idx].strong = (id)stack_key2; else new_keys2[idx].weak = stack_key2;
-            }
-        } else {
-            if (ht->bits.strong_values) new_values[idx].strong = (id)stack_key; else new_values[idx].weak = stack_key;
-            if (new_values2) {
-                if (ht->bits.strong_values2) new_values2[idx].strong = (id)stack_key; else new_values2[idx].weak = stack_key;
-            }
-            if (new_keys) {
-                if (ht->bits.strong_keys) new_keys[idx].strong = (id)stack_key; else new_keys[idx].weak = stack_key;
-            }
-            if (new_keys2) {
-                if (ht->bits.strong_keys2) new_keys2[idx].strong = (id)stack_key; else new_keys2[idx].weak = stack_key;
-            }
-        }
-    }
-    if (new_counts) memmove(new_counts, old_counts, new_num_buckets * sizeof(uintptr_t));
-    if (new_orders) memmove(new_orders, old_orders, new_num_buckets * sizeof(uintptr_t));
-    if (new_hashes) memmove(new_hashes, old_hashes, new_num_buckets * sizeof(uintptr_t));
-
     __CFBasicHashSetValues(ht, new_values);
-    if (new_values2) {
-        __CFBasicHashSetValues2(ht, new_values2);
-    }
     if (new_keys) {
         __CFBasicHashSetKeys(ht, new_keys);
-    }
-    if (new_keys2) {
-        __CFBasicHashSetKeys2(ht, new_keys2);
     }
     if (new_counts) {
         __CFBasicHashSetCounts(ht, new_counts);
     }
-    if (new_orders) {
-        __CFBasicHashSetOrders(ht, new_orders);
-    }
     if (new_hashes) {
         __CFBasicHashSetHashes(ht, new_hashes);
     }
+
+    for (CFIndex idx = 0; idx < new_num_buckets; idx++) {
+        uintptr_t stack_value = old_values[idx].neutral;
+        if (stack_value != 0UL && stack_value != ~0UL) {
+            uintptr_t old_value = stack_value;
+            if (__CFBasicHashSubABZero == old_value) old_value = 0UL;
+            if (__CFBasicHashSubABOne == old_value) old_value = ~0UL;
+            __CFBasicHashSetValue(ht, idx, __CFBasicHashImportValue(ht, old_value), true, false);
+            if (new_keys) {
+                uintptr_t old_key = old_keys[idx].neutral;
+                if (__CFBasicHashSubABZero == old_key) old_key = 0UL;
+                if (__CFBasicHashSubABOne == old_key) old_key = ~0UL;
+                __CFBasicHashSetKey(ht, idx, __CFBasicHashImportKey(ht, old_key), true, false);
+            }
+        } else {
+            __CFBasicHashSetValue(ht, idx, stack_value, true, true);
+            if (new_keys) {
+                __CFBasicHashSetKey(ht, idx, stack_value, true, true);
+            }
+        }
+    }
+    if (new_counts) memmove(new_counts, old_counts, new_num_buckets * (1 << ht->bits.counts_width));
+    if (new_hashes) memmove(new_hashes, old_hashes, new_num_buckets * sizeof(uintptr_t));
 
 #if ENABLE_MEMORY_COUNTERS
     int64_t size_now = OSAtomicAdd64Barrier((int64_t) CFBasicHashGetSize(ht, true), & __CFBasicHashTotalSize);
@@ -1754,6 +1712,10 @@ CFBasicHashRef CFBasicHashCreateCopy(CFAllocatorRef allocator, CFBasicHashRef sr
 #endif
 
     return ht;
+}
+
+__private_extern__ void __CFBasicHashSetCallbacks(CFBasicHashRef ht, const CFBasicHashCallbacks *cb) {
+    __AssignWithWriteBarrier(&ht->callbacks, cb);
 }
 
 void _CFbhx588461(CFBasicHashRef ht, Boolean growth) {

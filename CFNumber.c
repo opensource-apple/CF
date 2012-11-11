@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFNumber.c
-	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2011, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -36,9 +36,6 @@
 #define isnan(A) _isnan(A)
 #define isinf(A) !_finite(A)
 #define copysign(A, B) _copysign(A, B)
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-#else
-#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 #define __CFAssertIsBoolean(cf) __CFGenericValidateType(cf, __kCFBooleanTypeID)
@@ -62,7 +59,7 @@ static CFStringRef __CFBooleanCopyDescription(CFTypeRef cf) {
     return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<CFBoolean %p [%p]>{value = %s}"), cf, CFGetAllocator(cf), (boolean == kCFBooleanTrue) ? "true" : "false");
 }
 
-static CFStringRef __CFBooleanCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
+__private_extern__ CFStringRef __CFBooleanCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
     CFBooleanRef boolean = (CFBooleanRef)cf;
     return (CFStringRef)CFRetain((boolean == kCFBooleanTrue) ? CFSTR("true") : CFSTR("false"));
 }
@@ -153,7 +150,7 @@ static CFComparisonResult CFNumberCompare_old(struct __CFNumber_old * number1, s
 #define BITSFORDOUBLEPOSINF	((uint64_t)0x7ff0000000000000ULL)
 #define BITSFORDOUBLENEGINF	((uint64_t)0xfff0000000000000ULL)
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
 #define FLOAT_POSITIVE_2_TO_THE_64	0x1.0p+64L
 #define FLOAT_NEGATIVE_2_TO_THE_127	-0x1.0p+127L
 #define FLOAT_POSITIVE_2_TO_THE_127	0x1.0p+127L
@@ -425,7 +422,14 @@ static const struct {
     /* kCFNumberSInt128Type */	{kCFNumberSInt128Type, 0, 1, 4, 0},
 };
 
+#define CF_IS_TAGGED_INT(OBJ)	(CF_TAGGED_OBJ_TYPE(OBJ) == kCFTaggedObjectID_Integer)
+
 CF_INLINE CFNumberType __CFNumberGetType(CFNumberRef num) {
+    if (CF_IS_TAGGED_INT(num)) {
+        uintptr_t type_bits = ((uintptr_t)num >> 6) & 0x3; // top 2 bits of low byte
+        const CFNumberType canonical_types[4] = {kCFNumberSInt8Type, kCFNumberSInt16Type, kCFNumberSInt32Type, kCFNumberSInt64Type};
+	return canonical_types[type_bits];
+    }
     return __CFBitfieldGetValue(num->_base._cfinfo[CF_INFO_BITS], 4, 0);
 }
 
@@ -457,6 +461,12 @@ static Boolean __CFNumberGetValue(CFNumberRef number, CFNumberType type, void *v
     type = __CFNumberTypeTable[type].canonicalType;
     CFNumberType ntype = __CFNumberGetType(number);
     const void *data = &(number->_pad);
+    intptr_t taggedInteger;
+    if (CF_IS_TAGGED_INT(number)) {
+        taggedInteger = (intptr_t)number;
+        taggedInteger = taggedInteger >> 8;
+	data = &taggedInteger;
+    }
     switch (type) {
     case kCFNumberSInt8Type:
 	if (__CFNumberTypeTable[ntype].floatBit) {
@@ -647,6 +657,12 @@ static Boolean __CFNumberGetValueCompat(CFNumberRef number, CFNumberType type, v
     type = __CFNumberTypeTable[type].canonicalType;
     CFNumberType ntype = __CFNumberGetType(number);
     const void *data = &(number->_pad);
+    intptr_t taggedInteger;
+    if (CF_IS_TAGGED_INT(number)) {
+        taggedInteger = (intptr_t)number;
+        taggedInteger = taggedInteger >> 8;
+        data = &taggedInteger;
+    }
     switch (type) {
     case kCFNumberSInt8Type:
 	if (__CFNumberTypeTable[ntype].floatBit) {
@@ -862,7 +878,7 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in __CFNumberCopyDescription: '%@
 
 // This function separated out from __CFNumberCopyFormattingDescription() so the plist creation can use it as well.
 
-static CFStringRef __CFNumberCopyFormattingDescriptionAsFloat64_new(CFTypeRef cf) {
+static CFStringRef __CFNumberCreateFormattingDescriptionAsFloat64(CFAllocatorRef allocator, CFTypeRef cf) {
     Float64 d;
     CFNumberGetValue((CFNumberRef)cf, kCFNumberFloat64Type, &d);
     if (isnan(d)) {
@@ -875,11 +891,11 @@ static CFStringRef __CFNumberCopyFormattingDescriptionAsFloat64_new(CFTypeRef cf
 	return (CFStringRef)CFRetain(CFSTR("0.0"));
     }
     // if %g is used here, need to use DBL_DIG + 2 on Mac OS X, but %f needs +1
-    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%.*g"), DBL_DIG + 2, d);
+    return CFStringCreateWithFormat(allocator, NULL, CFSTR("%.*g"), DBL_DIG + 2, d);
 }
 
 __private_extern__ CFStringRef __CFNumberCopyFormattingDescriptionAsFloat64(CFTypeRef cf) {
-    CFStringRef result = __CFNumberCopyFormattingDescriptionAsFloat64_new(cf);
+    CFStringRef result = __CFNumberCreateFormattingDescriptionAsFloat64(kCFAllocatorSystemDefault, cf);
 #if OLD_CRAP_TOO
 CFNumberRef number = (CFNumberRef)cf;
 if (! number->__old__) {
@@ -892,6 +908,19 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in __CFNumberCopyFormattingDescri
 }
 #endif
     return result;
+}
+
+__private_extern__ CFStringRef __CFNumberCreateFormattingDescription(CFAllocatorRef allocator, CFTypeRef cf, CFDictionaryRef formatOptions) {
+    CFNumberRef number = (CFNumberRef)cf;
+    CFNumberType type = __CFNumberGetType(number);
+    if (__CFNumberTypeTable[type].floatBit) {
+        return __CFNumberCreateFormattingDescriptionAsFloat64(allocator, number);
+    }
+    CFSInt128Struct i;
+    __CFNumberGetValue(number, kCFNumberSInt128Type, &i);
+    char buffer[128];
+    emit128(buffer, &i, false);
+    return CFStringCreateWithFormat(allocator, NULL, CFSTR("%s"), buffer);
 }
 
 static CFStringRef __CFNumberCopyFormattingDescription_new(CFTypeRef cf, CFDictionaryRef formatOptions) {
@@ -907,7 +936,7 @@ static CFStringRef __CFNumberCopyFormattingDescription_new(CFTypeRef cf, CFDicti
     return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%s"), buffer);
 }
 
-static CFStringRef __CFNumberCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
+__private_extern__ CFStringRef __CFNumberCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
     CFStringRef result = __CFNumberCopyFormattingDescription_new(cf, formatOptions);
 #if OLD_CRAP_TOO
 CFNumberRef number = (CFNumberRef)cf;
@@ -975,6 +1004,14 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in __CFNumberHash: '%d' '%d'"), h
 }
 
 static CFTypeID __kCFNumberTypeID = _kCFRuntimeNotATypeID;
+static void *__CFTaggedNumberClass = 0;
+
+enum {
+  kCFNumberCachingEnabled = 0,
+  kCFNumberCachingDisabled = 1,
+  kCFNumberCachingFullyDisabled = 2
+};
+static char __CFNumberCaching = kCFNumberCachingEnabled;
 
 static const CFRuntimeClass __CFNumberClass = {
     0,
@@ -1005,6 +1042,10 @@ __private_extern__ void __CFNumberInitialize(void) {
     __kCFNumberPositiveInfinity._base._cfisa = __CFISAForTypeID(__kCFNumberTypeID);
     __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
     __kCFNumberPositiveInfinity._pad = BITSFORDOUBLEPOSINF;
+
+
+    const char *caching = __CFgetenv("CFNumberDisableCache");	// "all" to disable caching and tagging; anything else to disable caching; nothing to leave both enabled
+    if (caching) __CFNumberCaching = (!strcmp(caching, "all")) ? kCFNumberCachingFullyDisabled : kCFNumberCachingDisabled;	// initial state above is kCFNumberCachingEnabled
 }
 
 CFTypeID CFNumberGetTypeID(void) {
@@ -1020,13 +1061,46 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
     __CFAssertIsValidNumberType(type);
 //printf("+ [%p] CFNumberCreate(%p, %d, %p)\n", pthread_self(), allocator, type, valuePtr);
 
+    if (!allocator) allocator = __CFGetDefaultAllocator();
+
+    if (__CFTaggedNumberClass && _CFAllocatorIsSystemDefault(allocator) && (__CFNumberCaching != kCFNumberCachingFullyDisabled)) {
+	switch (__CFNumberTypeTable[type].canonicalType) { // canonicalized client-desired type
+	case kCFNumberSInt8Type: {
+            int8_t value = *(int8_t *)valuePtr;
+            return (CFNumberRef)((uintptr_t)((intptr_t)value << 8) | (0 << 6) | kCFTaggedObjectID_Integer);
+        }
+	case kCFNumberSInt16Type: {
+            int16_t value = *(int16_t *)valuePtr;
+            return (CFNumberRef)((uintptr_t)((intptr_t)value << 8) | (1 << 6) | kCFTaggedObjectID_Integer);
+        }
+	case kCFNumberSInt32Type: {
+            int32_t value = *(int32_t *)valuePtr;
+#if !__LP64__
+            // We don't bother allowing the min 24-bit integer -2^24 to also be fast-pathed;
+            // tell anybody that complains about that to go ... hang.
+            if ((1L << 23) <= -value || (1L << 23) <= value) break;
+#endif
+            return (CFNumberRef)((uintptr_t)((intptr_t)value << 8) | (2 << 6) | kCFTaggedObjectID_Integer);
+        }
+#if __LP64__
+	case kCFNumberSInt64Type: {
+            int64_t value = *(int64_t *)valuePtr;
+            // We don't bother allowing the min 56-bit integer -2^56 to also be fast-pathed;
+            // tell anybody that complains about that to go ... hang.
+            if ((1L << 55) <= -value || (1L << 55) <= value) break;
+            uintptr_t ptr_val = ((uintptr_t)(value << 8) | (3 << 6) | kCFTaggedObjectID_Integer);
+            return (CFNumberRef)ptr_val;
+	}
+#endif
+	}
+    }
+
     // Look for cases where we can return a cached instance.
     // We only use cached objects if the allocator is the system
     // default allocator, except for the special floating point
     // constant objects, where we return the cached object
     // regardless of allocator, since that is what has always
     // been done (and now must for compatibility).
-    if (!allocator) allocator = __CFGetDefaultAllocator();
     int64_t valToBeCached = NotToBeCached;
 
     if (__CFNumberTypeTable[type].floatBit) {
@@ -1041,7 +1115,7 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
 	    if (isinf(d)) cached = (d < 0.0) ? kCFNumberNegativeInfinity : kCFNumberPositiveInfinity;
 	}
 	if (cached) return (CFNumberRef)CFRetain(cached);
-    } else if (kCFAllocatorSystemDefault == allocator) {
+    } else if (_CFAllocatorIsSystemDefault(allocator) && (__CFNumberCaching == kCFNumberCachingEnabled)) {
 	switch (__CFNumberTypeTable[type].canonicalType) {
 	case kCFNumberSInt8Type:   {int8_t  val = *(int8_t *)valuePtr;  if (MinCachedInt <= val && val <= MaxCachedInt) valToBeCached = (int64_t)val; break;}
 	case kCFNumberSInt16Type:  {int16_t val = *(int16_t *)valuePtr; if (MinCachedInt <= val && val <= MaxCachedInt) valToBeCached = (int64_t)val; break;}
@@ -1108,6 +1182,9 @@ CFLog(kCFLogLevelWarning, CFSTR("+++ Create old number '%@'"), __CFNumberCopyDes
 
 CFNumberType CFNumberGetType(CFNumberRef number) {
 //printf("+ [%p] CFNumberGetType(%p)\n", pthread_self(), number);
+    if (CF_IS_TAGGED_INT(number)) {
+        return __CFNumberGetType(number);
+    }
     CF_OBJC_FUNCDISPATCH0(__kCFNumberTypeID, CFNumberType, number, "_cfNumberType");
     __CFAssertIsNumber(number);
     CFNumberType type = __CFNumberGetType(number);
@@ -1167,8 +1244,63 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in CFNumberIsFloatType: '%d' '%d'
     return r;
 }
 
-Boolean	CFNumberGetValue(CFNumberRef number, CFNumberType type, void *valuePtr) {
+Boolean CFNumberGetValue(CFNumberRef number, CFNumberType type, void *valuePtr) {
 //printf("+ [%p] CFNumberGetValue(%p, %d, %p)\n", pthread_self(), number, type, valuePtr);
+    if (CF_IS_TAGGED_INT(number)) {
+        __CFAssertIsValidNumberType(type);
+        uint8_t localMemory[128];
+        if (!valuePtr) valuePtr = localMemory;
+        intptr_t taggedInteger = (intptr_t)number;
+        taggedInteger = taggedInteger >> 8;
+        switch (__CFNumberTypeTable[type].canonicalType) { // canonicalized client-desired type
+        case kCFNumberSInt8Type:
+#if 0
+            if (taggedInteger < INT8_MIN) {
+                *(int8_t *)valuePtr = INT8_MIN;
+                return false;
+            }
+            if (INT8_MAX < taggedInteger) {
+                *(int8_t *)valuePtr = INT8_MAX;
+                return false;
+            }
+#endif
+            *(int8_t *)valuePtr = (int8_t)taggedInteger;
+            return true;
+        case kCFNumberSInt16Type:
+#if 0
+            if (taggedInteger < INT16_MIN) {
+                *(int16_t *)valuePtr = INT16_MIN;
+                return false;
+            }
+            if (INT16_MAX < taggedInteger) {
+                *(int16_t *)valuePtr = INT16_MAX;
+                return false;
+            }
+#endif
+            *(int16_t *)valuePtr = (int16_t)taggedInteger;
+            return true;
+        case kCFNumberSInt32Type:
+#if 0 && __LP64__
+            if (taggedInteger < INT32_MIN) {
+                *(int32_t *)valuePtr = INT32_MIN;
+                return false;
+            }
+            if (INT32_MAX < taggedInteger) {
+                *(int32_t *)valuePtr = INT32_MAX;
+                return false;
+            }
+#endif
+            *(int32_t *)valuePtr = (int32_t)taggedInteger;
+            return true;
+#if __LP64__
+        case kCFNumberSInt64Type:
+            *(int64_t *)valuePtr = (int64_t)taggedInteger;
+            return true;
+#endif
+        }
+        Boolean r = __CFNumberGetValueCompat(number, type, valuePtr);
+        return r;
+    }
     CF_OBJC_FUNCDISPATCH2(__kCFNumberTypeID, Boolean, number, "_getValue:forType:", valuePtr, __CFNumberTypeTable[type].canonicalType);
     __CFAssertIsNumber(number);
     __CFAssertIsValidNumberType(type);
