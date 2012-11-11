@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFDate.c
-	Copyright 1998-2002, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -33,15 +33,20 @@
 #include <CoreFoundation/CFNumber.h>
 #include "CFInternal.h"
 #include <math.h>
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <sys/time.h>
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
-const CFTimeInterval kCFAbsoluteTimeIntervalSince1970 = 978307200.0L;
-const CFTimeInterval kCFAbsoluteTimeIntervalSince1904 = 3061152000.0L;
 
 /* cjk: The Julian Date for the reference date is 2451910.5,
         I think, in case that's ever useful. */
+
+
+const CFTimeInterval kCFAbsoluteTimeIntervalSince1970 = 978307200.0L;
+const CFTimeInterval kCFAbsoluteTimeIntervalSince1904 = 3061152000.0L;
 
 __private_extern__ double __CFTSRRate = 0.0;
 static double __CF1_TSRRate = 0.0;
@@ -57,21 +62,36 @@ __private_extern__ CFTimeInterval __CFTSRToTimeInterval(int64_t tsr) {
 
 CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
     CFAbsoluteTime ret;
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_IPHONE
     struct timeval tv;
     gettimeofday(&tv, NULL);
     ret = (CFTimeInterval)tv.tv_sec - kCFAbsoluteTimeIntervalSince1970;
     ret += (1.0E-6 * (CFTimeInterval)tv.tv_usec);
+#elif DEPLOYMENT_TARGET_WINDOWS_SYNC || DEPLOYMENT_TARGET_CODE011
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ret = _CFAbsoluteTimeFromFileTime(&ft);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     return ret;
 }
 
 __private_extern__ void __CFDateInitialize(void) {
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_IPHONE
     struct mach_timebase_info info;
     mach_timebase_info(&info);
     __CFTSRRate = (1.0E9 / (double)info.numer) * (double)info.denom;
     __CF1_TSRRate = 1.0 / __CFTSRRate;
+#elif DEPLOYMENT_TARGET_WINDOWS_SYNC || DEPLOYMENT_TARGET_CODE011
+    LARGE_INTEGER freq;
+    if (!QueryPerformanceFrequency(&freq)) {
+        HALT;
+    }
+    __CFTSRRate = (double)freq.QuadPart;
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     CFDateGetTypeID(); // cause side-effects
 }
@@ -152,6 +172,7 @@ CFComparisonResult CFDateCompare(CFDateRef date, CFDateRef otherDate, void *cont
     return kCFCompareEqualTo;
 }
 #endif
+
 
 CF_INLINE int32_t __CFDoubleModToInt(double d, int32_t modulus) {
     int32_t result = (int32_t)(float)floor(d - floor(d / modulus) * modulus);

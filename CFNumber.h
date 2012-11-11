@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFNumber.h
-	Copyright (c) 1999-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFNUMBER__)
@@ -62,7 +62,7 @@ enum {
     kCFNumberDoubleType = 13,
     /* Other */
     kCFNumberCFIndexType = 14,
-#if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_5
+#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
     kCFNumberNSIntegerType = 15,
     kCFNumberCGFloatType = 16,
     kCFNumberMaxType = 16

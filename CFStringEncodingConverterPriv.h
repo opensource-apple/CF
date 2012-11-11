@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFStringEncodingConverterPriv.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__)
@@ -30,46 +30,19 @@
 #include <CoreFoundation/CFBase.h>
 #include "CFStringEncodingConverterExt.h"
 
-#define MAX_IANA_ALIASES (4)
+extern  const CFStringEncodingConverter __CFConverterASCII;
+extern  const CFStringEncodingConverter __CFConverterISOLatin1;
+extern  const CFStringEncodingConverter __CFConverterMacRoman;
+extern  const CFStringEncodingConverter __CFConverterWinLatin1;
+extern  const CFStringEncodingConverter __CFConverterNextStepLatin;
+extern  const CFStringEncodingConverter __CFConverterUTF8;
 
-typedef CFIndex (*_CFToBytesProc)(const void *converter, uint32_t flags, const UniChar *characters, CFIndex numChars, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen);
-typedef CFIndex (*_CFToUnicodeProc)(const void *converter, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen);
-
-typedef struct {
-    _CFToBytesProc toBytes;
-    _CFToUnicodeProc toUnicode;
-    _CFToUnicodeProc toCanonicalUnicode;
-    void *_toBytes; // original proc
-    void *_toUnicode; // original proc
-    uint16_t maxLen;
-    uint16_t :16;
-    CFStringEncodingToBytesLenProc toBytesLen;
-    CFStringEncodingToUnicodeLenProc toUnicodeLen;
-    CFStringEncodingToBytesFallbackProc toBytesFallback;
-    CFStringEncodingToUnicodeFallbackProc toUnicodeFallback;
-    CFStringEncodingToBytesPrecomposeProc toBytesPrecompose;
-    CFStringEncodingIsValidCombiningCharacterProc isValidCombiningChar;
-} _CFEncodingConverter;
-
-typedef struct {
-    uint32_t encoding;
-    _CFEncodingConverter *converter;
-    const char *encodingName;
-    const char *ianaNames[MAX_IANA_ALIASES];
-    const char *loadablePath;
-    CFStringEncodingBootstrapProc bootstrap;
-    CFStringEncodingToBytesFallbackProc toBytesFallback;
-    CFStringEncodingToUnicodeFallbackProc toUnicodeFallback;
-    uint32_t scriptCode;
-} _CFConverterEntry;
-
-extern const CFStringEncodingConverter __CFConverterASCII;
-extern const CFStringEncodingConverter __CFConverterISOLatin1;
-extern const CFStringEncodingConverter __CFConverterMacRoman;
-extern const CFStringEncodingConverter __CFConverterWinLatin1;
-extern const CFStringEncodingConverter __CFConverterNextStepLatin;
-extern const CFStringEncodingConverter __CFConverterUTF8;
-
+extern  CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters);
+extern  const CFStringEncodingConverter *__CFStringEncodingGetExternalConverter(uint32_t encoding);
+extern  CFIndex __CFStringEncodingPlatformUnicodeToBytes(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars, CFIndex *usedCharLen, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen);
+extern  CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, CFIndex *usedByteLen, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen);
+extern  CFIndex __CFStringEncodingPlatformCharLengthForBytes(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes);
+extern  CFIndex __CFStringEncodingPlatformByteLengthForCharacters(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars);
 
 #endif /* ! __COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__ */
 

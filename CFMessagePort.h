@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFMessagePort.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFMESSAGEPORT__)
@@ -30,6 +30,9 @@
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFData.h>
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <dispatch/dispatch.h>
+#endif
 
 CF_EXTERN_C_BEGIN
 
@@ -40,7 +43,8 @@ enum {
     kCFMessagePortSendTimeout = -1,
     kCFMessagePortReceiveTimeout = -2,
     kCFMessagePortIsInvalid = -3,
-    kCFMessagePortTransportError = -4
+    kCFMessagePortTransportError = -4,
+    kCFMessagePortBecameInvalidError = -5
 };
 
 typedef struct {
@@ -73,6 +77,10 @@ CF_EXPORT void CFMessagePortSetInvalidationCallBack(CFMessagePortRef ms, CFMessa
 CF_EXPORT SInt32	CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef data, CFTimeInterval sendTimeout, CFTimeInterval rcvTimeout, CFStringRef replyMode, CFDataRef *returnData);
 
 CF_EXPORT CFRunLoopSourceRef	CFMessagePortCreateRunLoopSource(CFAllocatorRef allocator, CFMessagePortRef local, CFIndex order);
+
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+CF_EXPORT void CFMessagePortSetDispatchQueue(CFMessagePortRef ms, dispatch_queue_t queue) AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+#endif
 
 CF_EXTERN_C_END
 

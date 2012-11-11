@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,14 +21,14 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFByteOrder.h
-	Copyright (c) 1995-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1995-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBYTEORDER__)
 #define __COREFOUNDATION_CFBYTEORDER__ 1
 
 #include <CoreFoundation/CFBase.h>
-#if defined(__MACH__) && !defined(CF_USE_OSBYTEORDER_H)
+#if ((TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) && !defined(CF_USE_OSBYTEORDER_H)
 #include <libkern/OSByteOrder.h>
 #define CF_USE_OSBYTEORDER_H 1
 #endif

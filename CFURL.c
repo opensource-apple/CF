@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,52 +21,50 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFURL.c
-	Copyright 1998-2004, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Becky Willrich
 */
 
 #include <CoreFoundation/CFURL.h>
-#include "CFPriv.h"
-#include "CFCharacterSetPriv.h"
+#include <CoreFoundation/CFPriv.h>
+#include <CoreFoundation/CFCharacterSetPriv.h>
 #include <CoreFoundation/CFNumber.h>
 #include "CFInternal.h"
-#include "CFStringEncodingConverter.h"
-#include "CFPriv.h"
+#include <CoreFoundation/CFStringEncodingConverter.h>
+#include <CoreFoundation/CFPriv.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #if DEPLOYMENT_TARGET_MACOSX
+#include <CoreFoundation/CFNumberFormatter.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#elif DEPLOYMENT_TARGET_EMBEDDED
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 static CFArrayRef HFSPathToURLComponents(CFStringRef path, CFAllocatorRef alloc, Boolean isDir);
+#endif
 static CFArrayRef WindowsPathToURLComponents(CFStringRef path, CFAllocatorRef alloc, Boolean isDir);
 static CFStringRef WindowsPathToURLPath(CFStringRef path, CFAllocatorRef alloc, Boolean isDir);
 static CFStringRef POSIXPathToURLPath(CFStringRef path, CFAllocatorRef alloc, Boolean isDirectory);
 CFStringRef CFURLCreateStringWithFileSystemPath(CFAllocatorRef allocator, CFURLRef anURL, CFURLPathStyle fsType, Boolean resolveAgainstBase);
-extern CFURLRef _CFURLCreateCurrentDirectoryURL(CFAllocatorRef allocator);
-
-#if DEPLOYMENT_TARGET_MACOSX
-
-DEFINE_WEAK_CARBONCORE_FUNC(void, DisposeHandle, (Handle A), (A))
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, FSNewAlias, (const FSRef *A, const FSRef *B, AliasHandle *C), (A, B, C), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, FSGetVolumeInfo, (FSVolumeRefNum A, ItemCount B, FSVolumeRefNum *C, FSVolumeInfoBitmap D, FSVolumeInfo *E, HFSUniStr255*F, FSRef *G), (A, B, C, D, E, F, G), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, FSGetCatalogInfo, (const FSRef *A, FSCatalogInfoBitmap B, FSCatalogInfo *C, HFSUniStr255 *D, FSSpec *E, FSRef *F), (A, B, C, D, E, F), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, FSMakeFSRefUnicode, (const FSRef *A, UniCharCount B, const UniChar *C, TextEncoding D, FSRef *E), (A, B, C, D, E), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSStatus, FSPathMakeRef, (const uint8_t *A, FSRef *B, Boolean *C), (A, B, C), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSStatus, FSRefMakePath, (const FSRef *A, uint8_t *B, UInt32 C), (A, B, C), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, FSpMakeFSRef, (const FSSpec *A, FSRef *B), (A, B), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(Size, GetAliasSizeFromPtr, (AliasPtr A), (A), 0)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, _FSGetFSRefInformationFast, (const FSRef* A, SInt16 *B, UInt32 *C, UInt32 *D, Boolean *E, Boolean *F, HFSUniStr255 *G), (A, B, C, D, E, F, G), -3296)
-DEFINE_WEAK_CARBONCORE_FUNC(OSErr, _FSGetVolumeByName, ( CFStringRef volumeNameRef, FSVolumeRefNum* vRefNumP), ( volumeNameRef, vRefNumP), -3296 )
-
-#elif 0 || 0 || 0
+CF_EXPORT CFURLRef _CFURLCreateCurrentDirectoryURL(CFAllocatorRef allocator);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+static CFStringRef HFSPathToURLPath(CFStringRef path, CFAllocatorRef alloc, Boolean isDir);
+#elif DEPLOYMENT_TARGET_WINDOWS
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
+
 
 
 #ifndef DEBUG_URL_MEMORY_USAGE
@@ -82,6 +80,7 @@ static UInt32 numURLs = 0;
 static UInt32 numDealloced = 0;
 static UInt32 numExtraDataAllocated = 0;
 static UInt32 numURLsWithBaseURL = 0;
+static UInt32 numNonUTF8EncodedURLs = 0;
 #endif
 
 /* The bit flags in myURL->_flags */
@@ -119,7 +118,7 @@ static UInt32 numURLsWithBaseURL = 0;
 //	#define PATH_DIFFERS       (0x08000000)	unused
 // #define PARAMETERS_DIFFER  (0x10000000)	unused
 // #define QUERY_DIFFERS      (0x20000000)	unused
-// #define FRAGMENT_DIFfERS   (0x40000000)	unused
+#define PATH_HAS_FILE_ID    (0x40000000)
 #define HAS_FILE_SCHEME		(0x80000000)
 
 // Number of bits to shift to get from HAS_FOO to FOO_DIFFERS flag
@@ -135,23 +134,29 @@ static UInt32 numURLsWithBaseURL = 0;
 #define PATH_DELIM_FOR_TYPE(fsType) ((fsType) == kCFURLHFSPathStyle ? ':' : (((fsType) == kCFURLWindowsPathStyle) ? '\\' : '/'))
 #define PATH_DELIM_AS_STRING_FOR_TYPE(fsType) ((fsType) == kCFURLHFSPathStyle ? CFSTR(":") : (((fsType) == kCFURLWindowsPathStyle) ? CFSTR("\\") : CFSTR("/")))
 
+#define FILE_ID_PREFIX ".file"
+#define FILE_ID_KEY "id"
 
-//	In order to get the sizeof ( __CFURL ) < 32 bytes, move these items into a seperate structure which is
+#define ASSERT_CHECK_PATHSTYLE(x) 0
+
+//	In order to reduce the sizeof ( __CFURL ), move these items into a seperate structure which is
 //	only allocated when necessary.  In my tests, it's almost never needed -- very rarely does a CFURL have
 //	either a sanitized string or a reserved pointer for URLHandle.
 struct _CFURLAdditionalData {
     void *_reserved; // Reserved for URLHandle's use.
     CFMutableStringRef _sanitizedString; // The fully compliant RFC string.  This is only non-NULL if ORIGINAL_AND_URL_STRINGS_MATCH is false.  This should never be mutated except when the sanatized string is first computed
+    CFHashCode	hashValue;
 };
 
 struct __CFURL {
     CFRuntimeBase _cfBase;
     UInt32 _flags;
-    CFStringRef  _string; // Never NULL; the meaning of _string depends on URL_PATH_TYPE(myURL) (see above)
-	CFURLRef	_base;
-    CFRange *ranges;
     CFStringEncoding _encoding; // The encoding to use when asked to remove percent escapes; this is never consulted if IS_OLD_UTF8_STYLE is set.
-	struct _CFURLAdditionalData* extra;
+    CFStringRef _string; // Never NULL; the meaning of _string depends on URL_PATH_TYPE(myURL) (see above)
+    CFURLRef _base;
+    CFRange *ranges;
+    struct _CFURLAdditionalData* extra;
+    void *_resourceInfo;    // For use by CarbonCore to cache property values. Retained and released by CFURL.
 };
 
 
@@ -171,20 +176,30 @@ CF_INLINE CFMutableStringRef _getSanitizedString ( const struct __CFURL* url )
 	return NULL;
 }
 
+static void* _getResourceInfo ( const struct __CFURL* url )
+{
+    if ( url ) {
+        return url->_resourceInfo;
+    }
+
+    return NULL;
+}
+
 static void _CFURLAllocateExtraDataspace( struct __CFURL* url )
 {	
-	if ( url && ! url->extra )
-	{	struct _CFURLAdditionalData* extra = (struct _CFURLAdditionalData*) CFAllocatorAllocate( CFGetAllocator( url), sizeof( struct _CFURLAdditionalData ), __kCFAllocatorGCScannedMemory);
+    if ( url && ! url->extra )
+    {	struct _CFURLAdditionalData* extra = (struct _CFURLAdditionalData*) CFAllocatorAllocate( CFGetAllocator( url), sizeof( struct _CFURLAdditionalData ), __kCFAllocatorGCScannedMemory);
 	
-		extra->_reserved = _getReserved( url );
-		extra->_sanitizedString = _getSanitizedString( url );
-		
-		url->extra = extra;
-		
-		#if DEBUG_URL_MEMORY_USAGE
-		numExtraDataAllocated ++;
-		#endif
-	}
+	extra->_reserved = _getReserved( url );
+	extra->_sanitizedString = _getSanitizedString( url );
+	extra->hashValue = 0;
+	
+	url->extra = extra;
+	
+	#if DEBUG_URL_MEMORY_USAGE
+	numExtraDataAllocated ++;
+	#endif
+    }
 }
 
 CF_INLINE void _setReserved ( struct __CFURL* url, void* reserved )
@@ -196,7 +211,7 @@ CF_INLINE void _setReserved ( struct __CFURL* url, void* reserved )
 			_CFURLAllocateExtraDataspace( url );
 		
 		if ( url->extra )
-			CF_WRITE_BARRIER_BASE_ASSIGN(CFGetAllocator(url), url->extra, url->extra->_reserved, reserved);
+			__CFAssignWithWriteBarrier((void **)&url->extra->_reserved, reserved);
 	}
 }
 
@@ -211,6 +226,15 @@ CF_INLINE void _setSanitizedString ( struct __CFURL* url, CFMutableStringRef san
 		if ( url->extra )
 			url->extra->_sanitizedString = sanitizedString;
 	}
+}
+
+static void _setResourceInfo ( struct __CFURL* url, void* resourceInfo )
+{
+    // Must be atomic
+    // Never a GC object
+    if ( url && OSAtomicCompareAndSwapPtrBarrier( NULL, resourceInfo, &url->_resourceInfo )) {
+	CFRetain( resourceInfo );
+    }
 }
 
 static void _convertToURLRepresentation(struct __CFURL *url);
@@ -283,7 +307,7 @@ static const unsigned char sURLValidCharacters[] = {
 	/* '='  61 */   VALID | PATHVALID ,
 	/* '>'  62 */   0,
 	/* '?'  63 */   VALID ,
-	/* '@'  64 */   VALID | PATHVALID ,
+	/* '@'  64 */   VALID ,
 	/* 'A'  65 */   VALID | UNRESERVED | SCHEME | PATHVALID | HEXDIGIT ,
 	/* 'B'  66 */   VALID | UNRESERVED | SCHEME | PATHVALID | HEXDIGIT ,
 	/* 'C'  67 */   VALID | UNRESERVED | SCHEME | PATHVALID | HEXDIGIT ,
@@ -392,6 +416,7 @@ CF_INLINE Boolean _haveTestedOriginalString(CFURLRef url) {
 }
 
 typedef CFStringRef (*StringTransformation)(CFAllocatorRef, CFStringRef, CFIndex);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 static CFArrayRef copyStringArrayWithTransformation(CFArrayRef array, StringTransformation transformation) {
     CFAllocatorRef alloc = CFGetAllocator(array);
     CFMutableArrayRef mArray = NULL;
@@ -420,6 +445,7 @@ static CFArrayRef copyStringArrayWithTransformation(CFArrayRef array, StringTran
         return array;
     }
 }
+#endif
 
 // Returns NULL if str cannot be converted for whatever reason, str if str contains no characters in need of escaping, or a newly-created string with the appropriate % escape codes in place.  Caller must always release the returned string.
 CF_INLINE CFStringRef _replacePathIllegalCharacters(CFStringRef str, CFAllocatorRef alloc, Boolean preserveSlashes) {
@@ -430,9 +456,11 @@ CF_INLINE CFStringRef _replacePathIllegalCharacters(CFStringRef str, CFAllocator
     }        
 }
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 static CFStringRef escapePathComponent(CFAllocatorRef alloc, CFStringRef origComponent, CFIndex componentIndex) {
     return CFURLCreateStringByAddingPercentEscapes(alloc, origComponent, NULL, CFSTR(";?/"), kCFStringEncodingUTF8);
 }
+#endif
 
 // We have 2 UniChars of a surrogate; we must convert to the correct percent-encoded UTF8 string and append to str.  Added so that file system URLs can always be converted from POSIX to full URL representation.  -- REW, 8/20/2001
 static Boolean _hackToConvertSurrogates(UniChar highChar, UniChar lowChar, CFMutableStringRef str) {
@@ -838,6 +866,76 @@ CF_EXPORT CFStringRef CFURLCreateStringByAddingPercentEscapes(CFAllocatorRef all
     return _addPercentEscapesToString(allocator, originalString, _shouldPercentReplaceChar, NULL, encoding, strings);
 }
  
+
+#if 0
+static Boolean __CFURLCompare(CFTypeRef  cf1, CFTypeRef  cf2) {
+    CFURLRef  url1 = (CFURLRef)cf1;
+    CFURLRef  url2 = (CFURLRef)cf2;
+    UInt32 pathType1, pathType2;
+    
+    __CFGenericValidateType(cf1, CFURLGetTypeID());
+    __CFGenericValidateType(cf2, CFURLGetTypeID());
+    
+    if (url1 == url2) return kCFCompareEqualTo;
+    
+    if ( url1->_base ) {
+        if (! url2->_base) return kCFCompareEqualTo;
+        if (!CFEqual( url1->_base, url2->_base )) return false;
+    } else if ( url2->_base) {
+        return false;
+    }
+    
+    pathType1 = URL_PATH_TYPE(url1);
+    pathType2 = URL_PATH_TYPE(url2);
+    if (pathType1 == pathType2) {
+        if (pathType1 != FULL_URL_REPRESENTATION) {
+            return CFEqual(url1->_string, url2->_string);
+        } else {
+            // Do not compare the original strings; compare the sanatized strings.
+            return CFEqual(CFURLGetString(url1), CFURLGetString(url2));
+        }
+    } else {
+        // Try hard to avoid the expensive conversion from a file system representation to the canonical form
+        CFStringRef scheme1 = CFURLCopyScheme(url1);
+        CFStringRef scheme2 = CFURLCopyScheme(url2);
+        Boolean eq;
+        if (scheme1 && scheme2) {
+            eq = CFEqual(scheme1, scheme2);
+            CFRelease(scheme1);
+            CFRelease(scheme2);
+        } else if (!scheme1 && !scheme2) {
+            eq = TRUE;
+        } else {
+            eq = FALSE;
+            if (scheme1) CFRelease(scheme1);
+            else CFRelease(scheme2);
+        }
+        if (!eq) return false;
+	
+        if (pathType1 == FULL_URL_REPRESENTATION) {
+            if (!(url1->_flags & IS_PARSED)) {
+                _parseComponentsOfURL(url1);
+            }
+            if (url1->_flags & (HAS_USER | HAS_PORT | HAS_PASSWORD | HAS_QUERY | HAS_PARAMETERS | HAS_FRAGMENT )) {
+                return false;
+            }
+        }
+	
+        if (pathType2 == FULL_URL_REPRESENTATION) {
+            if (!(url2->_flags & IS_PARSED)) {
+                _parseComponentsOfURL(url2);
+            }
+            if (url2->_flags & (HAS_USER | HAS_PORT | HAS_PASSWORD | HAS_QUERY | HAS_PARAMETERS | HAS_FRAGMENT )) {
+                return false;
+            }
+        }
+	
+        // No help for it; we now must convert to the canonical representation and compare.
+        return CFEqual(CFURLGetString(url1), CFURLGetString(url2));
+    }
+}
+#endif
+
 static Boolean __CFURLEqual(CFTypeRef  cf1, CFTypeRef  cf2) {
     CFURLRef  url1 = (CFURLRef)cf1;
     CFURLRef  url2 = (CFURLRef)cf2;
@@ -907,27 +1005,46 @@ static Boolean __CFURLEqual(CFTypeRef  cf1, CFTypeRef  cf2) {
 
 static CFHashCode __CFURLHash(CFTypeRef  cf) {
     /* This is tricky, because we do not want the hash value to change as a file system URL is changed to its canonical representation, nor do we wish to force the conversion to the canonical representation. We choose instead to take the last path component (or "/" in the unlikely case that the path is empty), then hash on that. */
-    CFURLRef  url = (CFURLRef)cf;
-    UInt32 result;
-    if (CFURLCanBeDecomposed(url)) {
-        CFStringRef lastComp = CFURLCopyLastPathComponent(url);
-		CFStringRef	hostNameRef = CFURLCopyHostName(url );
-		
-		result = 0;
-		
-        if (lastComp) {
-            result = CFHash(lastComp);
-            CFRelease(lastComp);
-        }
-		
-		if ( hostNameRef )
-		{
+    struct __CFURL*  url = (struct __CFURL*)cf;
+    CFHashCode result = 0;
+    
+    if ( url )
+    {
+	//  Allocate our extra space if it isn't already allocated
+	if ( url && ! url->extra )
+	    _CFURLAllocateExtraDataspace( url );
+	
+	if ( url->extra ) {
+	    result = url->extra->hashValue;
+	    
+	    if ( ! result ) {
+		if (CFURLCanBeDecomposed(url)) {
+		    CFStringRef lastComp = CFURLCopyLastPathComponent(url);
+		    CFStringRef hostNameRef = CFURLCopyHostName(url );
+		    
+		    result = 0;
+		    
+		    if (lastComp) {
+			result = CFHash(lastComp);
+			CFRelease(lastComp);
+		    }
+		    
+		    if ( hostNameRef ) {
 			result ^= CFHash( hostNameRef );
 			CFRelease( hostNameRef );
+		    }
+		} else {
+		    result = CFHash(CFURLGetString(url));
 		}
-    } else {
-        result = CFHash(CFURLGetString(url));
+		
+		if ( ! result )	    //	never store a 0 value for the hashed value
+		    result = 1;
+		
+		url->extra->hashValue = result;
+	    }
+	}
     }
+    
     return result;
 }
 
@@ -950,10 +1067,10 @@ static CFStringRef __CFURLCopyDescription(CFTypeRef cf) {
     CFAllocatorRef alloc = CFGetAllocator(url);
     if ( url->_base) {
         CFStringRef baseString = CFCopyDescription(url->_base);
-        result = CFStringCreateWithFormat(alloc, NULL, CFSTR("<CFURL %p [%p]>{type = %d, string = %@,\n\tbase = %@}"), cf, alloc, URL_PATH_TYPE(url), url->_string, baseString);
+        result = CFStringCreateWithFormat(alloc, NULL, CFSTR("<CFURL %p [%p]>{type = %d, string = %@, encoding = %d\n\tbase = %@}"), cf, alloc, URL_PATH_TYPE(url), url->_string, url->_encoding, baseString);
         CFRelease(baseString);
     } else {
-        result = CFStringCreateWithFormat(alloc, NULL, CFSTR("<CFURL %p [%p]>{type = %d, string = %@, base = (null)}"), cf, alloc, URL_PATH_TYPE(url), url->_string);
+        result = CFStringCreateWithFormat(alloc, NULL, CFSTR("<CFURL %p [%p]>{type = %d, string = %@, encoding = %d, base = (null)}"), cf, alloc, URL_PATH_TYPE(url), url->_string, url->_encoding);
     }
     return result;
 }
@@ -961,7 +1078,7 @@ static CFStringRef __CFURLCopyDescription(CFTypeRef cf) {
 #if DEBUG_URL_MEMORY_USAGE
 
 extern __attribute((used)) void __CFURLDumpMemRecord(void) {
-    CFStringRef str = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%d URLs created; %d destroyed\n%d file URLs created; %d converted; %d destroyed.  %d urls had 'extra' data allocated, %d had base urls\n"), numURLs, numDealloced, numFileURLsCreated, numFileURLsConverted, numFileURLsDealloced, numExtraDataAllocated, numURLsWithBaseURL );
+    CFStringRef str = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%d URLs created; %d destroyed\n%d file URLs created; %d converted; %d destroyed.  %d urls had 'extra' data allocated, %d had base urls, %d were not UTF8 encoded\n"), numURLs, numDealloced, numFileURLsCreated, numFileURLsConverted, numFileURLsDealloced, numExtraDataAllocated, numURLsWithBaseURL, numNonUTF8EncodedURLs );
     CFShow(str);
     CFRelease(str);
     // if (URLAllocator) CFCountingAllocatorPrintPointers(URLAllocator);
@@ -983,9 +1100,8 @@ static void __CFURLDeallocate(CFTypeRef  cf) {
     if (url->_base) CFRelease(url->_base);
     if (url->ranges) CFAllocatorDeallocate(alloc, url->ranges);
     if (_getSanitizedString(url)) CFRelease(_getSanitizedString(url));
-	
-	if ( url->extra != NULL )
-		CFAllocatorDeallocate( alloc, url->extra );
+    if ( url->extra != NULL ) CFAllocatorDeallocate( alloc, url->extra );
+    if (_getResourceInfo(url)) CFRelease(_getResourceInfo(url));
 }
 
 static CFTypeID __kCFURLTypeID = _kCFRuntimeNotATypeID;
@@ -1146,19 +1262,15 @@ static void _parseComponents(CFAllocatorRef alloc, CFStringRef string, CFURLRef 
             ranges[0].location = base_idx;
             ranges[0].length = idx;
             numRanges ++;
-			base_idx = idx + 1;
-			// optimization for http urls
-			if (idx == 4 && STRING_CHAR(0) == 'h' && STRING_CHAR(1) == 't' &&
-				STRING_CHAR(2) == 't' && STRING_CHAR(3) == 'p')
-			{
-				flags |= HAS_HTTP_SCHEME;
-			}
-			// optimization for file urls
-			if (idx == 4 && STRING_CHAR(0) == 'f' && STRING_CHAR(1) == 'i' &&
-				STRING_CHAR(2) == 'l' && STRING_CHAR(3) == 'e')
-			{
-				flags |= HAS_FILE_SCHEME;
-			}
+            base_idx = idx + 1;
+            // optimization for http urls
+            if (idx == 4 && STRING_CHAR(0) == 'h' && STRING_CHAR(1) == 't' && STRING_CHAR(2) == 't' && STRING_CHAR(3) == 'p') {
+		flags |= HAS_HTTP_SCHEME;
+            }
+            // optimization for file urls
+            if (idx == 4 && STRING_CHAR(0) == 'f' && STRING_CHAR(1) == 'i' && STRING_CHAR(2) == 'l' && STRING_CHAR(3) == 'e') {
+                flags |= HAS_FILE_SCHEME;
+            }
             break;
         } else if (!scheme_valid(ch)) {
             break;	// invalid scheme character -- no scheme
@@ -1310,9 +1422,19 @@ static void _parseComponents(CFAllocatorRef alloc, CFStringRef string, CFURLRef 
                     break;
                 }
             }
+#if DEPLOYMENT_TARGET_MACOSX
+	    if (pathRg.length > 6 && STRING_CHAR(pathRg.location) == '/' && STRING_CHAR(pathRg.location + 1) == '.' && STRING_CHAR(pathRg.location + 2) == 'f' && STRING_CHAR(pathRg.location + 3) == 'i' && STRING_CHAR(pathRg.location + 4) == 'l' && STRING_CHAR(pathRg.location + 5) == 'e' && STRING_CHAR(pathRg.location + 6) == '/') {
+		flags |= PATH_HAS_FILE_ID;
+	    } else if (!sawPercent) {
+                flags |= POSIX_AND_URL_PATHS_MATCH;
+            }
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
             if (!sawPercent) {
                 flags |= POSIX_AND_URL_PATHS_MATCH;
             }
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
 
             ch = STRING_CHAR(pathRg.location + pathRg.length - 1);
             if (ch == '/') {
@@ -1515,8 +1637,7 @@ CF_EXPORT CFURLRef _CFURLAlloc(CFAllocatorRef allocator) {
 
 // It is the caller's responsibility to guarantee that if URLString is absolute, base is NULL.  This is necessary to avoid duplicate processing for file system URLs, which had to decide whether to compute the cwd for the base; we don't want to duplicate that work.  This ALSO means it's the caller's responsibility to set the IS_ABSOLUTE bit, since we may have a degenerate URL whose string is relative, but lacks a base.
 static void _CFURLInit(struct __CFURL *url, CFStringRef URLString, UInt32 fsType, CFURLRef base) {
-    CFAssert1(URLString != NULL && CFGetTypeID(URLString) == CFStringGetTypeID() && CFStringGetLength(URLString) != 0, __kCFLogAssertion, "%s(): internal CF error; empty string encountered", __PRETTY_FUNCTION__);
-    CFAssert2((fsType == FULL_URL_REPRESENTATION) || (fsType == kCFURLPOSIXPathStyle) || (fsType == kCFURLWindowsPathStyle) || (fsType == kCFURLHFSPathStyle), __kCFLogAssertion, "%s(): Received bad fsType %d", __PRETTY_FUNCTION__, fsType);
+    CFAssert2((fsType == FULL_URL_REPRESENTATION) || (fsType == kCFURLPOSIXPathStyle) || (fsType == kCFURLWindowsPathStyle) || (fsType == kCFURLHFSPathStyle) || ASSERT_CHECK_PATHSTYLE(fsType), __kCFLogAssertion, "%s(): Received bad fsType %d", __PRETTY_FUNCTION__, fsType);
     
     // Coming in, the url has its allocator flag properly set, and its base initialized, and nothing else.    
     url->_string = (CFStringRef)CFStringCreateCopy(CFGetAllocator(url), URLString);
@@ -1533,7 +1654,7 @@ static void _CFURLInit(struct __CFURL *url, CFStringRef URLString, UInt32 fsType
 	#endif
 }
 
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path) {
     CFIndex len = CFStringGetLength(path);
     if (len && CFStringGetCharacterAtIndex(path, 0) == '/') {
@@ -1548,32 +1669,17 @@ CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path) {
     if (!len || '/' == CFStringGetCharacterAtIndex(path, len - 1))
         ((struct __CFURL *)url)->_flags |= IS_DIRECTORY;
 }
-#elif 0
+#elif DEPLOYMENT_TARGET_WINDOWS
 CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path) {
     CFIndex len = CFStringGetLength(path);
-    if (len > 2) {
-        char firstChar = CFStringGetCharacterAtIndex(path, 0);
-        char secondChar = CFStringGetCharacterAtIndex(path, 1);
-        if (((((firstChar >= 'A') && (firstChar <= 'Z')) || ((firstChar >= 'a') && (firstChar <= 'z'))) &&
-            ((secondChar == ':') || (secondChar == '|'))) ||
-        ((firstChar == '\\') && (secondChar == '\\')))
-        {
-            _CFURLInit((struct __CFURL *)url, path, kCFURLWindowsPathStyle, NULL);
-            ((struct __CFURL *)url)->_flags |= IS_ABSOLUTE;
-        } else {
-            CFURLRef cwdURL = _CFURLCreateCurrentDirectoryURL(CFGetAllocator(url));
-            _CFURLInit((struct __CFURL *)url, path, kCFURLPOSIXPathStyle, cwdURL);
-            if ( cwdURL )
-                CFRelease(cwdURL);
-        }
-    }
-    if (!len || '/' == CFStringGetCharacterAtIndex(path, len - 1))
-        ((struct __CFURL *)url)->_flags |= IS_DIRECTORY;
-}
-#elif 0
-CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path) {
-    CFIndex len = CFStringGetLength(path);
-    if (len && CFStringGetCharacterAtIndex(path, 0) == '/') {
+    UniChar firstChar = 0 < len ? CFStringGetCharacterAtIndex(path, 0) : 0;
+    UniChar secondChar = 1 < len ? CFStringGetCharacterAtIndex(path, 1) : 0;
+    Boolean isDrive = ('A' <= firstChar && firstChar <= 'Z') || ('a' <= firstChar && firstChar <= 'z');
+    isDrive = isDrive && (secondChar == ':' || secondChar == '|');
+    if (isDrive || (firstChar == '\\' && secondChar == '\\')) {
+        _CFURLInit((struct __CFURL *)url, path, kCFURLWindowsPathStyle, NULL);
+        ((struct __CFURL *)url)->_flags |= IS_ABSOLUTE;
+    } else if (firstChar == '/') {
         _CFURLInit((struct __CFURL *)url, path, kCFURLPOSIXPathStyle, NULL);
         ((struct __CFURL *)url)->_flags |= IS_ABSOLUTE;
     } else {
@@ -1783,6 +1889,11 @@ CFURLRef CFURLCreateWithBytes(CFAllocatorRef allocator, const uint8_t *URLBytes,
         _CFURLInitWithString(result, urlString, baseURL);
         if (encoding != kCFStringEncodingUTF8 && !createOldUTF8StyleURLs()) {
             ((struct __CFURL *)result)->_encoding = encoding;
+	#if DEBUG_URL_MEMORY_USAGE
+	    if ( encoding != kCFStringEncodingUTF8 ) {
+		numNonUTF8EncodedURLs++;
+	    }
+	#endif
         }
     }
     CFRelease(urlString); // it's retained by result, now.
@@ -1836,8 +1947,13 @@ CFURLRef CFURLCreateAbsoluteURLWithBytes(CFAllocatorRef alloc, const UInt8 *rela
         CFURLRef url = _CFURLCreateWithArbitraryString(alloc, relativeString, baseURL);
         CFRelease(relativeString);
         if (url) {
-			((struct __CFURL *)url)->_encoding = encoding;
+	    ((struct __CFURL *)url)->_encoding = encoding;
             CFURLRef absURL = CFURLCopyAbsoluteURL(url);
+	#if DEBUG_URL_MEMORY_USAGE
+	    if ( encoding != kCFStringEncodingUTF8 ) {
+		numNonUTF8EncodedURLs++;
+	    }
+	#endif
             CFRelease(url);
             return absURL;
         } else {
@@ -1939,6 +2055,11 @@ CFURLRef CFURLCreateAbsoluteURLWithBytes(CFAllocatorRef alloc, const UInt8 *rela
         CFRelease(absString);
         if (absURL) {
             ((struct __CFURL *)absURL)->_encoding = encoding;
+	#if DEBUG_URL_MEMORY_USAGE
+	    if ( encoding != kCFStringEncodingUTF8 ) {
+		numNonUTF8EncodedURLs++;
+	    }
+	#endif
         }
         return absURL;
     }
@@ -2218,6 +2339,11 @@ CFURLRef CFURLCopyAbsoluteURL(CFURLRef  relativeURL) {
     anURL = _CFURLCreateWithArbitraryString(alloc, newString, NULL);
     CFRelease(newString);
     ((struct __CFURL *)anURL)->_encoding = relativeURL->_encoding;
+#if DEBUG_URL_MEMORY_USAGE
+    if ( relativeURL->_encoding != kCFStringEncodingUTF8 ) {
+	numNonUTF8EncodedURLs++;
+    }
+#endif
     return anURL;
 }
 
@@ -3022,6 +3148,13 @@ static CFStringRef schemeSpecificString(CFURLRef url) {
         } else {
             return POSIXPathToURLPath(url->_string, CFGetAllocator(url), isDir);
         }
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    case kCFURLHFSPathStyle:
+        return HFSPathToURLPath(url->_string, CFGetAllocator(url), isDir);
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
     case kCFURLWindowsPathStyle:
         return WindowsPathToURLPath(url->_string, CFGetAllocator(url), isDir);
     case FULL_URL_REPRESENTATION:
@@ -3114,6 +3247,14 @@ static Boolean decomposeToRFC1808(CFURLRef url, CFURLComponentsRFC1808 *componen
             CFRelease(pathStr);
             break;
         }
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+	case kCFURLHFSPathStyle:
+            components->pathComponents = HFSPathToURLComponents(url->_string, alloc, ((url->_flags & IS_DIRECTORY) != 0));
+            break;
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
         case kCFURLWindowsPathStyle:
             components->pathComponents = WindowsPathToURLComponents(url->_string, alloc, ((url->_flags & IS_DIRECTORY) != 0));
             break;
@@ -3168,7 +3309,7 @@ static CFURLRef composeFromRFC1808(CFAllocatorRef alloc, const CFURLComponentsRF
         hadPrePathComponent = true;
     }
 
-    if (hadPrePathComponent && (comp->pathComponents == NULL || CFStringGetLength((CFStringRef)CFArrayGetValueAtIndex(comp->pathComponents, 0)) != 0)) {
+    if (hadPrePathComponent && (comp->pathComponents == NULL || CFArrayGetCount( comp->pathComponents ) == 0 || CFStringGetLength((CFStringRef)CFArrayGetValueAtIndex(comp->pathComponents, 0)) != 0)) {
         CFStringAppend(urlString, CFSTR("/"));
     }
     if (comp->pathComponents) {
@@ -3312,9 +3453,16 @@ CF_EXPORT void *__CFURLReservedPtr(CFURLRef  url) {
 }
 
 CF_EXPORT void __CFURLSetReservedPtr(CFURLRef  url, void *ptr) {
-	_setReserved ( (struct __CFURL*) url, ptr );
+    _setReserved ( (struct __CFURL*) url, ptr );
 }
 
+CF_EXPORT void *__CFURLResourceInfoPtr(CFURLRef url) {
+    return _getResourceInfo(url);
+}
+
+CF_EXPORT void __CFURLSetResourceInfoPtr(CFURLRef url, void *ptr) {
+    _setResourceInfo ( (struct __CFURL*) url, ptr );
+}
 
 /* File system stuff */
 
@@ -3416,16 +3564,18 @@ static CFStringRef URLPathToWindowsPath(CFStringRef path, CFAllocatorRef allocat
         UniChar ch;
 
 	{
-            if (CFStringGetLength(firstComponent) == 2 && ((ch = CFStringGetCharacterAtIndex(firstComponent, 1)) == '|' || ch == ':')) {
-                // Drive letter
-                CFArrayRemoveValueAtIndex(components, 0);
-                if (ch == '|') {
-                    CFStringRef driveStr = CFStringCreateWithFormat(allocator, NULL, CFSTR("%c:"), CFStringGetCharacterAtIndex(firstComponent, 0));
-                    CFArraySetValueAtIndex(components, 0, driveStr);
-                    CFRelease(driveStr);
-                }
-            }
-            CFRelease(firstComponent);
+            if (firstComponent) {
+		if (CFStringGetLength(firstComponent) == 2 && ((ch = CFStringGetCharacterAtIndex(firstComponent, 1)) == '|' || ch == ':')) {
+		    // Drive letter
+		    CFArrayRemoveValueAtIndex(components, 0);
+		    if (ch == '|') {
+			CFStringRef driveStr = CFStringCreateWithFormat(allocator, NULL, CFSTR("%c:"), CFStringGetCharacterAtIndex(firstComponent, 0));
+			CFArraySetValueAtIndex(components, 0, driveStr);
+			CFRelease(driveStr);
+		    }
+		}
+		CFRelease(firstComponent);
+	    }
         }
     }
     newPath = CFStringCreateByCombiningStrings(allocator, components, CFSTR("\\"));
@@ -3435,12 +3585,15 @@ static CFStringRef URLPathToWindowsPath(CFStringRef path, CFAllocatorRef allocat
     return result;
 }
 
+
+
 // converts url from a file system path representation to a standard representation
 static void _convertToURLRepresentation(struct __CFURL *url) {
     CFStringRef path = NULL;
     Boolean isDir = ((url->_flags & IS_DIRECTORY) != 0);
+    Boolean isFileReferencePath = false;
     CFAllocatorRef alloc = CFGetAllocator(url);
-
+    
 #if DEBUG_URL_MEMORY_USAGE
     numFileURLsConverted ++;
 #endif
@@ -3460,15 +3613,15 @@ static void _convertToURLRepresentation(struct __CFURL *url) {
     CFAssert2(path != NULL, __kCFLogAssertion, "%s(): Encountered malformed file system URL %@", __PRETTY_FUNCTION__, url);
     if (!url->_base) {
 	CFMutableStringRef str = CFStringCreateMutable(alloc, 0);
-	CFStringAppend(str, CFSTR("file://localhost"));
+	CFStringAppend(str, isFileReferencePath ? CFSTR("file://") : CFSTR("file://localhost"));
 	CFStringAppend(str, path);
-        url->_flags = (url->_flags & (IS_DIRECTORY)) | (FULL_URL_REPRESENTATION << 16) | IS_DECOMPOSABLE | IS_ABSOLUTE | IS_PARSED | HAS_SCHEME | HAS_FILE_SCHEME | HAS_HOST | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH;
+        url->_flags = (url->_flags & (IS_DIRECTORY)) | (FULL_URL_REPRESENTATION << 16) | IS_DECOMPOSABLE | IS_ABSOLUTE | IS_PARSED | HAS_SCHEME | HAS_FILE_SCHEME | HAS_HOST | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH | ( isFileReferencePath ? PATH_HAS_FILE_ID : 0 );
         CFRelease(url->_string);
         url->_string = str;
         url->ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange) * 3, 0);
         url->ranges[0] = CFRangeMake(0, 4);
-        url->ranges[1] = CFRangeMake(7, 9);
-        url->ranges[2] = CFRangeMake(16, CFStringGetLength(path));
+        url->ranges[1] = CFRangeMake(7, isFileReferencePath ? 0 : 9);
+        url->ranges[2] = CFRangeMake(url->ranges[1].location + url->ranges[1].length, CFStringGetLength(path));
         CFRelease(path);
     } else {
         CFRelease(url->_string);
@@ -3532,7 +3685,8 @@ CFURLRef CFURLCreateWithFileSystemPath(CFAllocatorRef allocator, CFStringRef fil
     CFIndex len;
     CFURLRef baseURL, result;
 
-    CFAssert2(fsType == kCFURLPOSIXPathStyle || fsType == kCFURLHFSPathStyle || fsType == kCFURLWindowsPathStyle, __kCFLogAssertion, "%s(): encountered unknown path style %d", __PRETTY_FUNCTION__, fsType);
+    CFAssert2(fsType == kCFURLPOSIXPathStyle || fsType == kCFURLHFSPathStyle || fsType == kCFURLWindowsPathStyle || ASSERT_CHECK_PATHSTYLE(fsType), __kCFLogAssertion, "%s(): encountered unknown path style %d", __PRETTY_FUNCTION__, fsType);
+    
     CFAssert1(filePath != NULL, __kCFLogAssertion, "%s(): NULL filePath argument not permitted", __PRETTY_FUNCTION__);
 
 	len = CFStringGetLength(filePath);
@@ -3569,7 +3723,7 @@ CF_EXPORT CFURLRef CFURLCreateWithFileSystemPathRelativeToBase(CFAllocatorRef al
     CFIndex len;
 
     CFAssert1(filePath != NULL, __kCFLogAssertion, "%s(): NULL path string not permitted", __PRETTY_FUNCTION__);
-    CFAssert2(fsType == kCFURLPOSIXPathStyle || fsType == kCFURLHFSPathStyle || fsType == kCFURLWindowsPathStyle, __kCFLogAssertion, "%s(): encountered unknown path style %d", __PRETTY_FUNCTION__, fsType);
+    CFAssert2(fsType == kCFURLPOSIXPathStyle || fsType == kCFURLHFSPathStyle || fsType == kCFURLWindowsPathStyle || ASSERT_CHECK_PATHSTYLE(fsType), __kCFLogAssertion, "%s(): encountered unknown path style %d", __PRETTY_FUNCTION__, fsType);
     
 	len = CFStringGetLength(filePath);
 
@@ -3701,10 +3855,28 @@ CF_EXPORT CFURLRef CFURLCreateWithFileSystemPathRelativeToBase(CFAllocatorRef al
     return url;
 }
 
+static Boolean _pathHasFileIDPrefix( CFStringRef path )
+{
+    // path is not NULL, path has prefix "/.file/" and has at least one character following the prefix.
+    static const CFStringRef fileIDPrefix = CFSTR( "/" FILE_ID_PREFIX "/" );
+    return path && CFStringHasPrefix( path, fileIDPrefix ) && CFStringGetLength( path ) > CFStringGetLength( fileIDPrefix );
+}
+
+
+static Boolean _pathHasFileIDOnly( CFStringRef path )
+{
+    // Is file ID rooted and contains no additonal path segments
+    CFRange slashRange;
+    return _pathHasFileIDPrefix( path ) && ( !CFStringFindWithOptions( path, CFSTR("/"), CFRangeMake( sizeof(FILE_ID_PREFIX) + 1, CFStringGetLength( path ) - sizeof(FILE_ID_PREFIX) - 1), 0, &slashRange ) || slashRange.location == CFStringGetLength( path ) - 1 );
+}
+
+
 CF_EXPORT CFStringRef CFURLCopyFileSystemPath(CFURLRef anURL, CFURLPathStyle pathStyle) {
-    CFAssert2(pathStyle == kCFURLPOSIXPathStyle || pathStyle == kCFURLHFSPathStyle || pathStyle == kCFURLWindowsPathStyle, __kCFLogAssertion, "%s(): Encountered unknown path style %d", __PRETTY_FUNCTION__, pathStyle);
+    CFAssert2(pathStyle == kCFURLPOSIXPathStyle || pathStyle == kCFURLHFSPathStyle || pathStyle == kCFURLWindowsPathStyle || ASSERT_CHECK_PATHSTYLE(pathStyle), __kCFLogAssertion, "%s(): Encountered unknown path style %d", __PRETTY_FUNCTION__, pathStyle);
+    
     return CFURLCreateStringWithFileSystemPath(CFGetAllocator(anURL), anURL, pathStyle, false);
 }
+
 
 // There is no matching ObjC method for this functionality; because this function sits on top of the CFURL primitives, it's o.k. not to check for the need to dispatch an ObjC method instead, but this means care must be taken that this function never call anything that will result in dereferencing anURL without first checking for an ObjC dispatch.  -- REW, 10/29/98
 CFStringRef CFURLCreateStringWithFileSystemPath(CFAllocatorRef allocator, CFURLRef anURL, CFURLPathStyle fsType, Boolean resolveAgainstBase) {
@@ -3774,23 +3946,64 @@ Boolean CFURLGetFileSystemRepresentation(CFURLRef url, Boolean resolveAgainstBas
     CFAllocatorRef alloc = CFGetAllocator(url);
 
     if (!url) return false;
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
     path = CFURLCreateStringWithFileSystemPath(alloc, url, kCFURLPOSIXPathStyle, resolveAgainstBase);
     if (path) {
         Boolean convResult = _CFStringGetFileSystemRepresentation(path, buffer, bufLen);
         CFRelease(path);
         return convResult;
     }
+#elif DEPLOYMENT_TARGET_WINDOWS
+    path = CFURLCreateStringWithFileSystemPath(alloc, url, kCFURLWindowsPathStyle, resolveAgainstBase);
+    if (path) {
+        CFIndex usedLen;
+        CFIndex pathLen = CFStringGetLength(path);
+        CFIndex numConverted = CFStringGetBytes(path, CFRangeMake(0, pathLen), CFStringFileSystemEncoding(), 0, true, buffer, bufLen-1, &usedLen); // -1 because we need one byte to zero-terminate.
+        CFRelease(path);
+        if (numConverted == pathLen) {
+            buffer[usedLen] = '\0';
+            return true;
+        }
+    }
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     return false;
 }
+
+#if DEPLOYMENT_TARGET_WINDOWS
+CF_EXPORT Boolean _CFURLGetWideFileSystemRepresentation(CFURLRef url, Boolean resolveAgainstBase, wchar_t *buffer, CFIndex bufferLength) {
+	CFStringRef path = CFURLCreateStringWithFileSystemPath(CFGetAllocator(url), url, kCFURLWindowsPathStyle, resolveAgainstBase);
+	CFIndex pathLength, charsConverted, usedBufLen;
+	if (!path) return false;
+	pathLength = CFStringGetLength(path);
+	if (pathLength+1 > bufferLength) {
+		CFRelease(path);
+		return false;
+	}
+	charsConverted = CFStringGetBytes(path, CFRangeMake(0, pathLength), kCFStringEncodingUTF16, 0, false, (UInt8 *)buffer, bufferLength*sizeof(wchar_t), &usedBufLen);
+//	CFStringGetCharacters(path, CFRangeMake(0, pathLength), (UniChar *)buffer);
+	CFRelease(path);
+	if (charsConverted != pathLength || usedBufLen%sizeof(wchar_t) != 0) {
+		return false;
+	} else {
+		buffer[usedBufLen/sizeof(wchar_t)] = 0;
+//		buffer[pathLength] = 0;
+		return true;
+	}
+}
+#endif
 
 CFURLRef CFURLCreateFromFileSystemRepresentation(CFAllocatorRef allocator, const uint8_t *buffer, CFIndex bufLen, Boolean isDirectory) {
     CFStringRef path = CFStringCreateWithBytes(allocator, buffer, bufLen, CFStringFileSystemEncoding(), false);
     CFURLRef newURL;
     if (!path) return NULL;
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
     newURL = CFURLCreateWithFileSystemPath(allocator, path, kCFURLPOSIXPathStyle, isDirectory);
+#elif DEPLOYMENT_TARGET_WINDOWS
+    newURL = CFURLCreateWithFileSystemPath(allocator, path, kCFURLWindowsPathStyle, isDirectory);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     CFRelease(path);
     return newURL;
@@ -3800,8 +4013,12 @@ CF_EXPORT CFURLRef CFURLCreateFromFileSystemRepresentationRelativeToBase(CFAlloc
     CFStringRef path = CFStringCreateWithBytes(allocator, buffer, bufLen, CFStringFileSystemEncoding(), false);
     CFURLRef newURL;
     if (!path) return NULL;
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
     newURL = CFURLCreateWithFileSystemPathRelativeToBase(allocator, path, kCFURLPOSIXPathStyle, isDirectory, baseURL);
+#elif DEPLOYMENT_TARGET_WINDOWS
+    newURL = CFURLCreateWithFileSystemPathRelativeToBase(allocator, path, kCFURLWindowsPathStyle, isDirectory, baseURL);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
     CFRelease(path);
     return newURL;
@@ -3853,11 +4070,18 @@ CFStringRef CFURLCopyLastPathComponent(CFURLRef url) {
         CFRange rg, compRg;
         if (!path) return NULL;
         rg = CFRangeMake(0, CFStringGetLength(path));
+	if ( rg.length == 0 ) return path;
         length = rg.length; // Remember this for comparison later
-        if (CFStringGetCharacterAtIndex(path, rg.length - 1) == '/') {
+        if (CFStringGetCharacterAtIndex(path, rg.length - 1) == '/' ) {
             rg.length --;
         }
-        if (CFStringFindWithOptions(path, CFSTR("/"), rg, kCFCompareBackwards, &compRg)) {
+	if ( rg.length == 0 )
+	{
+	    //	If we have reduced the string to empty, then it's "/", and that's what we return as
+	    //	the last path component.
+	   return path;
+	}
+        else if (CFStringFindWithOptions(path, CFSTR("/"), rg, kCFCompareBackwards, &compRg)) {
             rg.length = rg.location + rg.length - (compRg.location+1);
             rg.location = compRg.location + 1;
         }
@@ -4095,6 +4319,86 @@ CFURLRef CFURLCreateCopyDeletingPathExtension(CFAllocatorRef allocator, CFURLRef
 }
 
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+static CFArrayRef HFSPathToURLComponents(CFStringRef path, CFAllocatorRef alloc, Boolean isDir) {
+    CFArrayRef components = CFStringCreateArrayBySeparatingStrings(alloc, path, CFSTR(":"));
+    CFMutableArrayRef newComponents = CFArrayCreateMutableCopy(alloc, 0, components);
+    Boolean doSpecialLeadingColon = false;
+    UniChar firstChar = CFStringGetCharacterAtIndex(path, 0);
+    UInt32 i, cnt;
+    CFRelease(components);
+
+
+    if (!doSpecialLeadingColon && firstChar != ':') {
+        CFArrayInsertValueAtIndex(newComponents, 0, CFSTR(""));
+    } else if (firstChar != ':') {
+        // see what we need to add at the beginning. Under MacOS, if the
+        // first character isn't a ':', then the first component is the
+        // volume name, and we need to find the mount point.  Bleah. If we
+        // don't find a mount point, we're going to have to lie, and make something up.
+        CFStringRef firstComp = (CFStringRef)CFArrayGetValueAtIndex(newComponents, 0);
+        if (CFStringGetLength(firstComp) == 1 && CFStringGetCharacterAtIndex(firstComp, 0) == '/') {
+            // "/" is the "magic" path for a UFS root directory
+            CFArrayRemoveValueAtIndex(newComponents, 0);
+            CFArrayInsertValueAtIndex(newComponents, 0, CFSTR(""));
+        } else {
+            // See if we can get a mount point.
+            Boolean foundMountPoint = false;
+            if (!foundMountPoint) {
+                // Fall back to treating the volume name as the top level directory
+                CFArrayInsertValueAtIndex(newComponents, 0, CFSTR(""));
+            }
+        }
+    } else {
+        CFArrayRemoveValueAtIndex(newComponents, 0);
+    }
+
+    cnt = CFArrayGetCount(newComponents);
+    for (i = 0; i < cnt; i ++) {
+        CFStringRef comp = (CFStringRef)CFArrayGetValueAtIndex(newComponents, i);
+        CFStringRef newComp = NULL;
+        CFRange searchRg, slashRg;
+        searchRg.location = 0;
+        searchRg.length = CFStringGetLength(comp);
+        while (CFStringFindWithOptions(comp, CFSTR("/"), searchRg, 0, &slashRg)) {
+            if (!newComp) {
+                newComp = CFStringCreateMutableCopy(alloc, searchRg.location + searchRg.length, comp);
+            }
+            CFStringReplace((CFMutableStringRef)newComp, slashRg, CFSTR(":"));
+            searchRg.length = searchRg.location + searchRg.length - slashRg.location - 1;
+            searchRg.location = slashRg.location + 1;
+        }
+        if (newComp) {
+            CFArraySetValueAtIndex(newComponents, i, newComp);
+            CFRelease(newComp);
+        }
+    }
+    if (isDir && CFStringGetLength((CFStringRef)CFArrayGetValueAtIndex(newComponents, cnt-1)) != 0) {
+            CFArrayAppendValue(newComponents, CFSTR(""));
+    }
+    return newComponents;
+}
+static CFStringRef HFSPathToURLPath(CFStringRef path, CFAllocatorRef alloc, Boolean isDir) {
+    CFArrayRef components = HFSPathToURLComponents(path, alloc, isDir);
+    CFArrayRef newComponents = components ? copyStringArrayWithTransformation(components, escapePathComponent) : NULL;
+    CFIndex cnt;
+    CFStringRef result;
+    if (components) CFRelease(components);
+    if (!newComponents) return NULL;
+
+    cnt = CFArrayGetCount(newComponents);
+    if (cnt == 1 && CFStringGetLength((CFStringRef)CFArrayGetValueAtIndex(newComponents, 0)) == 0) {
+        result = (CFStringRef)CFRetain(CFSTR("/"));
+    } else {
+        result = CFStringCreateByCombiningStrings(alloc, newComponents, CFSTR("/"));
+    }
+    CFRelease(newComponents);
+    return result;
+}
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
 
 
 
@@ -4212,5 +4516,4 @@ CFURLRef _CFURLCreateFromPropertyListRepresentation(CFAllocatorRef alloc, CFProp
     if (baseURL) CFRelease(baseURL);
     return url;
 }
-
 

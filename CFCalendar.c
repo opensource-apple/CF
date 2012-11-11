@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -24,6 +24,8 @@
 	Copyright 2004-2004, Apple Computer, Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
+
+
 
 #include <CoreFoundation/CFCalendar.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -1044,6 +1046,7 @@ Boolean CFCalendarGetTimeRangeOfUnit(CFCalendarRef calendar, CFCalendarUnit unit
 	    return true;
 	}
     }
+
     return false;
 }
 

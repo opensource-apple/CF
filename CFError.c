@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,17 +21,20 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFError.c
-	Copyright 2006, Apple, Inc. All rights reserved.
+	Copyright 2006-2009, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
 #include <CoreFoundation/CFError.h>
 #include <CoreFoundation/CFError_Private.h>
 #include "CFInternal.h"
-#include "CFPriv.h"
-#if DEPLOYMENT_TARGET_MACOSX
+#include <CoreFoundation/CFPriv.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <objc/runtime.h>
 #include <mach/mach_error.h>
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 /* Pre-defined userInfo keys
@@ -225,13 +228,28 @@ CFStringRef _CFErrorCreateLocalizedDescription(CFErrorRef err) {
     CFStringRef localizedDesc = _CFErrorCopyUserInfoKey(err, kCFErrorLocalizedDescriptionKey);
     if (localizedDesc) return localizedDesc;
 
-    // Cache the CF bundle since we will be using it for localized strings. !!! Might be good to check for NULL, although that indicates some serious problem.
+    // Cache the CF bundle since we will be using it for localized strings.
     CFBundleRef cfBundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.CoreFoundation"));
+
+    if (!cfBundle) {	// This should be rare, but has been observed in the wild, due to running out of file descriptors. Normally we might not go to such extremes, but since we want to be able to present reasonable errors even in the case of errors such as running out of file descriptors, why not. This is CFError after all. !!! Be sure to have the same logic here as below for going through various options for fetching the strings.
+    
+	CFStringRef result = NULL, reasonOrDesc;
+
+	if ((reasonOrDesc = _CFErrorCopyUserInfoKey(err, kCFErrorLocalizedFailureReasonKey))) {	    // First look for kCFErrorLocalizedFailureReasonKey
+	    result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("The operation couldn\\U2019t be completed. %@"), reasonOrDesc);
+	} else if ((reasonOrDesc = _CFErrorCopyUserInfoKey(err, kCFErrorDescriptionKey))) {	    // Then try kCFErrorDescriptionKey
+	    result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("The operation couldn\\U2019t be completed. (%@ error %ld - %@)"), CFErrorGetDomain(err), (long)CFErrorGetCode(err), reasonOrDesc);
+	} else {	// Last resort, just the domain and code
+	    result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("The operation couldn\\U2019t be completed. (%@ error %ld.)"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
+	}
+	if (reasonOrDesc) CFRelease(reasonOrDesc);
+	return result;
+    }
 
     // Then look for kCFErrorLocalizedFailureReasonKey; if there, create a full sentence from that.
     CFStringRef reason = _CFErrorCopyUserInfoKey(err, kCFErrorLocalizedFailureReasonKey);
     if (reason) {
-	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("Operation could not be completed. %@"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem. The %@ will be replaced by a second sentence which indicates why the operation failed.");
+	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("The operation couldn\\U2019t be completed. %@"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem. The %@ will be replaced by a second sentence which indicates why the operation failed.");
         CFStringRef result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, operationFailedStr, reason);
 	CFRelease(operationFailedStr);
         CFRelease(reason);
@@ -243,12 +261,12 @@ CFStringRef _CFErrorCreateLocalizedDescription(CFErrorRef err) {
     CFStringRef desc = _CFErrorCopyUserInfoKey(err, kCFErrorDescriptionKey);
     CFStringRef localizedDomain = CFCopyLocalizedStringFromTableInBundle(CFErrorGetDomain(err), CFSTR("Error"), cfBundle, "These are localized in the comment above");
     if (desc) {     // We have kCFErrorDescriptionKey, so include that with the error domain and code
-	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("Operation could not be completed. (%@ error %ld - %@)"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem, followed by a parenthetical sentence which indicates error domain, code, and a description when there is no other way to present an error to the user. The first %@ indicates the error domain, %ld indicates the error code, and the second %@ indicates the description; so this might become '(Mach error 42 - Server error.)' for instance.");
+	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("The operation couldn\\U2019t be completed. (%@ error %ld - %@)"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem, followed by a parenthetical sentence which indicates error domain, code, and a description when there is no other way to present an error to the user. The first %@ indicates the error domain, %ld indicates the error code, and the second %@ indicates the description; so this might become '(Mach error 42 - Server error.)' for instance.");
 	result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, operationFailedStr, localizedDomain, (long)CFErrorGetCode(err), desc);
 	CFRelease(operationFailedStr);
         CFRelease(desc);
     } else {        // We don't have kCFErrorDescriptionKey, so just use error domain and code
-	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("Operation could not be completed. (%@ error %ld.)"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem, followed by a parenthetical sentence which indicates error domain and code when there is no other way to present an error to the user. The %@ indicates the error domain while %ld indicates the error code; so this might become '(Mach error 42.)' for instance.");
+	CFStringRef operationFailedStr = CFCopyLocalizedStringFromTableInBundle(CFSTR("The operation couldn\\U2019t be completed. (%@ error %ld.)"), CFSTR("Error"), cfBundle, "A generic error string indicating there was a problem, followed by a parenthetical sentence which indicates error domain and code when there is no other way to present an error to the user. The %@ indicates the error domain while %ld indicates the error code; so this might become '(Mach error 42.)' for instance.");
 	result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, operationFailedStr, localizedDomain, (long)CFErrorGetCode(err));
 	CFRelease(operationFailedStr);
     }
@@ -276,11 +294,20 @@ CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err) {
     CFStringRef desc = CFErrorCopyDescription(err);
     CFStringRef debugDesc = _CFErrorCopyUserInfoKey(err, kCFErrorDebugDescriptionKey);
     CFDictionaryRef userInfo = _CFErrorGetUserInfo(err);
+    CFErrorRef underlyingError = NULL;    
     CFMutableStringRef result = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
     CFStringAppendFormat(result, NULL, CFSTR("Error Domain=%@ Code=%d"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
-    if (userInfo) CFStringAppendFormat(result, NULL, CFSTR(" UserInfo=%p"), userInfo);
+    if (userInfo) {
+        CFStringAppendFormat(result, NULL, CFSTR(" UserInfo=%p"), userInfo);
+        underlyingError = (CFErrorRef)CFDictionaryGetValue(userInfo, kCFErrorUnderlyingErrorKey);
+    }
     CFStringAppendFormat(result, NULL, CFSTR(" \"%@\""), desc);
     if (debugDesc && CFStringGetLength(debugDesc) > 0) CFStringAppendFormat(result, NULL, CFSTR(" (%@)"), debugDesc);
+    if (underlyingError) {
+        CFStringRef underlyingErrorDesc = _CFErrorCreateDebugDescription(underlyingError);
+        CFStringAppendFormat(result, NULL, CFSTR(" Underlying Error=(%@)"), underlyingErrorDesc);
+        CFRelease(underlyingErrorDesc);
+    }
     if (debugDesc) CFRelease(debugDesc);
     if (desc) CFRelease(desc);
     return result;
@@ -422,7 +449,7 @@ static CFTypeRef _CFErrorPOSIXCallBack(CFErrorRef err, CFStringRef key) {
     return errStr;
 }
 
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 /* Built-in callback for Mach domain.
 */
 static CFTypeRef _CFErrorMachCallBack(CFErrorRef err, CFStringRef key) {
@@ -432,6 +459,9 @@ static CFTypeRef _CFErrorMachCallBack(CFErrorRef err, CFStringRef key) {
     }
     return NULL;
 }
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 
@@ -450,8 +480,11 @@ static void _CFErrorInitializeCallBackTable(void) {
         // Note, even though the table looks like it was initialized, we go on to register the items on this thread as well, since otherwise we might consult the table before the items are actually registered.
     }
     CFErrorSetCallBackForDomain(kCFErrorDomainPOSIX, _CFErrorPOSIXCallBack);
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED    
     CFErrorSetCallBackForDomain(kCFErrorDomainMach, _CFErrorMachCallBack);
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 }
 

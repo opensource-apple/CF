@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 /*
     CFLocaleIdentifier.c
-	Copyright (c) 2002-2007, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2009, Apple Inc. All rights reserved.
     Responsibility: Christopher Kane
     
     CFLocaleIdentifier.c defines
@@ -74,7 +74,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unicode/uloc.h>
-
+#include "CFInternal.h"
+#include "CFLocaleInternal.h"
 
 // Max byte length of locale identifier (ASCII) as C string, including terminating null byte
 enum {
@@ -169,7 +170,7 @@ static const char * const regionCodeToLocaleString[] = {
     "uk_UA",        //  62 verUkraine;           45 langUkrainian;
     NULL,           //  63 *unused;              -1 none;           * one-way mapping   # ""
     "el_GR",        //  64 verGreeceAlt;         14 langGreek (modern)-Grek-mono;   * one-way mapping
-    "sr_CS",        //  65 verSerbian;           42 langSerbian -Cyrl;								// <1.18>
+    "sr_RS",        //  65 verSerbian;           42 langSerbian -Cyrl;								// <1.18>
     "sl_SI",        //  66 verSlovenian;         40 langSlovenian;
     "mk_MK",        //  67 verMacedonian;        43 langMacedonian;
     "hr_HR",        //  68 verCroatia;           18 langCroatian;
@@ -527,13 +528,15 @@ static const KeyStringToResultString oldAppleLocaleToCanonical[] = {
     { "ms.La",                  "ms"        },  //                      # from old LocaleRefGetPartString
     { "nl-be",                  "nl-BE"     },  //                      # from old LocaleRefGetPartString
     { "nl-be_BE",               "nl_BE"     },  //                      # from old LocaleRefGetPartString
+    { "no-NO",					"nb-NO"     },  //                      # not handled by localeStringPrefixToCanonical
+    { "no-NO_NO",				"nb-NO_NO"  },  //                      # not handled by localeStringPrefixToCanonical
 //  { "no-bok_NO",              "nb_NO"     },  //                      # from old LocaleRefGetPartString - handled by localeStringPrefixToCanonical
 //  { "no-nyn_NO",              "nn_NO"     },  //                      # from old LocaleRefGetPartString - handled by localeStringPrefixToCanonical
 //  { "nya",                    "ny"        },  //                      # from old LocaleRefGetPartString - handled by localeStringPrefixToCanonical
     { "pa_??",                  "pa"        },  //                      # from old LocaleRefGetPartString
     { "sa.Dv",                  "sa"        },  //                      # from old LocaleRefGetPartString
     { "sl_??",                  "sl_SI"     },  //                      # from old MapScriptInfoAndISOCodes
-    { "sr_??",                  "sr_CS"     },  //                      # from old MapScriptInfoAndISOCodes						// <1.18>
+    { "sr_??",                  "sr_RS"     },  //                      # from old MapScriptInfoAndISOCodes						// <1.18>
     { "su.La",                  "su"        },  //                      # from old LocaleRefGetPartString
     { "yi.He",                  "yi"        },  //                      # from old LocaleRefGetPartString
     { "zh-simp",                "zh-Hans"   },  //                      # from earlier version of tables in this file!
@@ -719,24 +722,23 @@ static const SpecialCaseUpdates specialCases[] = {
 // Data for special cases
 // a) The 3166 code CS was used for Czechoslovakia until 1993, when that country split and the code was
 // replaced by CZ and SK. Then in 2003-07, the code YU (formerly designating all of Yugoslavia, then after
-// the 1990s breakup just designating what is now Serbia and Montenegro) was changed to CS! However, ICU
-// and RFC 3066bis will continue to use YU for this. So now CS is ambiguous. We guess as follows: If we
-// see CS but a language of cs or sk, we change CS to CZ or SK. Otherwise, we change CS to YU.
+// the 1990s breakup just designating what is now Serbia and Montenegro) was changed to CS! Then after
+// Serbia and Montenegro split, the code CS was replaced in 2006-09 with separate codes RS and ME. If we
+// see CS but a language of cs or sk, we change CS to CZ or SK. Otherwise, we change CS (and old YU) to RS.
 // b) The 639 code sh for Serbo-Croatian was also replaced in the 1990s by separate codes hr and sr, and
 // deprecated in 2000. We guess which one to map it to as follows: If there is a region tag of HR we use
-// hr; if there is a region tag of (now) YU we use sr; else we do not change it (not enough info).
+// hr; if there is a region tag of (now) RS we use sr; else we do not change it (not enough info).
 // c) There are other codes that have been updated without these issues (eg. TP to TL), plus among the
 // "exceptionally reserved" codes some are just alternates for standard codes (eg. UK for GB).
     {   NULL,   "-UK",  "GB",   NULL,   NULL    },  // always change UK to GB (UK is "exceptionally reserved" to mean GB)
     {   NULL,   "-TP",  "TL",   NULL,   NULL    },  // always change TP to TL (East Timor, code changed 2002-05)
     {   "cs",   "-CS",  "CZ",   NULL,   NULL    },  // if language is cs, change CS (pre-1993 Czechoslovakia) to CZ (Czech Republic)
     {   "sk",   "-CS",  "SK",   NULL,   NULL    },  // if language is sk, change CS (pre-1993 Czechoslovakia) to SK (Slovakia)
-    {   NULL,   "-YU",  "CS",   NULL,   NULL    },  // then always change YU to CS (map old Yugoslavia code to new 2003-07 ISO code
-    												// for Serbia & Montenegro per RFC3066bis & ICU)								// <1.18>
-                                                    // Note: do this after fixing CS for cs/sk as above.
-    {   "sh",   "-HR",  "hr",   "-CS",  "sr"    },  // if language is old 'sh' (SerboCroatian), change it to 'hr' (Croatian) if we find
-                                                    // HR (Croatia) or to 'sr' (Serbian) if we find CS (Serbia & Montenegro, Yugoslavia).	// <1.18>
-                                                    // Note: Do this after changing YU to CS as above.
+    {   NULL,   "-CS",  "RS",   NULL,   NULL    },  // otherwise map CS (assume Serbia+Montenegro) to RS (Serbia)
+    {   NULL,   "-YU",  "RS",   NULL,   NULL    },  // also map old YU (assume Serbia+Montenegro) to RS (Serbia)
+    {   "sh",   "-HR",  "hr",   "-RS",  "sr"    },  // then if language is old 'sh' (SerboCroatian), change it to 'hr' (Croatian)
+                                                    // if we find HR (Croatia) or to 'sr' (Serbian) if we find RS (Serbia).
+                                                    // Note: Do this after changing YU/CS toRS as above.
     {   NULL,   NULL,   NULL,   NULL,   NULL    }   // terminator
 };
 
@@ -1509,72 +1511,7 @@ static void _AppendKeyValueString(char inLocaleString[], int locStringMaxLen, ch
 	}
 }
 
-__private_extern__ CFStringRef _CFLocaleCreateCanonicalLanguageIdentifierForCFBundle(CFAllocatorRef allocator, CFStringRef localeIdentifier) {
-    char            inLocaleString[kLocaleIdentifierCStringMax];
-    CFStringRef     outStringRef = NULL;
-    
-    if ( localeIdentifier && CFStringGetCString(localeIdentifier, inLocaleString,  sizeof(inLocaleString), kCFStringEncodingASCII) ) {
-        KeyStringToResultString     testEntry;
-        KeyStringToResultString *   foundEntry;
-        char                        keyValueString[sizeof(inLocaleString)];				// <1.10>
-        char						varKeyValueString[sizeof(inLocaleString)];			// <1.17>
-
-        _GetKeyValueString(inLocaleString, keyValueString);								// <1.10>
-        testEntry.result = NULL;
-        
-        // A. First check if input string matches an old-style string that has a replacement
-        // (do this before case normalization)
-        testEntry.key = inLocaleString;
-        foundEntry = (KeyStringToResultString *)bsearch( &testEntry, oldAppleLocaleToCanonical, kNumOldAppleLocaleToCanonical,
-                                                        sizeof(KeyStringToResultString), _CompareTestEntryToTableEntryKey );
-        if (foundEntry) {
-            // It does match, so replace old string with new
-            strlcpy(inLocaleString, foundEntry->result, sizeof(inLocaleString));
-             varKeyValueString[0] = 0;
-        } else {
-            // B. No match with an old-style string, use input string but update codes, normalize case, etc.
-            _UpdateFullLocaleString(inLocaleString, sizeof(inLocaleString), NULL, NULL, varKeyValueString);   // <1.10><1.17>
-        }
-        
-        // C. Now we have an up-to-date locale string, but we need to strip defaults and turn it into a language string
-        
-        // 1. Strip defaults in input string based on initial part of locale string
-        // (mainly to strip default script tag for a language)
-        testEntry.key = inLocaleString;
-        foundEntry = (KeyStringToResultString *)bsearch( &testEntry, localeStringPrefixToDefaults, kNumLocaleStringPrefixToDefaults,
-                                                        sizeof(KeyStringToResultString), _CompareTestEntryPrefixToTableEntryKey );
-        if (foundEntry) {
-            // The input string begins with a character sequence for which
-            // there are default substrings which should be stripped if present
-            _RemoveSubstringsIfPresent(inLocaleString, foundEntry->result);         
-        }
-        
-        // 2. If the string matches a locale string used by Apple as a language string, turn it into a language string
-        testEntry.key = inLocaleString;
-        foundEntry = (KeyStringToResultString *)bsearch( &testEntry, appleLocaleToLanguageStringForCFBundle, kNumAppleLocaleToLanguageStringForCFBundle,
-                                                        sizeof(KeyStringToResultString), _CompareTestEntryToTableEntryKey );
-        if (foundEntry) {
-            // it does match
-            strlcpy(inLocaleString, foundEntry->result, sizeof(inLocaleString));
-        } else {
-            // just delete the region tag and anything after
-            char *  inLocalePtr = inLocaleString;
-            while (*inLocalePtr != 0 && *inLocalePtr != '_') {
-                inLocalePtr++;
-            }
-            *inLocalePtr = 0;
-        }
-        
-        // D. Re-append any key-value strings, now canonical										// <1.10><1.17>
-		_AppendKeyValueString( inLocaleString, sizeof(inLocaleString), varKeyValueString );
-		_AppendKeyValueString( inLocaleString, sizeof(inLocaleString), keyValueString );
-        
-        // All done, return what we came up with.
-        outStringRef = CFStringCreateWithCString(allocator, inLocaleString, kCFStringEncodingASCII);
-    }
-
-    return outStringRef;
-}
+// __private_extern__ CFStringRef _CFLocaleCreateCanonicalLanguageIdentifierForCFBundle(CFAllocatorRef allocator, CFStringRef localeIdentifier) {}
 
 CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(CFAllocatorRef allocator, CFStringRef localeIdentifier) {
     char            inLocaleString[kLocaleIdentifierCStringMax];
@@ -1760,6 +1697,101 @@ CFStringRef CFLocaleCreateCanonicalLocaleIdentifierFromScriptManagerCodes(CFAllo
 }
 
 
+/*
+SPI:  CFLocaleGetLanguageRegionEncodingForLocaleIdentifier gets the appropriate language and region codes,
+ and the default legacy script code and encoding, for the specified locale (or language) string.
+ Returns false if CFLocale has no information about the given locale (in which case none of the by-reference return values are set);
+ otherwise may set *langCode and/or *regCode to -1 if there is no appropriate legacy value for the locale.
+ This is a replacement for the CFBundle SPI CFBundleGetLocalizationInfoForLocalization (which was intended to be temporary and transitional);
+ this function is more up-to-date in its handling of locale strings, and is in CFLocale where this functionality should belong. Compared
+ to CFBundleGetLocalizationInfoForLocalization, this function does not spcially interpret a NULL localeIdentifier to mean use the single most
+ preferred localization in the current context (this function returns NO for a NULL localeIdentifier); and in this function
+ langCode, regCode, and scriptCode are all SInt16* (not SInt32* like the equivalent parameters in CFBundleGetLocalizationInfoForLocalization).
+*/
+static int CompareLocaleToLegacyCodesEntries( const void *entry1, const void *entry2 );
+
+Boolean CFLocaleGetLanguageRegionEncodingForLocaleIdentifier(CFStringRef localeIdentifier, LangCode *langCode, RegionCode *regCode, ScriptCode *scriptCode, CFStringEncoding *stringEncoding) {
+	Boolean		returnValue = false;
+	CFStringRef	canonicalIdentifier = CFLocaleCreateCanonicalLocaleIdentifierFromString(NULL, localeIdentifier);
+	if (canonicalIdentifier) {
+    	char	localeCString[kLocaleIdentifierCStringMax];
+		if ( CFStringGetCString(canonicalIdentifier, localeCString,  sizeof(localeCString), kCFStringEncodingASCII) ) {
+			UErrorCode	icuStatus = U_ZERO_ERROR;
+			int32_t		languagelength;
+			char		searchString[ULOC_LANG_CAPACITY + ULOC_FULLNAME_CAPACITY];
+			
+			languagelength = uloc_getLanguage( localeCString, searchString, ULOC_LANG_CAPACITY, &icuStatus );
+			if ( U_SUCCESS(icuStatus) && languagelength > 0 ) {
+				// OK, here we have at least a language code, check for other components in order
+				LocaleToLegacyCodes			searchEntry = { (const char *)searchString, 0, 0, 0 };
+				const LocaleToLegacyCodes *	foundEntryPtr;
+				int32_t						componentLength;
+				char						componentString[ULOC_FULLNAME_CAPACITY];
+				
+				languagelength = strlen(searchString);	// in case it got truncated
+				icuStatus = U_ZERO_ERROR;
+				componentLength = uloc_getScript( localeCString, componentString, sizeof(componentString), &icuStatus );
+				if ( U_FAILURE(icuStatus) || componentLength == 0 ) {
+					icuStatus = U_ZERO_ERROR;
+					componentLength = uloc_getCountry( localeCString, componentString, sizeof(componentString), &icuStatus );
+					if ( U_FAILURE(icuStatus) || componentLength == 0 ) {
+						icuStatus = U_ZERO_ERROR;
+						componentLength = uloc_getVariant( localeCString, componentString, sizeof(componentString), &icuStatus );
+						if ( U_FAILURE(icuStatus) ) {
+							componentLength = 0;
+						}
+					}
+				}
+				
+				// Append whichever other component we first found
+				if (componentLength > 0) {
+					strlcat(searchString, "_", sizeof(searchString));
+					strlcat(searchString, componentString, sizeof(searchString));
+				}
+				
+				// Search
+				foundEntryPtr = (const LocaleToLegacyCodes *)bsearch( &searchEntry, localeToLegacyCodes, kNumLocaleToLegacyCodes, sizeof(LocaleToLegacyCodes), CompareLocaleToLegacyCodesEntries );
+				if (foundEntryPtr == NULL && (int32_t) strlen(searchString) > languagelength) {
+					// truncate to language al;one and try again
+					searchString[languagelength] = 0;
+					foundEntryPtr = (const LocaleToLegacyCodes *)bsearch( &searchEntry, localeToLegacyCodes, kNumLocaleToLegacyCodes, sizeof(LocaleToLegacyCodes), CompareLocaleToLegacyCodesEntries );
+				}
+
+				// If found a matching entry, return requested values
+				if (foundEntryPtr) {
+					returnValue = true;
+					if (langCode)		*langCode		= foundEntryPtr->langCode;
+					if (regCode)		*regCode		= foundEntryPtr->regCode;
+					if (stringEncoding)	*stringEncoding	= foundEntryPtr->encoding;
+					if (scriptCode) {
+						// map CFStringEncoding to ScriptCode
+						if (foundEntryPtr->encoding < 33/*kCFStringEncodingMacSymbol*/) {
+							*scriptCode	= foundEntryPtr->encoding;
+						} else {
+							switch (foundEntryPtr->encoding) {
+								case 0x8C/*kCFStringEncodingMacFarsi*/:		*scriptCode	= 4/*smArabic*/; break;
+								case 0x98/*kCFStringEncodingMacUkrainian*/:	*scriptCode	= 7/*smCyrillic*/; break;
+								case 0xEC/*kCFStringEncodingMacInuit*/:		*scriptCode	= 28/*smEthiopic*/; break;
+								case 0xFC/*kCFStringEncodingMacVT100*/:		*scriptCode	= 32/*smUninterp*/; break;
+								default:									*scriptCode	= 0/*smRoman*/; break;
+							}
+						}
+					}
+				}
+			}
+		}
+		CFRelease(canonicalIdentifier);
+	}
+	return returnValue;
+}
+
+static int CompareLocaleToLegacyCodesEntries( const void *entry1, const void *entry2 ) {
+	const char *	localeString1 = ((const LocaleToLegacyCodes *)entry1)->locale;
+	const char *	localeString2 = ((const LocaleToLegacyCodes *)entry2)->locale;
+	return strcmp(localeString1, localeString2);
+}
+
+
 CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allocator, CFStringRef localeID) {
     char cLocaleID[ULOC_FULLNAME_CAPACITY+ULOC_KEYWORD_AND_VALUES_CAPACITY];
     char buffer[ULOC_FULLNAME_CAPACITY+ULOC_KEYWORD_AND_VALUES_CAPACITY];
@@ -1778,7 +1810,7 @@ CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allo
     if (U_SUCCESS(icuStatus) && length > 0)
     {
         CFStringRef string = CFStringCreateWithBytes(allocator, (UInt8 *)buffer, length, kCFStringEncodingASCII, true);
-        CFDictionaryAddValue(working, kCFLocaleLanguageCode, string);
+        CFDictionaryAddValue(working, kCFLocaleLanguageCodeKey, string);
         CFRelease(string);
     }
     icuStatus = U_ZERO_ERROR;
@@ -1787,7 +1819,7 @@ CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allo
     if (U_SUCCESS(icuStatus) && length > 0)
     {
         CFStringRef string = CFStringCreateWithBytes(allocator, (UInt8 *)buffer, length, kCFStringEncodingASCII, true);
-        CFDictionaryAddValue(working, kCFLocaleScriptCode, string);
+        CFDictionaryAddValue(working, kCFLocaleScriptCodeKey, string);
         CFRelease(string);
     }
     icuStatus = U_ZERO_ERROR;
@@ -1796,7 +1828,7 @@ CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allo
     if (U_SUCCESS(icuStatus) && length > 0)
     {
         CFStringRef string = CFStringCreateWithBytes(allocator, (UInt8 *)buffer, length, kCFStringEncodingASCII, true);
-        CFDictionaryAddValue(working, kCFLocaleCountryCode, string);
+        CFDictionaryAddValue(working, kCFLocaleCountryCodeKey, string);
         CFRelease(string);
     }
     icuStatus = U_ZERO_ERROR;
@@ -1805,7 +1837,7 @@ CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allo
     if (U_SUCCESS(icuStatus) && length > 0)
     {
         CFStringRef string = CFStringCreateWithBytes(allocator, (UInt8 *)buffer, length, kCFStringEncodingASCII, true);
-        CFDictionaryAddValue(working, kCFLocaleVariantCode, string);
+        CFDictionaryAddValue(working, kCFLocaleVariantCodeKey, string);
         CFRelease(string);
     }
     icuStatus = U_ZERO_ERROR;
@@ -1840,58 +1872,62 @@ CFDictionaryRef CFLocaleCreateComponentsFromLocaleIdentifier(CFAllocatorRef allo
     return result;
 }
 
-typedef struct __AppendContext
-{
-    char                separator;
-    CFMutableStringRef  working;
-} __AppendContext;
-
-static void __AppendKeywords(const void *k, const void *v, void *c)
-{
-    __AppendContext *context = (__AppendContext *) c;
-    CFStringRef key = (CFStringRef) k;
-    CFStringRef value = (CFStringRef) v;
-    if (CFEqual(key, kCFLocaleLanguageCode) || CFEqual(key, kCFLocaleScriptCode) || CFEqual(key, kCFLocaleCountryCode) || CFEqual(key, kCFLocaleVariantCode))
-        return;
-    CFStringAppendFormat(context->working, NULL, CFSTR("%c%@%c%@"), context->separator, key, ULOC_KEYWORD_ASSIGN, value);
-    context->separator = ULOC_KEYWORD_ITEM_SEPARATOR;
+static char *__CStringFromString(CFStringRef str) {
+    if (!str) return NULL;
+    CFRange rg = CFRangeMake(0, CFStringGetLength(str));
+    CFIndex neededLength = 0;
+    CFStringGetBytes(str, rg, kCFStringEncodingASCII, (UInt8)'?', false, NULL, 0, &neededLength);
+    char *buf = (char *)malloc(neededLength + 1);
+    CFStringGetBytes(str, rg, kCFStringEncodingASCII, (UInt8)'?', false, (uint8_t *)buf, neededLength, &neededLength);
+    buf[neededLength] = '\0';
+    return buf;
 }
 
 CFStringRef CFLocaleCreateLocaleIdentifierFromComponents(CFAllocatorRef allocator, CFDictionaryRef dictionary) {
-    CFMutableStringRef working = CFStringCreateMutable(allocator, 0);
-    CFStringRef value = NULL;
-    bool country = false;
-    __AppendContext context = {ULOC_KEYWORD_SEPARATOR, working};
-    
-    if ((value = (CFStringRef) CFDictionaryGetValue(dictionary, kCFLocaleLanguageCode)))
-    {
-        CFStringAppend(working, value);
+    CFIndex cnt = CFDictionaryGetCount(dictionary);
+    STACK_BUFFER_DECL(CFStringRef, values, cnt);
+    STACK_BUFFER_DECL(CFStringRef, keys, cnt);
+    CFDictionaryGetKeysAndValues(dictionary, (const void **)keys, (const void **)values);
+
+    char *language = NULL, *script = NULL, *country = NULL, *variant = NULL;
+    for (CFIndex idx = 0; idx < cnt; idx++) {
+	if (CFEqual(kCFLocaleLanguageCodeKey, keys[idx])) {
+	    language = __CStringFromString(values[idx]);
+	    keys[idx] = NULL;
+	} else if (CFEqual(kCFLocaleScriptCodeKey, keys[idx])) {
+	    script = __CStringFromString(values[idx]);
+	    keys[idx] = NULL;
+	} else if (CFEqual(kCFLocaleCountryCodeKey, keys[idx])) {
+	    country = __CStringFromString(values[idx]);
+	    keys[idx] = NULL;
+	} else if (CFEqual(kCFLocaleVariantCodeKey, keys[idx])) {
+	    variant = __CStringFromString(values[idx]);
+	    keys[idx] = NULL;
+	}
     }
 
-    if ((value = (CFStringRef) CFDictionaryGetValue(dictionary, kCFLocaleScriptCode)))
-    {
-        CFStringAppendFormat(working, NULL, CFSTR("_%@"), value);
+    char *buf1 = NULL;	// (|L)(|_S)(|_C|_C_V|__V)
+    asprintf(&buf1, "%s%s%s%s%s%s%s", language ? language : "", script ? "_" : "", script ? script : "", (country || variant ? "_" : ""), country ? country : "", variant ? "_" : "", variant ? variant : "");
+
+    char cLocaleID[2 * ULOC_FULLNAME_CAPACITY + 2 * ULOC_KEYWORD_AND_VALUES_CAPACITY];
+    strlcpy(cLocaleID, buf1, sizeof(cLocaleID));
+    free(language);
+    free(script);
+    free(country);
+    free(variant);
+    free(buf1);
+
+    for (CFIndex idx = 0; idx < cnt; idx++) {
+	if (keys[idx]) {
+	    char *key = __CStringFromString(keys[idx]);
+	    char *value = __CStringFromString(values[idx]);
+	    UErrorCode status = U_ZERO_ERROR;
+	    uloc_setKeywordValue(key, value, cLocaleID, sizeof(cLocaleID), &status);
+	    free(key);
+	    free(value);
+	}
     }
-    
-    if ((value = (CFStringRef) CFDictionaryGetValue(dictionary, kCFLocaleCountryCode)))
-    {
-        CFStringAppendFormat(working, NULL, CFSTR("_%@"), value);
-        country = true;
-    }
-    
-    if ((value = (CFStringRef) CFDictionaryGetValue(dictionary, kCFLocaleVariantCode)))
-    {
-        if (!country)
-            CFStringAppend(working, CFSTR("_"));
-        CFStringAppendFormat(working, NULL, CFSTR("_%@"), value);
-    }
-    
-    // Now iterate through any remaining entries and append as keywords
-    CFDictionaryApplyFunction(dictionary, __AppendKeywords, &context);
-    
-    // Convert to immutable string and return
-    CFStringRef result = (CFStringRef)CFStringCreateCopy(allocator, working);
-    CFRelease(working);
-    return result;
+
+    return CFStringCreateWithCString(allocator, cLocaleID, kCFStringEncodingASCII);
 }
 

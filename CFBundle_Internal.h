@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFBundle_Internal.h
-	Copyright (c) 1999-2007, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_INTERNAL__)
@@ -40,9 +40,9 @@ CF_EXTERN_C_BEGIN
 #define __kCFLogBundle       3
 #define __kCFLogPlugIn       3
 
-#if DEPLOYMENT_TARGET_MACOSX || 0
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #define PLATFORM_PATH_STYLE kCFURLPOSIXPathStyle
-#elif 0 || 0
+#elif DEPLOYMENT_TARGET_WINDOWS
 #define PLATFORM_PATH_STYLE kCFURLWindowsPathStyle
 #else
 #error Unknown or unspecified DEPLOYMENT_TARGET
@@ -112,14 +112,15 @@ extern void _CFBundleUnloadScheduledBundles(void);
 #if defined(BINARY_SUPPORT_DYLD)
 // DYLD API
 extern __CFPBinaryType _CFBundleGrokBinaryType(CFURLRef executableURL);
+extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void);
+extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint);
+#if !defined(BINARY_SUPPORT_DLFCN)
 extern Boolean _CFBundleDYLDCheckLoaded(CFBundleRef bundle);
 extern Boolean _CFBundleDYLDLoadBundle(CFBundleRef bundle, Boolean forceGlobal, CFErrorRef *error);
 extern Boolean _CFBundleDYLDLoadFramework(CFBundleRef bundle, CFErrorRef *error);
 extern void _CFBundleDYLDUnloadBundle(CFBundleRef bundle);
 extern void *_CFBundleDYLDGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName);
-
-extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void);
-extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint);
+#endif /* !BINARY_SUPPORT_DLFCN */
 #endif /* BINARY_SUPPORT_DYLD */
 
 #if defined(BINARY_SUPPORT_DLFCN)
@@ -221,7 +222,7 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory);
 
 #define _CFBundleLocalizedResourceForkFileName CFSTR("Localized")
 
-#if 0 || 0
+#if DEPLOYMENT_TARGET_WINDOWS
 #define _CFBundleWindowsResourceDirectoryExtension CFSTR("resources")
 #endif
 

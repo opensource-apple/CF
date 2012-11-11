@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,11 +21,11 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFWindowsMessageQueue.c
-	Copyright 1999-2002, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
-#if defined(__WIN32__)
+#if DEPLOYMENT_TARGET_WINDOWS
 
 #include "CFWindowsMessageQueue.h"
 #include "CFInternal.h"
@@ -91,7 +91,7 @@ static CFStringRef __CFWindowsMessageQueueCopyDescription(CFTypeRef cf) {
 #warning CF: and you cannot call description if the object is locked;
 #warning CF: probably should not lock description, and call it unsafe
 */
-    CFStringAppendFormat(result, NULL, CFSTR("<CFWindowsMessageQueue %p [%p]>{locked = %s, valid = %s, mask = 0x%x,\n    run loops = %@}"), cf, CFGetAllocator(wmq), (wmq->_lock.LockCount ? "Yes" : "No"), (__CFWindowsMessageQueueIsValid(wmq) ? "Yes" : "No"), (UInt32)wmq->_mask, wmq->_runLoops);
+    CFStringAppendFormat(result, NULL, CFSTR("<CFWindowsMessageQueue %p [%p]>{locked = %s, valid = %s, mask = 0x%x,\n    run loops = %@}"), cf, CFGetAllocator(wmq), "unknown", (__CFWindowsMessageQueueIsValid(wmq) ? "Yes" : "No"), (UInt32)wmq->_mask, wmq->_runLoops);
     __CFWindowsMessageQueueUnlock(wmq);
     return result;
 }
@@ -106,7 +106,6 @@ static void __CFWindowsMessageQueueDeallocate(CFTypeRef cf) {
     CFAllocatorRef allocator = CFGetAllocator(wmq);
     CFAllocatorDeallocate(allocator, wmq);
     CFRelease(allocator);
-    DeleteCriticalSection(&(wmq->_lock));
 }
 
 static CFTypeID __kCFWindowsMessageQueueTypeID = _kCFRuntimeNotATypeID;
@@ -131,7 +130,7 @@ CFTypeID CFWindowsMessageQueueGetTypeID(void) {
     return __kCFWindowsMessageQueueTypeID;
 }
 
-CFWindowsMessageQueueRef CFWindowsMessageQueueCreate(CFAllocatorRef allocator, DWORD mask) {
+CFWindowsMessageQueueRef CFWindowsMessageQueueCreate(CFAllocatorRef allocator, uint32_t mask) {
     CFWindowsMessageQueueRef memory;
     UInt32 size = sizeof(struct __CFWindowsMessageQueue) - sizeof(CFRuntimeBase);
     memory = (CFWindowsMessageQueueRef)_CFRuntimeCreateInstance(allocator, __kCFWindowsMessageQueueTypeID, size, NULL);
@@ -141,7 +140,7 @@ CFWindowsMessageQueueRef CFWindowsMessageQueueCreate(CFAllocatorRef allocator, D
     __CFWindowsMessageQueueSetValid(memory);
 
     CF_SPINLOCK_INIT_FOR_STRUCTS(memory->_lock);
-    memory->_mask = mask;   
+    memory->_mask = (DWORD)mask;   
     memory->_source = NULL;
     memory->_runLoops = CFArrayCreateMutable(allocator, 0, NULL);
     return memory;
@@ -174,7 +173,7 @@ Boolean CFWindowsMessageQueueIsValid(CFWindowsMessageQueueRef wmq) {
     return __CFWindowsMessageQueueIsValid(wmq);
 }
 
-DWORD CFWindowsMessageQueueGetMask(CFWindowsMessageQueueRef wmq) {
+uint32_t CFWindowsMessageQueueGetMask(CFWindowsMessageQueueRef wmq) {
     __CFGenericValidateType(wmq, __kCFWindowsMessageQueueTypeID);
     return wmq->_mask;
 }
@@ -195,15 +194,9 @@ static void __CFWindowsMessageQueueSchedule(void *info, CFRunLoopRef rl, CFStrin
 static void __CFWindowsMessageQueueCancel(void *info, CFRunLoopRef rl, CFStringRef mode) {
     CFWindowsMessageQueueRef wmq = (CFWindowsMessageQueueRef)info;
     __CFWindowsMessageQueueLock(wmq);
-#if defined (__WIN32__)
 //#warning CF: should fix up run loop modes mask here, if not done
 //#warning CF: previously by the invalidation, where it should also
 //#warning CF: be done
-#else
-#warning CF: should fix up run loop modes mask here, if not done
-#warning CF: previously by the invalidation, where it should also
-#warning CF: be done
-#endif //__WIN32__
     if (NULL != wmq->_runLoops) {
 	SInt32 idx = CFArrayGetFirstIndexOfValue(wmq->_runLoops, CFRangeMake(0, CFArrayGetCount(wmq->_runLoops)), rl);
 	if (0 <= idx) CFArrayRemoveValueAtIndex(wmq->_runLoops, idx);
@@ -213,17 +206,14 @@ static void __CFWindowsMessageQueueCancel(void *info, CFRunLoopRef rl, CFStringR
 
 static void __CFWindowsMessageQueuePerform(void *info) {
     CFWindowsMessageQueueRef wmq = (CFWindowsMessageQueueRef)info;
-    MSG msg;
     __CFWindowsMessageQueueLock(wmq);
     if (!__CFWindowsMessageQueueIsValid(wmq)) {
 	__CFWindowsMessageQueueUnlock(wmq);
 	return;
     }
     __CFWindowsMessageQueueUnlock(wmq);
-    if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_NOYIELD)) {
-	TranslateMessage(&msg);
-	DispatchMessage(&msg);
-    }
+    extern void do_WIN32_MSG();
+    do_WIN32_MSG();
 }
 
 CFRunLoopSourceRef CFWindowsMessageQueueCreateRunLoopSource(CFAllocatorRef allocator, CFWindowsMessageQueueRef wmq, CFIndex order) {

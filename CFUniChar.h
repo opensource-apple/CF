@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFUniChar.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFUNICHAR__)
@@ -121,9 +121,9 @@ enum {
 };
 
 enum {
-    kCFUniCharCaseMapFinalSigma = (1),
-    kCFUniCharCaseMapAfter_i = (1 << 1),
-    kCFUniCharCaseMapMoreAbove = (1 << 2)
+    kCFUniCharCaseMapFinalSigma = (1UL << 0),
+    kCFUniCharCaseMapAfter_i = (1UL << 1),
+    kCFUniCharCaseMapMoreAbove = (1UL << 2)
 };
 
 CF_EXPORT CFIndex CFUniCharMapCaseTo(UTF32Char theChar, UTF16Char *convertedChar, CFIndex maxLength, uint32_t ctype, uint32_t flags, const uint8_t *langCode);

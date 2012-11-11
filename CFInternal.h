@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFInternal.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 /*
@@ -35,6 +35,8 @@
 #if !defined(__COREFOUNDATION_CFINTERNAL__)
 #define __COREFOUNDATION_CFINTERNAL__ 1
 
+CF_EXTERN_C_BEGIN
+
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFURL.h>
 #include <CoreFoundation/CFString.h>
@@ -42,24 +44,25 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFStorage.h>
-#include "CFLogUtilities.h"
-#include "CFRuntime.h"
-#if DEPLOYMENT_TARGET_MACOSX
+#include <CoreFoundation/CFLogUtilities.h>
+#include <CoreFoundation/CFRuntime.h>
+#include <limits.h>
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <xlocale.h>
+#include <libkern/OSAtomic.h>
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <unistd.h>
 #endif
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
 #include <sys/time.h>
 #include <pthread.h>
+#include <signal.h>
 #endif
-#include <limits.h>
-#include "auto_stubs.h"
-#if !defined (__WIN32__)
+#if DEPLOYMENT_TARGET_WINDOWS
 #include <pthread.h>
-#endif //__WIN32__
-#ifndef __WIN32__
-#include <libkern/OSAtomic.h>
-#endif //__WIN32__
+#endif
+
 
 #if defined(__BIG_ENDIAN__)
 #define __CF_BIG_ENDIAN__ 1
@@ -72,7 +75,7 @@
 #endif
 
 
-#include "ForFoundationOnly.h"
+#include <CoreFoundation/ForFoundationOnly.h>
 
 CF_EXPORT const char *_CFProcessName(void);
 CF_EXPORT CFStringRef _CFProcessNameString(void);
@@ -89,16 +92,19 @@ CF_EXPORT CFStringRef _CFStringCreateHostName(void);
 
 CF_EXPORT void _CFMachPortInstallNotifyPort(CFRunLoopRef rl, CFStringRef mode);
 
-#if defined(__ppc__) || defined(__ppc64__)
-    #define HALT asm __volatile__("trap")
+#if defined(__ppc__)
+    #define HALT do {asm __volatile__("trap"); kill(getpid(), 9); } while (0)
 #elif defined(__i386__) || defined(__x86_64__)
     #if defined(__GNUC__)
-        #define HALT asm __volatile__("int3")
+        #define HALT do {asm __volatile__("int3"); kill(getpid(), 9); } while (0)
     #elif defined(_MSC_VER)
-        #define HALT __asm int 3;
+        #define HALT do { DebugBreak(); abort(); } while (0)
     #else
         #error Compiler not supported
     #endif
+#endif
+#if defined(__arm__)
+    #define HALT do {asm __volatile__("bkpt 0xCF"); kill(getpid(), 9); } while (0)
 #endif
 
 #if defined(DEBUG)
@@ -150,35 +156,62 @@ extern void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char *fu
 #define __CFBitSet(V, N)  ((V) |= (1UL << (N)))
 #define __CFBitClear(V, N)  ((V) &= ~(1UL << (N)))
 
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+// The fixed range 50 - 59 of pthread_specific keys is reserved
+// for CoreFoundation; see <System/pthread_machdep.h>.
+// 60 - 69 are reserved for Foundation; Foundation uses 64 - 69
+// and reserves 60-63 for CoreFoundation.
+// Foundation knows about the value of __CFTSDKeyAutoreleaseData1
+enum {
+	__CFTSDKeyUnused50 = 50,
+	__CFTSDKeyAllocator = 51,
+	__CFTSDKeyExceptionData = 52,
+	__CFTSDKeyRunLoopCntr = 53,
+	__CFTSDKeyRunLoop = 54,
+	__CFTSDKeyICUConverter = 55,
+	__CFTSDKeyCollatorLocale = 56,
+	__CFTSDKeyCollatorUCollator = 57,
+	__CFTSDKeyIsInNSCache = 58,
+	__CFTSDKeyIsInCFLog = 59,
+	__CFTSDKeyIsInGCDMainQ = 60,
+	__CFTSDKeyUnused61 = 61,
+	__CFTSDKeyAutoreleaseData1 = 62,
+	__CFTSDKeyAutoreleaseData2 = 63,  // autorelease pool stuff must be higher than run loop constants
+};
+
+extern int pthread_key_init_np(int, void (*)(void *));
+#endif
+
+#if DEPLOYMENT_TARGET_WINDOWS
 typedef struct ___CFThreadSpecificData {
     void *_unused1;
     void *_allocator;
+    void *_runLoop;
+    int _runLoop_pid;
+    HHOOK _messageHook;
+    void *_icuThreadData;
+
 // If you add things to this struct, add cleanup to __CFFinalizeThreadData()
 } __CFThreadSpecificData;
 
 extern __CFThreadSpecificData *__CFGetThreadSpecificData(void);
 __private_extern__ void __CFFinalizeThreadData(void *arg);
+extern DWORD __CFTSDKey;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-extern pthread_key_t __CFTSDKey;
+// implemented in windowsSyncHelper.c
+__private_extern__ __CFThreadSpecificData *__CFGetThreadSpecificData_inline(void);
+
 #endif
-
-//extern void *pthread_getspecific(pthread_key_t key);
-
-CF_INLINE __CFThreadSpecificData *__CFGetThreadSpecificData_inline(void) {
-#if DEPLOYMENT_TARGET_MACOSX|| DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    __CFThreadSpecificData *data = pthread_getspecific(__CFTSDKey);
-    return data ? data : __CFGetThreadSpecificData();
-#elif defined(__WIN32__)
-    __CFThreadSpecificData *data = (__CFThreadSpecificData *)TlsGetValue(__CFTSDKey);
-    return data ? data : __CFGetThreadSpecificData();
-#endif
-}
 
 #define __kCFAllocatorTypeID_CONST	2
 
 CF_INLINE CFAllocatorRef __CFGetDefaultAllocator(void) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    CFAllocatorRef allocator = pthread_getspecific(__CFTSDKeyAllocator);
+#else
     CFAllocatorRef allocator = (CFAllocatorRef)__CFGetThreadSpecificData_inline()->_allocator;
+#endif
     if (NULL == allocator) {
 	allocator = kCFAllocatorSystemDefault;
     }
@@ -239,6 +272,19 @@ CF_INLINE auto_memory_type_t CF_GET_GC_MEMORY_TYPE(CFOptionFlags flags) {
     return type;
 }
 
+CF_INLINE void __CFAssignWithWriteBarrier(void **location, void *value) {
+    if (kCFUseCollectableAllocator) {
+        objc_assign_strongCast((id)value, (id *)location);
+    } else {
+        *location = value;
+    }
+}
+
+// Zero-retain count CFAllocator functions, i.e. memory that will be collected, no dealloc necessary
+CF_EXPORT void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint);
+CF_EXPORT void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void *ptr, CFIndex newsize, CFOptionFlags hint);
+CF_EXPORT void _CFAllocatorDeallocateGC(CFAllocatorRef allocator, void *ptr);
+
 CF_EXPORT CFAllocatorRef _CFTemporaryMemoryAllocator(void);
 
 extern SInt64 __CFTimeIntervalToTSR(CFTimeInterval ti);
@@ -252,11 +298,20 @@ extern Boolean __CFStringScanInteger(CFStringInlineBuffer *buf, CFTypeRef locale
 extern Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFTypeRef locale, SInt32 *indexPtr, double *resultPtr); 
 extern Boolean __CFStringScanHex(CFStringInlineBuffer *buf, SInt32 *indexPtr, unsigned *result);
 
+extern const char *__CFgetenv(const char *n);
 
-#define STACK_BUFFER_DECL(T, N, C) T N[C];
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#define STACK_BUFFER_DECL(T, N, C) T N[C]
+#elif DEPLOYMENT_TARGET_WINDOWS
+#define STACK_BUFFER_DECL(T, N, C) T *N = (T *)_alloca((C) * sizeof(T))
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
+
 
 #ifdef __CONSTANT_CFSTRINGS__
 #define CONST_STRING_DECL(S, V) const CFStringRef S = (const CFStringRef)__builtin___CFStringMakeConstantString(V);
+#define PE_CONST_STRING_DECL(S, V) __private_extern__ const CFStringRef S = (const CFStringRef)__builtin___CFStringMakeConstantString(V);
 #else
 
 struct CF_CONST_STRING {
@@ -265,48 +320,37 @@ struct CF_CONST_STRING {
     uint32_t _length;
 };
 
-extern int __CFConstantStringClassReference[];
+CF_EXPORT int __CFConstantStringClassReference[];
 
 /* CFNetwork also has a copy of the CONST_STRING_DECL macro (for use on platforms without constant string support in cc); please warn cfnetwork-core@group.apple.com of any necessary changes to this macro. -- REW, 1/28/2002 */
-#if 0
-#define ___WindowsConstantStringClassReference &__CFConstantStringClassReference
-#else
-#define ___WindowsConstantStringClassReference NULL
-#endif
 
-#if __CF_BIG_ENDIAN__
+#if __CF_BIG_ENDIAN__ && (DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
 #define CONST_STRING_DECL(S, V)			\
 static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, {0x0000, 0x07c8}}, V, sizeof(V) - 1}; \
 const CFStringRef S = (CFStringRef) & __ ## S ## __;
-#elif !defined (__WIN32__)
+#define PE_CONST_STRING_DECL(S, V)			\
+static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, {0x0000, 0x07c8}}, V, sizeof(V) - 1}; \
+__private_extern__ const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#elif __CF_LITTLE_ENDIAN__ && (DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
 #define CONST_STRING_DECL(S, V)			\
 static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, {0x07c8, 0x0000}}, V, sizeof(V) - 1}; \
 const CFStringRef S = (CFStringRef) & __ ## S ## __;
-#elif 0
+#define PE_CONST_STRING_DECL(S, V)			\
+static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, {0x07c8, 0x0000}}, V, sizeof(V) - 1}; \
+__private_extern__ const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#elif DEPLOYMENT_TARGET_WINDOWS
 #define CONST_STRING_DECL(S, V)			\
-static struct CF_CONST_STRING __ ## S ## __ = {{___WindowsConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}},(uint8_t *) V, sizeof(V) - 1}; \
+static struct CF_CONST_STRING __ ## S ## __ = {{(uintptr_t)&__CFConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)(V), sizeof(V) - 1}; \
 const CFStringRef S = (CFStringRef) & __ ## S ## __;
-
-#define CONST_STRING_DECL_EXPORT(S, V)			\
-struct CF_CONST_STRING __ ## S ## __ = {{___WindowsConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)V, sizeof(V) - 1}; \
-CF_EXPORT const CFStringRef S = (CFStringRef) & __ ## S ## __;
-
-#else
-#define CONST_STRING_DECL(S, V)			\
-static struct CF_CONST_STRING __ ## S ## __ = {{NULL, {0xc8, 0x07, 0x00, 0x00}},(uint8_t *) V, sizeof(V) - 1}; \
-const CFStringRef S = (CFStringRef) & __ ## S ## __;
-
-#define CONST_STRING_DECL_EXPORT(S, V)			\
-struct CF_CONST_STRING __ ## S ## __ = {{NULL, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)V, sizeof(V) - 1}; \
-CF_EXPORT const CFStringRef S = (CFStringRef) & __ ## S ## __;
-
-#endif // __WIN32__
+#define PE_CONST_STRING_DECL(S, V)			\
+static struct CF_CONST_STRING __ ## S ## __ = {{(uintptr_t)&__CFConstantStringClassReference, {0xc8, 0x07, 0x00, 0x00}}, (uint8_t *)(V), sizeof(V) - 1}; \
+__private_extern__ const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#endif
 #endif // __BIG_ENDIAN__
 
-#undef ___WindowsConstantStringClassReference
 
 /* Buffer size for file pathname */
-#if 0 || 0
+#if DEPLOYMENT_TARGET_WINDOWS
     #define CFMaxPathSize ((CFIndex)262)
     #define CFMaxPathLength ((CFIndex)260)
 #else
@@ -314,10 +358,15 @@ CF_EXPORT const CFStringRef S = (CFStringRef) & __ ## S ## __;
     #define CFMaxPathLength ((CFIndex)1024)
 #endif
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+extern bool __CFOASafe;
+extern void __CFSetLastAllocationEventName(void *ptr, const char *classname);
+#else
 #define __CFOASafe 0
 #define __CFSetLastAllocationEventName(a, b) ((void) 0)
+#endif
 
-CF_EXPORT CFStringRef _CFCreateLimitedUniqueString(void);
+
 
 /* Comparators are passed the address of the values; this is somewhat different than CFComparatorFunction is used in public API usually. */
 CF_EXPORT CFIndex	CFBSearch(const void *element, CFIndex elementSize, const void *list, CFIndex count, CFComparatorFunction comparator, void *context);
@@ -332,41 +381,55 @@ extern const void *__CFStringCollectionCopy(CFAllocatorRef allocator, const void
 extern const void *__CFTypeCollectionRetain(CFAllocatorRef allocator, const void *ptr);
 extern void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *ptr);
 
+extern CFTypeRef CFMakeUncollectable(CFTypeRef cf);
 
-#if DEPLOYMENT_TARGET_MACOSX
+__private_extern__ void _CFRaiseMemoryException(CFStringRef reason);
+
+__private_extern__ Boolean __CFProphylacticAutofsAccess;
+
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 
 typedef OSSpinLock CFSpinLock_t;
 
 #define CFSpinLockInit OS_SPINLOCK_INIT
 #define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
 
-CF_INLINE void __CFSpinLock(CFSpinLock_t *lockp) {
-    OSSpinLockLock(lockp);
-}
+#define __CFSpinLock(LP) ({ \
+    OSSpinLock *__lockp__ = (LP); \
+    OSSpinLock __lockv__ = *__lockp__; \
+    if (0 != __lockv__ && ~0 != __lockv__ && (uintptr_t)__lockp__ != (uintptr_t)__lockv__) { \
+        CFLog(3, CFSTR("In '%s', file %s, line %d, during lock, spin lock %p has value 0x%x, which is neither locked nor unlocked.  The memory has been smashed."), __PRETTY_FUNCTION__, __FILE__, __LINE__, __lockp__, __lockv__); \
+        /* HALT; */ \
+    } \
+    OSSpinLockLock(__lockp__); })
 
-CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lockp) {
-    OSSpinLockUnlock(lockp);
-}
+#define __CFSpinUnlock(LP) ({ \
+    OSSpinLock *__lockp__ = (LP); \
+    OSSpinLock __lockv__ = *__lockp__; \
+    if (~0 != __lockv__ && (uintptr_t)__lockp__ != (uintptr_t)__lockv__) { \
+        CFLog(3, CFSTR("In '%s', file %s, line %d, during unlock, spin lock %p has value 0x%x, which is not locked.  The memory has been smashed or the lock is being unlocked when not locked."), __PRETTY_FUNCTION__, __FILE__, __LINE__, __lockp__, __lockv__); \
+        /* HALT; */ \
+    } \
+    OSSpinLockUnlock(__lockp__); })
 
-#elif defined(__WIN32__)
+#elif DEPLOYMENT_TARGET_WINDOWS
 
-typedef CRITICAL_SECTION CFSpinLock_t;
+typedef int32_t CFSpinLock_t;
+#define CFSpinLockInit 0
+#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
 
-#define CFSpinLockInit {0}
-
-// For some reason, the {0} initializer does not work when the spinlock is a member of a structure; hence this macro
-#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) InitializeCriticalSection(&X)
-extern CFSpinLock_t *theLock;
-CF_INLINE void __CFSpinLock(CFSpinLock_t *slock) {
-    if (NULL == slock->DebugInfo) {
-        InitializeCriticalSection(slock);
+CF_INLINE void __CFSpinLock(volatile CFSpinLock_t *lock) {
+    while (InterlockedCompareExchange((LONG volatile *)lock, ~0, 0) != 0) {
+	Sleep(0);
     }
-    EnterCriticalSection(slock);
 }
 
-CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lock) {
-    LeaveCriticalSection(lock);
+CF_INLINE void __CFSpinUnlock(volatile CFSpinLock_t *lock) {
+    MemoryBarrier();
+    *lock = 0;
 }
+
 
 #else
 
@@ -376,17 +439,31 @@ CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lock) {
 
 #endif
 
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+extern uint8_t __CF120293;
+extern uint8_t __CF120290;
+extern void __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__(void);
+#define CHECK_FOR_FORK() do { __CF120290 = true; if (__CF120293) __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__(); } while (0)
+#define CHECK_FOR_FORK_RET(...) do { CHECK_FOR_FORK(); if (__CF120293) return __VA_ARGS__; } while (0)
+#define HAS_FORKED() (__CF120293)
+#endif
+
 #if !defined(CHECK_FOR_FORK)
 #define CHECK_FOR_FORK() do { } while (0)
+#endif
+
+#if !defined(CHECK_FOR_FORK_RET)
+#define CHECK_FOR_FORK_RET(...) do { } while (0)
 #endif
 
 #if !defined(HAS_FORKED)
 #define HAS_FORKED() 0
 #endif
 
-#if defined(__svr4__) || defined(__hpux__) || defined(__WIN32__)
+#if DEPLOYMENT_TARGET_WINDOWS
 #include <errno.h>
-#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
 #include <sys/errno.h>
 #endif
 
@@ -404,6 +481,9 @@ CF_EXPORT CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType);
 /* These functions all act on a c-strings which must be in the file system encoding. */
     
 CF_EXPORT Boolean _CFCreateDirectory(const char *path);
+#if DEPLOYMENT_TARGET_WINDOWS
+CF_EXPORT Boolean _CFCreateDirectoryWide(const wchar_t *path);
+#endif
 CF_EXPORT Boolean _CFRemoveDirectory(const char *path);
 CF_EXPORT Boolean _CFDeleteFile(const char *path);
 
@@ -412,7 +492,7 @@ CF_EXPORT Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void 
     /* maxLength of zero means the whole file.  Otherwise it sets a limit on the number of bytes read. */
 
 CF_EXPORT Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, CFIndex length);
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 CF_EXPORT Boolean _CFWriteBytesToFileWithAtomicity(CFURLRef url, const void *bytes, unsigned int length, SInt32 mode, Boolean atomic);
 #endif
 
@@ -441,6 +521,34 @@ CF_EXPORT CFIndex _CFLengthAfterDeletingLastPathComponent(UniChar *unichars, CFI
 CF_EXPORT CFIndex _CFStartOfPathExtension(UniChar *unichars, CFIndex length);
 CF_EXPORT CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex length);
 
+#define __CFMaxRuntimeTypes	65535
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS_SYNC
+
+#include <objc/runtime.h>
+
+extern int32_t __CFRuntimeClassTableSize;
+
+extern uintptr_t *__CFRuntimeObjCClassTable;
+CF_INLINE uintptr_t __CFISAForTypeID(CFTypeID typeID) {
+    return (typeID < __CFRuntimeClassTableSize) ? __CFRuntimeObjCClassTable[typeID] : 0;
+}
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+extern id objc_msgSend(id, SEL, ...);
+#elif DEPLOYMENT_TARGET_WINDOWS && defined(__cplusplus)
+extern "C" __declspec(dllimport) id objc_msgSend(id, SEL, ...);
+#elif DEPLOYMENT_TARGET_WINDOWS
+extern __declspec(dllimport) id objc_msgSend(id, SEL, ...);
+#endif
+
+extern void * (*__CFSendObjCMsg)(const void *, SEL, ...);
+
+CF_INLINE Boolean CF_IS_OBJC(CFTypeID typeID, const void *obj) {
+    return (typeID >= __CFRuntimeClassTableSize) || (((CFRuntimeBase *)obj)->_cfisa != __CFISAForTypeID(typeID) && ((CFRuntimeBase *)obj)->_cfisa > (uintptr_t)0xFFF);
+}
+
+#endif
 #define CF_IS_OBJC(typeID, obj)	(false)
 
 #define CF_OBJC_VOIDCALL0(obj, sel)
@@ -451,25 +559,13 @@ CF_EXPORT CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex
 #define CF_OBJC_CALL1(rettype, retvar, obj, sel, a1)
 #define CF_OBJC_CALL2(rettype, retvar, obj, sel, a1, a2)
 
-#if defined (__WIN32__)
-#define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel) ((void)0)
-#define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1) ((void)0)
-#define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2) ((void)0)
-#define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3) ((void)0)
-#define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4) ((void)0)
-#define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5) ((void)0)
-#else
 #define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel)
 #define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1)
 #define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2)
 #define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3)
 #define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4)
 #define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5)
-#endif //__WIN32__
 
-#define __CFISAForTypeID(x) (0)
-
-#define __CFMaxRuntimeTypes	65535
 
 /* See comments in CFBase.c
 */
@@ -511,7 +607,7 @@ extern void *__CF_INVOKE_CALLBACK(void *, ...);
 //   DEFINE_WEAK_CARBONCORE_FUNC(void, DisposeHandle, (Handle h), (h))
 //
 
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 
 extern void *__CFLookupCFNetworkFunction(const char *name);
 
@@ -524,9 +620,20 @@ static R __CFNetwork_ ## N P {				\
     return __VA_ARGS__ ;				\
 }
 
+#define DEFINE_WEAK_CFNETWORK_FUNC_FAIL(R, N, P, A, FAILACTION, ...)	\
+static R __CFNetwork_ ## N P {				\
+    static R (*dyfunc) P = (void *)(~(uintptr_t)0);	\
+    if ((void *)(~(uintptr_t)0) == dyfunc) {		\
+	dyfunc = __CFLookupCFNetworkFunction(#N); }	\
+    if (dyfunc) { return dyfunc A ; }			\
+    FAILACTION ;					\
+    return __VA_ARGS__ ;				\
+}
+
 #else
 
 #define DEFINE_WEAK_CFNETWORK_FUNC(R, N, P, A, ...)
+#define DEFINE_WEAK_CFNETWORK_FUNC_FAIL(R, N, P, A, ...)
 
 #endif
 
@@ -535,11 +642,21 @@ static R __CFNetwork_ ## N P {				\
 #define DEFINE_WEAK_CARBONCORE_FUNC(R, N, P, A, ...)
 #endif
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+__private_extern__ CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *str1, CFRange str1Range, CFStringInlineBuffer *str2, CFRange str2Range, CFOptionFlags options, const void *compareLocale);
+#endif
+
 
 __private_extern__ CFArrayRef _CFBundleCopyUserLanguages(Boolean useBackstops);
 
-/* GC related internal SPIs. */
-extern malloc_zone_t *__CFCollectableZone;
+
+#if DEPLOYMENT_TARGET_WINDOWS
+__private_extern__ const wchar_t *_CFDLLPath(void);
+__private_extern__ void __CFStringCleanup(void);
+__private_extern__ void __CFSocketCleanup(void);
+__private_extern__ void __CFUniCharCleanup(void);
+__private_extern__ void __CFStreamCleanup(void);
+#endif
 
 /* !!! Avoid #importing objc.h; e.g. converting this to a .m file */
 struct __objcFastEnumerationStateEquivalent {
@@ -551,36 +668,7 @@ struct __objcFastEnumerationStateEquivalent {
 
 unsigned long _CFStorageFastEnumeration(CFStorageRef storage, struct __objcFastEnumerationStateEquivalent *state, void *stackbuffer, unsigned long count);
 
-
-// Allocate an id[count], new slots are nil
-extern void *__CFAllocateObjectArray(unsigned long count);
-extern void *__CFReallocateObjectArray(id *array, unsigned long count);
-extern void __CFFreeObjectArray(id *array);
-
-// check against LONG_MAX to catch negative numbers
-#define new_id_array(N, C) \
-        size_t N ## _count__ = (C); \
-        if (N ## _count__ > LONG_MAX) { \
-	    id rr = [objc_lookUpClass("NSString") stringWithFormat:@"*** attempt to create a temporary id buffer which is too large or with a negative count (%lu) -- possibly data is corrupt", N ## _count__]; \
-	    @throw [NSException exceptionWithName:NSGenericException reason:rr userInfo:nil]; \
-	} \
-        NSInteger N ## _is_stack__ = (N ## _count__ <= 256); \
-        id N ## _buffer__[N ## _is_stack__ ? N ## _count__ : 0]; \
-        if (N ## _is_stack__) memset(N ## _buffer__, 0, sizeof(N ## _buffer__)); \
-        id * N = N ## _is_stack__ ? N ## _buffer__ : __CFAllocateObjectArray(N ## _count__); \
-        if (! N) { \
-	    id rr = [objc_lookUpClass("NSString") stringWithFormat:@"*** attempt to create a temporary id buffer of length (%lu) failed", N ## _count__]; \
-	    @throw [NSException exceptionWithName:NSMallocException reason:rr userInfo:nil]; \
-	} \
-        do {} while (0)
-
-#define free_id_array(N) \
-        if (! N ## _is_stack__) __CFFreeObjectArray(N)
-
-extern void *__CFFullMethodName(Class cls, id obj, SEL sel);
-extern void *__CFExceptionProem(id obj, SEL sel);
-extern void __CFRequireConcreteImplementation(Class absClass, id obj, SEL sel);
-
+CF_EXTERN_C_END
 
 #endif /* ! __COREFOUNDATION_CFINTERNAL__ */
 

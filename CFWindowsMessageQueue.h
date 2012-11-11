@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,36 +21,31 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFWindowsMessageQueue.h
-	Copyright (c) 1999-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFWINDOWSMESSAGEQUEUE__)
 #define __COREFOUNDATION_CFWINDOWSMESSAGEQUEUE__ 1
 
-#if defined(__WIN32__)
+#if DEPLOYMENT_TARGET_WINDOWS
 
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFRunLoop.h>
-#include <windows.h>
 
-
-CF_EXTERN_C_BEGIN
 
 typedef struct __CFWindowsMessageQueue * CFWindowsMessageQueueRef;
 
 CF_EXPORT CFTypeID	CFWindowsMessageQueueGetTypeID(void);
 
-CF_EXPORT CFWindowsMessageQueueRef	CFWindowsMessageQueueCreate(CFAllocatorRef allocator, DWORD mask);
+CF_EXPORT CFWindowsMessageQueueRef	CFWindowsMessageQueueCreate(CFAllocatorRef allocator, uint32_t /* DWORD */ mask);
 
-CF_EXPORT DWORD		CFWindowsMessageQueueGetMask(CFWindowsMessageQueueRef wmq);
+CF_EXPORT uint32_t	CFWindowsMessageQueueGetMask(CFWindowsMessageQueueRef wmq);
 CF_EXPORT void		CFWindowsMessageQueueInvalidate(CFWindowsMessageQueueRef wmq);
 CF_EXPORT Boolean	CFWindowsMessageQueueIsValid(CFWindowsMessageQueueRef wmq);
 
 CF_EXPORT CFRunLoopSourceRef	CFWindowsMessageQueueCreateRunLoopSource(CFAllocatorRef allocator, CFWindowsMessageQueueRef wmq, CFIndex order);
 
-CF_EXTERN_C_END
-
-#endif /* __WIN32__ */
+#endif
 
 #endif /* ! __COREFOUNDATION_CFWINDOWSMESSAGEQUEUE__ */
 

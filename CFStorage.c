@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFStorage.c
-	Copyright 1999-2007, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -55,7 +55,7 @@ CFStorage is thread-safe for multiple readers, but not thread safe for simultane
 #endif
 #endif
 
-#define COPYMEM(src,dst,n) CF_WRITE_BARRIER_MEMMOVE((dst), (src), (n))
+#define COPYMEM(src,dst,n) objc_memmove_collectable((dst), (src), (n))
 #define PAGE_LIMIT ((CFIndex)PAGE_SIZE / 2)
 
 CF_INLINE int32_t roundToPage(int32_t num) {
@@ -113,7 +113,7 @@ struct __CFStorage {
 */
 static void __CFStorageAllocLeafNodeMemoryAux(CFAllocatorRef allocator, CFStorageRef storage, CFStorageNode *node, CFIndex cap) {
     __CFSpinLock(&(storage->cacheReaderMemoryAllocationLock));
-    CF_WRITE_BARRIER_ASSIGN(allocator, node->info.leaf.memory, _CFAllocatorReallocateGC(allocator, node->info.leaf.memory, cap, storage->nodeHint));	// This will free...
+    __CFAssignWithWriteBarrier((void **)&node->info.leaf.memory, _CFAllocatorReallocateGC(allocator, node->info.leaf.memory, cap, storage->nodeHint));	// This will free...
     if (__CFOASafe) __CFSetLastAllocationEventName(node->info.leaf.memory, "CFStorage (node bytes)");
     node->info.leaf.capacityInBytes = cap;
     __CFSpinUnlock(&(storage->cacheReaderMemoryAllocationLock));
@@ -273,8 +273,9 @@ CF_INLINE void *__CFStorageGetValueAtIndex(CFStorageRef storage, CFIndex idx, CF
     return result;
 }
 
+// returns refcount==1 node under GC
 static CFStorageNode *__CFStorageCreateNode(CFAllocatorRef allocator, bool isLeaf, CFIndex numBytes) {
-    CFStorageNode *newNode = (CFStorageNode *)_CFAllocatorAllocateGC(allocator, sizeof(CFStorageNode), __kCFAllocatorGCScannedMemory);
+    CFStorageNode *newNode = (CFStorageNode *)CFAllocatorAllocate(allocator, sizeof(CFStorageNode), __kCFAllocatorGCScannedMemory);
     if (__CFOASafe) __CFSetLastAllocationEventName(newNode, "CFStorage (node)");
     newNode->isLeaf = isLeaf;
     newNode->numBytes = numBytes;
@@ -335,7 +336,7 @@ static void __CFStorageDelete(CFAllocatorRef allocator, CFStorageRef storage, CF
                 int cnt;
                 _CFAllocatorDeallocateGC(allocator, node->info.notLeaf.child[childNum]);
                 for (cnt = childNum; cnt < 2; cnt++) {
-                    CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[cnt], node->info.notLeaf.child[cnt+1]);
+                    __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[cnt], node->info.notLeaf.child[cnt+1]);
                 }
                 node->info.notLeaf.child[2] = NULL;
             }
@@ -387,11 +388,13 @@ static void __CFStorageDelete(CFAllocatorRef allocator, CFStorageRef storage, CF
                 if (sCnt) {
                     if (!node->info.notLeaf.child[cCnt]) {
                         CFStorageNode *newNode = __CFStorageCreateNode(allocator, false, 0);
-                        CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[cCnt], newNode);
+                        __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[cCnt], newNode);
+                        Boolean GC = CF_IS_COLLECTABLE_ALLOCATOR(allocator);
+                        if (GC) auto_zone_release(auto_zone(), newNode);
                     }
                     for (cnt = 0; cnt < sCnt; cnt++) {
                         node->info.notLeaf.child[cCnt]->numBytes += gChildren[gCnt]->numBytes;
-                        CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[cCnt]->info.notLeaf.child[cnt], gChildren[gCnt++]);
+                        __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[cCnt]->info.notLeaf.child[cnt], gChildren[gCnt++]);
                     }
                 } else {
                     if (node->info.notLeaf.child[cCnt]) {
@@ -407,6 +410,7 @@ static void __CFStorageDelete(CFAllocatorRef allocator, CFStorageRef storage, CF
 
 /* Returns NULL or additional node to come after this node
    Assumption: size is never > storage->maxLeafCapacity
+   Under GC node has a retain count to keep it alive in unregistered pthreads
 */
 static CFStorageNode *__CFStorageInsert(CFAllocatorRef allocator, CFStorageRef storage, CFStorageNode *node, CFIndex byteNum, CFIndex size, CFIndex absoluteByteNum) {
     if (node->isLeaf) {
@@ -417,7 +421,7 @@ static CFStorageNode *__CFStorageInsert(CFAllocatorRef allocator, CFStorageRef s
                 return newNode;
             } else if (byteNum == 0) {	// Inserting at front; also easy, but we need to swap node and newNode
                 CFStorageNode *newNode = __CFStorageCreateNode(allocator, true, 0);
-                CF_WRITE_BARRIER_MEMMOVE(newNode, node, sizeof(CFStorageNode));
+                objc_memmove_collectable(newNode, node, sizeof(CFStorageNode));
                 node->isLeaf = true;
                 node->numBytes = size;
                 node->info.leaf.capacityInBytes = 0;
@@ -463,25 +467,30 @@ static CFStorageNode *__CFStorageInsert(CFAllocatorRef allocator, CFStorageRef s
         newNode = __CFStorageInsert(allocator, storage, node->info.notLeaf.child[childNum], relativeByteNum, size, absoluteByteNum);
         if (newNode) {
             if (node->info.notLeaf.child[2] == NULL) {	// There's an empty slot for the new node, cool
-                if (childNum == 0) CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[2], node->info.notLeaf.child[1]);	// Make room
-                CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[childNum + 1], newNode);
+                if (childNum == 0) __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[2], node->info.notLeaf.child[1]);	// Make room
+                __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[childNum + 1], newNode);
+                Boolean GC = CF_IS_COLLECTABLE_ALLOCATOR(allocator);
+                if (GC) auto_zone_release(auto_zone(), newNode);
                 node->numBytes += size;
                 return NULL;
             } else {
                 CFStorageNode *anotherNode = __CFStorageCreateNode(allocator, false, 0);	// Create another node
                 if (childNum == 0) {	// Last two children go to new node
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[0], node->info.notLeaf.child[1]);
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[1], node->info.notLeaf.child[2]);
-                    CF_WRITE_BARRIER_ASSIGN(allocator, node->info.notLeaf.child[1], newNode);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[0], node->info.notLeaf.child[1]);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[1], node->info.notLeaf.child[2]);
+                    __CFAssignWithWriteBarrier((void **)&node->info.notLeaf.child[1], newNode);
                     node->info.notLeaf.child[2] = NULL;
                 } else if (childNum == 1) {	// Last child goes to new node
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[0], newNode);
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[1], node->info.notLeaf.child[2]);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[0], newNode);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[1], node->info.notLeaf.child[2]);
                     node->info.notLeaf.child[2] = NULL;
                 } else {	// New node contains the new comers...
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[0], node->info.notLeaf.child[2]);
-                    CF_WRITE_BARRIER_ASSIGN(allocator, anotherNode->info.notLeaf.child[1], newNode);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[0], node->info.notLeaf.child[2]);
+                    __CFAssignWithWriteBarrier((void **)&anotherNode->info.notLeaf.child[1], newNode);
                     node->info.notLeaf.child[2] = NULL;
+                }
+                if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+                    auto_zone_release(auto_zone(), newNode);
                 }
                 node->numBytes = node->info.notLeaf.child[0]->numBytes + node->info.notLeaf.child[1]->numBytes;
                 anotherNode->numBytes = anotherNode->info.notLeaf.child[0]->numBytes + anotherNode->info.notLeaf.child[1]->numBytes;
@@ -658,17 +667,21 @@ void CFStorageInsertValues(CFStorageRef storage, CFRange range) {
         newNode = __CFStorageInsert(allocator, storage, &storage->rootNode, byteNum, insertThisTime, byteNum);
         if (newNode) {
             CFStorageNode *tempRootNode = __CFStorageCreateNode(allocator, false, 0);	// Will copy the (static) rootNode over to this
-            CF_WRITE_BARRIER_MEMMOVE(tempRootNode, &storage->rootNode, sizeof(CFStorageNode));
+            objc_memmove_collectable(tempRootNode, &storage->rootNode, sizeof(CFStorageNode));
             storage->rootNode.isLeaf = false;
-            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, storage, storage->rootNode.info.notLeaf.child[0], tempRootNode);
-            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, storage, storage->rootNode.info.notLeaf.child[1], newNode);
+            __CFAssignWithWriteBarrier((void **)&storage->rootNode.info.notLeaf.child[0], tempRootNode);
+            __CFAssignWithWriteBarrier((void **)&storage->rootNode.info.notLeaf.child[1], newNode);
+            if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+                auto_zone_release(auto_zone(), tempRootNode);
+                auto_zone_release(auto_zone(), newNode);
+            }
             storage->rootNode.info.notLeaf.child[2] = NULL;
             storage->rootNode.numBytes = tempRootNode->numBytes + newNode->numBytes;
 #if 1
 	    // ???
 	    __CFStorageSetCache(storage, NULL, 0, 0);
 #else
-            if (storage->cache.cachedNode == &(storage->rootNode)) CF_WRITE_BARRIER_BASE_ASSIGN(allocator, storage, storage->cache.cachedNode, tempRootNode);	// The cache should follow the node
+            if (storage->cache.cachedNode == &(storage->rootNode)) __CFAssignWithWriteBarrier((void **)&storage->cache.cachedNode, tempRootNode);	// The cache should follow the node
 #endif
 	}
         numBytesToInsert -= insertThisTime;
@@ -686,7 +699,7 @@ void CFStorageDeleteValues(CFStorageRef storage, CFRange range) {
     __CFStorageDelete(allocator, storage, &storage->rootNode, range, true);
     while (__CFStorageGetNumChildren(&storage->rootNode) == 1) {
         CFStorageNode *child = storage->rootNode.info.notLeaf.child[0];	// The single child
-        CF_WRITE_BARRIER_MEMMOVE(&storage->rootNode, child, sizeof(CFStorageNode));
+        objc_memmove_collectable(&storage->rootNode, child, sizeof(CFStorageNode));
         _CFAllocatorDeallocateGC(allocator, child);
     }
     if (__CFStorageGetNumChildren(&storage->rootNode) == 0 && !storage->rootNode.isLeaf) {
@@ -754,20 +767,20 @@ void CFStorageReplaceValues(CFStorageRef storage, CFRange range, const void *val
 
 /* Used by CFArray.c */
 
-static void __CFStorageNodeSetLayoutType(CFStorageNode *node, auto_zone_t *zone, auto_memory_type_t type) {
+static void __CFStorageNodeSetUnscanned(CFStorageNode *node, auto_zone_t *zone) {
     if (node->isLeaf) {
-        auto_zone_set_layout_type(zone, node->info.leaf.memory, type);
+        auto_zone_set_unscanned(zone, node->info.leaf.memory);
     } else {
         CFStorageNode **children = node->info.notLeaf.child;
-        if (children[0]) __CFStorageNodeSetLayoutType(children[0], zone, type);
-        if (children[1]) __CFStorageNodeSetLayoutType(children[1], zone, type);
-        if (children[2]) __CFStorageNodeSetLayoutType(children[2], zone, type);
+        if (children[0]) __CFStorageNodeSetUnscanned(children[0], zone);
+        if (children[1]) __CFStorageNodeSetUnscanned(children[1], zone);
+        if (children[2]) __CFStorageNodeSetUnscanned(children[2], zone);
     }
 }
 
 __private_extern__ void _CFStorageSetWeak(CFStorageRef storage) {
     storage->nodeHint = 0;
-    __CFStorageNodeSetLayoutType(&storage->rootNode, __CFCollectableZone, CF_GET_GC_MEMORY_TYPE(storage->nodeHint));
+    __CFStorageNodeSetUnscanned(&storage->rootNode, (auto_zone_t *)auto_zone());
 }
 
 #undef COPYMEM

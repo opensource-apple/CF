@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFXMLPreferencesDomain.c
-	Copyright 1998-2002, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 	Responsibility: Chris Parker
 */
 
@@ -64,7 +64,9 @@ __private_extern__ const _CFPreferencesDomainCallBacks __kCFXMLPropertyListDomai
 
 // Directly ripped from Foundation....
 static void __CFMilliSleep(uint32_t msecs) {
-#if defined(__svr4__) || defined(__hpux__)
+#if DEPLOYMENT_TARGET_WINDOWS
+    SleepEx(msecs, false);
+#elif defined(__svr4__) || defined(__hpux__)
     sleep((msecs + 900) / 1000);
 #elif DEPLOYMENT_TARGET_MACOSX
     struct timespec input;

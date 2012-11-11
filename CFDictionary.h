@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFDictionary.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 /*!
@@ -69,9 +69,9 @@
 
 	Computational Complexity
 	The access time for a value in the dictionary is guaranteed to be at
-	worst O(lg N) for any implementation, current and future, but will
+	worst O(N) for any implementation, current and future, but will
 	often be O(1) (constant time). Insertion or deletion operations
-	will typically be constant time as well, but are O(N*lg N) in the
+	will typically be constant time as well, but are O(N*N) in the
 	worst case in some implementations. Access of values through a key
 	is faster than accessing values directly (if there are any such
 	operations). Dictionaries will tend to use significantly more memory

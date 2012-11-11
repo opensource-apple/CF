@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,24 +21,60 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFFileUtilities.c
-	Copyright 1999-2002, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
 #include "CFInternal.h"
-#include "CFPriv.h"
-#include <string.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <pwd.h>
+#include <CoreFoundation/CFPriv.h>
+#if DEPLOYMENT_TARGET_WINDOWS
+#include <io.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <errno.h>
-#include <stdio.h>
 
-#define CF_OPENFLGS	(0)
+#define close _close
+#define write _write
+#define read _read
+#define open _NS_open
+#define stat _NS_stat
+#define fstat _fstat
+#define mkdir(a,b) _NS_mkdir(a)
+#define rmdir _NS_rmdir
+#define unlink _NS_unlink
 
+#define statinfo _stat
+
+#else
+    #include <string.h>
+    #include <unistd.h>
+    #include <dirent.h>
+    #include <sys/stat.h>
+    #include <sys/types.h>
+    #include <pwd.h>
+    #include <fcntl.h>
+    #include <errno.h>
+    #include <stdio.h>
+
+#define statinfo stat
+
+#endif
+
+
+CF_INLINE int openAutoFSNoWait() {
+#if DEPLOYMENT_TARGET_WINDOWS
+    return -1;
+#else
+    return (__CFProphylacticAutofsAccess ? open("/dev/autofs_nowait", 0) : -1);
+#endif
+}
+
+CF_INLINE void closeAutoFSNoWait(int fd) {
+#if DEPLOYMENT_TARGET_WINDOWS
+#else
+    if (-1 != fd) close(fd);
+#endif
+}
 
 __private_extern__ CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType) {
     return (abstractType ? (CFStringRef)CFRetain(abstractType) : NULL);
@@ -46,42 +82,37 @@ __private_extern__ CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstr
 
 
 __private_extern__ Boolean _CFCreateDirectory(const char *path) {
-#if 0 || 0
-    return CreateDirectoryA(path, (LPSECURITY_ATTRIBUTES)NULL);
-#else
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
+    int no_hang_fd = openAutoFSNoWait();
     int ret = ((mkdir(path, 0777) == 0) ? true : false);
-    close(no_hang_fd);
+    closeAutoFSNoWait(no_hang_fd);
     return ret;
-#endif
 }
 
-__private_extern__ Boolean _CFRemoveDirectory(const char *path) {
-#if 0 || 0
-    return RemoveDirectoryA(path);
-#else
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
-    int ret = ((rmdir(path) == 0) ? true : false);
-    close(no_hang_fd);
-    return ret;
+#if DEPLOYMENT_TARGET_WINDOWS
+// todo: remove this function and make callers use _CFCreateDirectory
+__private_extern__ Boolean _CFCreateDirectoryWide(const wchar_t *path) {
+    return CreateDirectoryW(path, 0);
+}
 #endif
+
+__private_extern__ Boolean _CFRemoveDirectory(const char *path) {
+    int no_hang_fd = openAutoFSNoWait();
+    int ret = ((rmdir(path) == 0) ? true : false);
+    closeAutoFSNoWait(no_hang_fd);
+    return ret;
 }
 
 __private_extern__ Boolean _CFDeleteFile(const char *path) {
-#if 0 || 0
-    return DeleteFileA(path);
-#else
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
+    int no_hang_fd = openAutoFSNoWait();
     int ret = unlink(path) == 0;
-    close(no_hang_fd);
+    closeAutoFSNoWait(no_hang_fd);
     return ret;
-#endif
 }
 
 __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength) {
     // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
-    struct stat statBuf;
     int fd = -1;
+    struct statinfo statBuf;
     char path[CFMaxPathSize];
     if (!CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize)) {
         return false;
@@ -90,26 +121,23 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
     *bytes = NULL;
 
     
-#if 0 || 0
-    fd = open(path, O_RDONLY|CF_OPENFLGS, 0666|_S_IREAD);
-#else
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
+    int no_hang_fd = openAutoFSNoWait();
     fd = open(path, O_RDONLY|CF_OPENFLGS, 0666);
-#endif
+
     if (fd < 0) {
-        close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         return false;
     }
     if (fstat(fd, &statBuf) < 0) {
         int saveerr = thread_errno();
         close(fd);
-        close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         thread_set_errno(saveerr);
         return false;
     }
     if ((statBuf.st_mode & S_IFMT) != S_IFREG) {
         close(fd);
-        close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         thread_set_errno(EACCES);
         return false;
     }
@@ -130,69 +158,52 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
         if (read(fd, *bytes, desiredLength) < 0) {
             CFAllocatorDeallocate(alloc, *bytes);
             close(fd);
-	    close(no_hang_fd);
+	        closeAutoFSNoWait(no_hang_fd);
             return false;
         }
         *length = desiredLength;
     }
     close(fd);
-    close(no_hang_fd);
+    closeAutoFSNoWait(no_hang_fd);
     return true;
 }
 
 __private_extern__ Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, CFIndex length) {
-    struct stat statBuf;
     int fd = -1;
     int mode;
+    struct statinfo statBuf;
     char path[CFMaxPathSize];
     if (!CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize)) {
         return false;
     }
 
-#if 0 || 0
+    int no_hang_fd = openAutoFSNoWait();
     mode = 0666;
     if (0 == stat(path, &statBuf)) {
         mode = statBuf.st_mode;
     } else if (thread_errno() != ENOENT) {
-        return false;
-    }
-    fd = open(path, O_WRONLY|O_CREAT|O_TRUNC|CF_OPENFLGS, 0666|_S_IWRITE);
-    if (fd < 0) {
-        return false;
-    }
-    if (length && write(fd, bytes, length) != length) {
-        int saveerr = thread_errno();
-        close(fd);
-        thread_set_errno(saveerr);
-        return false;
-    }
-    FlushFileBuffers((HANDLE)_get_osfhandle(fd));
-    close(fd);
-#else
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
-    mode = 0666;
-    if (0 == stat(path, &statBuf)) {
-        mode = statBuf.st_mode;
-    } else if (thread_errno() != ENOENT) {
-	close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         return false;
     }
     fd = open(path, O_WRONLY|O_CREAT|O_TRUNC|CF_OPENFLGS, 0666);
     if (fd < 0) {
-	close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         return false;
     }
     if (length && write(fd, bytes, length) != length) {
         int saveerr = thread_errno();
         close(fd);
-	close(no_hang_fd);
+        closeAutoFSNoWait(no_hang_fd);
         thread_set_errno(saveerr);
         return false;
     }
+#if DEPLOYMENT_TARGET_WINDOWS
+    FlushFileBuffers((HANDLE)_get_osfhandle(fd));
+#else
     fsync(fd);
-    close(fd);
-    close(no_hang_fd);
 #endif
+    close(fd);
+    closeAutoFSNoWait(no_hang_fd);
     return true;
 }
 
@@ -207,15 +218,105 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     // MF:!!! Need to use four-letter type codes where appropriate.
     CFStringRef extension = (matchingAbstractType ? _CFCopyExtensionForAbstractType(matchingAbstractType) : NULL);
     CFIndex extLen = (extension ? CFStringGetLength(extension) : 0);
+
+
+#if DEPLOYMENT_TARGET_WINDOWS
+    // This is a replacement for 'dirent' below, and also uses wchar_t to support unicode paths
+    wchar_t extBuff[CFMaxPathSize];
+    
+    if (extLen > 0) {
+        CFStringGetBytes(extension, CFRangeMake(0, extLen), kCFStringEncodingUTF16, 0, false, (uint8_t *)extBuff, CFMaxPathLength, &extLen);
+        extBuff[extLen] = '\0';
+    }
+    
+    wchar_t pathBuf[CFMaxPathSize];
+    
+    if (!dirPath) {
+        if (!_CFURLGetWideFileSystemRepresentation(dirURL, true, pathBuf, CFMaxPathLength)) {
+            if (extension) CFRelease(extension);
+            return NULL;
+        }
+        
+        pathLength = wcslen(pathBuf);
+
+    } else {
+        // Convert dirPath to a wide representation and put it into our pathBuf
+        // Get the real length of the string in UTF16 characters
+        CFStringRef dirPathStr = CFStringCreateWithCString(kCFAllocatorSystemDefault, dirPath, kCFStringEncodingUTF8);
+        CFIndex strLen = CFStringGetLength(dirPathStr);
+        
+        // Copy the string into the buffer and terminate
+        CFStringGetCharacters(dirPathStr, CFRangeMake(0, strLen), (UniChar *)pathBuf);
+        pathBuf[strLen] = 0;
+        
+        CFRelease(dirPathStr);
+    }
+    
+    WIN32_FIND_DATAW  file;
+    HANDLE handle;
+    
+    if (pathLength + 2 >= CFMaxPathLength) {
+        if (extension) {
+            CFRelease(extension);
+        }
+        return NULL;
+    }
+
+    pathBuf[pathLength] = '\\';
+    pathBuf[pathLength + 1] = '*';
+    pathBuf[pathLength + 2] = '\0';
+    handle = FindFirstFileW(pathBuf, (LPWIN32_FIND_DATAW)&file);
+    if (INVALID_HANDLE_VALUE == handle) {
+        pathBuf[pathLength] = '\0';
+        if (extension) {
+            CFRelease(extension);
+        }
+        return NULL;
+    }
+
+    files = CFArrayCreateMutable(alloc, 0, &kCFTypeArrayCallBacks);
+
+    do {
+        CFURLRef fileURL;
+        CFIndex namelen = wcslen(file.cFileName);
+        if (file.cFileName[0] == '.' && (namelen == 1 || (namelen == 2  && file.cFileName[1] == '.'))) {
+            continue;
+        }
+
+        if (extLen > namelen) continue;    // if the extension is the same length or longer than the name, it can't possibly match.
+
+        if (extLen > 0) {
+            // Check to see if it matches the extension we're looking for.
+            if (_wcsicmp(&(file.cFileName[namelen - extLen]), (const wchar_t *)extBuff) != 0) {
+                continue;
+            }
+        }
+	if (dirURL == NULL) {
+	    CFStringRef dirURLStr = CFStringCreateWithBytes(alloc, (const uint8_t *)pathBuf, pathLength, kCFStringEncodingUTF16, NO);
+	    dirURL = CFURLCreateWithFileSystemPath(alloc, dirURLStr, kCFURLWindowsPathStyle, true);
+	    CFRelease(dirURLStr);
+            releaseBase = true;
+        }
+        // MF:!!! What about the trailing slash?
+        CFStringRef fileURLStr = CFStringCreateWithBytes(alloc, (const uint8_t *)file.cFileName, namelen, kCFStringEncodingUTF16, NO);
+        fileURL = CFURLCreateWithFileSystemPathRelativeToBase(alloc, fileURLStr, kCFURLWindowsPathStyle, (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? true : false, dirURL);
+        CFArrayAppendValue(files, fileURL);
+        CFRelease(fileURL);
+        CFRelease(fileURLStr);
+    } while (FindNextFileW(handle, &file));
+    FindClose(handle);
+    pathBuf[pathLength] = '\0';
+
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     uint8_t extBuff[CFMaxPathSize];
     
     if (extLen > 0) {
         CFStringGetBytes(extension, CFRangeMake(0, extLen), CFStringFileSystemEncoding(), 0, false, extBuff, CFMaxPathLength, &extLen);
         extBuff[extLen] = '\0';
     }
-
+    
     uint8_t pathBuf[CFMaxPathSize];
-
+    
     if (!dirPath) {
         if (!CFURLGetFileSystemRepresentation(dirURL, true, pathBuf, CFMaxPathLength)) {
             if (extension) CFRelease(extension);
@@ -226,19 +327,18 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
         }
     }
     
-#if (DEPLOYMENT_TARGET_MACOSX) || defined(__svr4__) || defined(__hpux__) || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     struct dirent buffer;
     struct dirent *dp;
     int err;
    
-    int no_hang_fd = open("/dev/autofs_nowait", 0);
+    int no_hang_fd = __CFProphylacticAutofsAccess ? open("/dev/autofs_nowait", 0) : -1;
  
     DIR *dirp = opendir(dirPath);
     if (!dirp) {
         if (extension) {
             CFRelease(extension);
         }
-	close(no_hang_fd);
+	if (-1 != no_hang_fd) close(no_hang_fd);
         return NULL;
         // raiseErrno("opendir", path);
     }
@@ -270,7 +370,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
             if (!isDir) {
                 // Ugh; must stat.
                 char subdirPath[CFMaxPathLength];
-                struct stat statBuf;
+                struct statinfo statBuf;
                 strlcpy(subdirPath, dirPath, sizeof(subdirPath));
                 strlcat(subdirPath, "/", sizeof(subdirPath));
                 strlcat(subdirPath, dp->d_name, sizeof(subdirPath));
@@ -286,7 +386,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
         CFRelease(fileURL);
     }
     err = closedir(dirp);
-    close(no_hang_fd);
+    if (-1 != no_hang_fd) close(no_hang_fd);
     if (err != 0) {
         CFRelease(files);
         if (releaseBase) {
@@ -300,7 +400,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     
 #else
     
-#error _CFContentsOfDirectory() unknown architechture, not implemented
+#error _CFContentsOfDirectory() unknown architecture, not implemented
     
 #endif
 
@@ -317,19 +417,19 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
     Boolean fileExists;
     Boolean isDirectory = false;
 
-    struct stat64 statBuf;
-    char path[CFMaxPathSize];
-
     if ((exists == NULL) && (posixMode == NULL) && (size == NULL) && (modTime == NULL) && (ownerID == NULL) && (dirContents == NULL)) {
         // Nothing to do.
         return 0;
     }
 
+    struct statinfo statBuf;
+    char path[CFMaxPathSize];
+
     if (!CFURLGetFileSystemRepresentation(pathURL, true, (uint8_t *)path, CFMaxPathLength)) {
         return -1;
     }
 
-    if (stat64(path, &statBuf) != 0) {
+    if (stat(path, &statBuf) != 0) {
         // stat failed, but why?
         if (thread_errno() == ENOENT) {
             fileExists = false;
@@ -368,9 +468,12 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
 
     if (modTime != NULL) {
         if (fileExists) {
-            CFAbsoluteTime theTime = (CFAbsoluteTime)statBuf.st_mtimespec.tv_sec - kCFAbsoluteTimeIntervalSince1970;
-	    theTime += (CFAbsoluteTime)statBuf.st_mtimespec.tv_nsec / 1000000000.0;
-            *modTime = CFDateCreate(alloc, theTime);
+#if DEPLOYMENT_TARGET_WINDOWS
+            struct timespec ts = {statBuf.st_mtime, 0};
+#else
+            struct timespec ts = statBuf.st_mtimespec;
+#endif
+            *modTime = CFDateCreate(alloc, _CFAbsoluteTimeFromFileTimeSpec(ts));
         } else {
             *modTime = NULL;
         }
@@ -389,7 +492,7 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
     if (dirContents != NULL) {
         if (fileExists && isDirectory) {
 
-            CFMutableArrayRef contents = _CFContentsOfDirectory(alloc, path, NULL, pathURL, NULL);
+            CFMutableArrayRef contents = _CFContentsOfDirectory(alloc, (char *)path, NULL, pathURL, NULL);
 
             if (contents) {
                 *dirContents = contents;
@@ -405,9 +508,9 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
 
 
 // MF:!!! Should pull in the rest of the UniChar based path utils from Foundation.
-#if (DEPLOYMENT_TARGET_MACOSX) || defined(__svr4__) || defined(__hpux__) || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     #define UNIX_PATH_SEMANTICS
-#elif defined(__WIN32__)
+#elif DEPLOYMENT_TARGET_WINDOWS
     #define WINDOWS_PATH_SEMANTICS
 #else
 #error Unknown platform

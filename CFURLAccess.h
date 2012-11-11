@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFURLAccess.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -31,10 +31,13 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFData.h>
 #include <CoreFoundation/CFDictionary.h>
+#include <CoreFoundation/CFError.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFURL.h>
 
 CF_EXTERN_C_BEGIN
+
+
 
 /* Attempts to read the data and properties for the given URL.  If
 only interested in one of the resourceData and properties, pass NULL
@@ -59,7 +62,7 @@ large files.
 
 */
 CF_EXPORT
-Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode);
+Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 
 /* Attempts to write the given data and properties to the given URL.
 If dataToWrite is NULL, only properties are written out (use
@@ -70,19 +73,20 @@ Returns success or failure; errorCode is set as for
 CFURLCreateDataAndPropertiesFromResource(), above.
 */
 CF_EXPORT
-Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode);
+Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 
 /* Destroys the resource indicated by url. */
 /* Returns success or failure; errorCode set as above. */
 CF_EXPORT
-Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode);
+Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 
 /* Convenience method which calls through to CFURLCreateDataAndPropertiesFromResource(). */
 /* Returns NULL on error and sets errorCode accordingly. */
 CF_EXPORT
-CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode);
+CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 
-/* Common error codes; this list is expected to grow */
+
+/* Common error codes (returned only by the older APIs that predate CFError) */
 enum {
     kCFURLUnknownError = -10,
     kCFURLUnknownSchemeError = -11,
@@ -96,24 +100,24 @@ enum {
 };
 typedef CFIndex CFURLError;
 
-/* Property keys */
+/* Older property keys */
 
 CF_EXPORT
-const CFStringRef kCFURLFileExists;
+const CFStringRef kCFURLFileExists AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLFileDirectoryContents;
+const CFStringRef kCFURLFileDirectoryContents AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLFileLength;
+const CFStringRef kCFURLFileLength AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT 
-const CFStringRef kCFURLFileLastModificationTime;
+const CFStringRef kCFURLFileLastModificationTime AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLFilePOSIXMode;
+const CFStringRef kCFURLFilePOSIXMode AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLFileOwnerID;
+const CFStringRef kCFURLFileOwnerID AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusCode;
+const CFStringRef kCFURLHTTPStatusCode AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusLine;
+const CFStringRef kCFURLHTTPStatusLine AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
 
 /* The value of kCFURLFileExists is a CFBoolean */
 /* The value of kCFURLFileDirectoryContents is a CFArray containing CFURLs.  An empty array means the directory exists, but is empty */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,17 +21,16 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFSocket.h
-	Copyright (c) 1999-2007, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSOCKET__)
 #define __COREFOUNDATION_CFSOCKET__ 1
 
-#if defined(__WIN32__)
-// This needs to be early in the file, before sys/types gets included, or winsock.h complains
-// about "fd_set and associated macros have been defined".
-#include <winsock2.h>
-typedef SOCKET CFSocketNativeHandle;
+#include <TargetConditionals.h>
+
+#if TARGET_OS_WIN32
+typedef uintptr_t CFSocketNativeHandle;
 #else
 typedef int CFSocketNativeHandle;
 #endif
@@ -156,6 +155,9 @@ enum {
     kCFSocketAutomaticallyReenableAcceptCallBack = 2,
     kCFSocketAutomaticallyReenableDataCallBack = 3,
     kCFSocketAutomaticallyReenableWriteCallBack = 8,
+#if MAC_OS_X_VERSION_10_5 <= MAC_OS_X_VERSION_MAX_ALLOWED
+    kCFSocketLeaveErrors = 64,
+#endif
     kCFSocketCloseOnInvalidate = 128
 };
 #endif

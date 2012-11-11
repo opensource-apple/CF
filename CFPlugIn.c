@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -20,9 +20,9 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-/*	CFPlugIn.c
-	Copyright (c) 1999-2007 Apple Inc.  All rights reserved.
-	Responsibility: Doug Davidson
+/*      CFPlugIn.c
+        Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
+        Responsibility: Doug Davidson
 */
 
 #include "CFBundle_Internal.h"
@@ -47,13 +47,8 @@ CF_EXPORT CFArrayRef CFPlugInFindFactoriesForPlugInType(CFUUIDRef typeID) {
     
     if (array) {
         SInt32 i, c = CFArrayGetCount(array);
-
-        // Use default allocator
         result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
-        
-        for (i=0; i<c; i++) {
-            CFArrayAppendValue(result, _CFPFactoryGetFactoryID((_CFPFactory *)CFArrayGetValueAtIndex(array, i)));
-        }
+        for (i = 0; i < c; i++) CFArrayAppendValue(result, _CFPFactoryGetFactoryID((_CFPFactory *)CFArrayGetValueAtIndex(array, i)));
     }
     return result;
 }
@@ -65,15 +60,10 @@ CF_EXPORT CFArrayRef CFPlugInFindFactoriesForPlugInTypeInPlugIn(CFUUIDRef typeID
     if (array) {
         SInt32 i, c = CFArrayGetCount(array);
         _CFPFactory *factory;
-        
-        // Use default allocator
         result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
-
-        for (i=0; i<c; i++) {
+        for (i = 0; i < c; i++) {
             factory = (_CFPFactory *)CFArrayGetValueAtIndex(array, i);
-            if (_CFPFactoryGetPlugIn(factory) == plugIn) {
-                CFArrayAppendValue(result, _CFPFactoryGetFactoryID(factory));
-            }
+            if (_CFPFactoryGetPlugIn(factory) == plugIn) CFArrayAppendValue(result, _CFPFactoryGetFactoryID(factory));
         }
     }
     return result;

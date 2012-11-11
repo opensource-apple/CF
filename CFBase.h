@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,13 +21,15 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFBase.h
-	Copyright (c) 1998-2007, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2009, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBASE__)
 #define __COREFOUNDATION_CFBASE__ 1
 
-#if (defined(__CYGWIN32__) || defined(_WIN32)) && !defined (__WIN32__)
+#include <TargetConditionals.h>
+
+#if (defined(__CYGWIN32__) || defined(_WIN32)) && !defined(__WIN32__)
 #define __WIN32__ 1
 #endif
 
@@ -36,7 +38,7 @@
 #endif
 
 #if (defined(__i386__) || defined(__x86_64__)) && !defined(__LITTLE_ENDIAN__)
-    #define __LITTLE_ENDIAN__ 1
+#define __LITTLE_ENDIAN__ 1
 #endif
 
 #if !defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__)
@@ -51,9 +53,7 @@
 #error Both __BIG_ENDIAN__ and __LITTLE_ENDIAN__ cannot be true
 #endif
 
-#if defined(__WIN32__)
-#include <windows.h>
-#include <winsock2.h>
+#if TARGET_OS_WIN32
 #include <stdint.h>
 #include <stdbool.h>
 #elif defined(__GNUC__)
@@ -62,9 +62,9 @@
 #endif
 #include <AvailabilityMacros.h>
 
-    #if defined(__MACH__)
-        #include <libkern/OSTypes.h>
-    #endif
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <libkern/OSTypes.h>
+#endif
 
 #if !defined(__MACTYPES__)
 #if !defined(_OS_OSTYPES_H)
@@ -82,6 +82,7 @@
     typedef float                   Float32;
     typedef double                  Float64;
     typedef unsigned short          UniChar;
+    typedef unsigned long           UniCharCount;
     typedef unsigned char *         StringPtr;
     typedef const unsigned char *   ConstStringPtr;
     typedef unsigned char           Str255[256];
@@ -89,6 +90,11 @@
     typedef SInt16                  OSErr;
     typedef SInt16                  RegionCode;
     typedef SInt16                  LangCode;
+    typedef SInt16                  ScriptCode;
+    typedef UInt32                  FourCharCode;
+    typedef FourCharCode            OSType;
+    typedef UInt8                   Byte;
+    typedef SInt8                   SignedByte;
 #endif
 #if !defined(__MACTYPES__) || (defined(UNIVERSAL_INTERFACES_VERSION) && UNIVERSAL_INTERFACES_VERSION < 0x0340)
     typedef UInt32                  UTF32Char;
@@ -104,6 +110,18 @@
 #define CF_EXTERN_C_BEGIN
 #define CF_EXTERN_C_END
 #endif
+#endif
+
+#if TARGET_OS_WIN32 && defined(CF_BUILDING_CF) && defined(__cplusplus)
+#define CF_EXPORT extern "C" __declspec(dllexport) 
+#elif TARGET_OS_WIN32 && defined(CF_BUILDING_CF) && !defined(__cplusplus)
+#define CF_EXPORT extern __declspec(dllexport) 
+#elif TARGET_OS_WIN32 && defined(__cplusplus)
+#define CF_EXPORT extern "C" __declspec(dllimport) 
+#elif TARGET_OS_WIN32
+#define CF_EXPORT extern __declspec(dllimport) 
+#else
+#define CF_EXPORT extern
 #endif
 
 CF_EXTERN_C_BEGIN
@@ -126,23 +144,6 @@ CF_EXTERN_C_BEGIN
     #define FALSE	0
 #endif
 
-#if defined(__WIN32__)
-    #undef CF_EXPORT
-    #if defined(CF_BUILDING_CF)
-	#define CF_EXPORT __declspec(dllexport) extern
-    #else
-	#define CF_EXPORT __declspec(dllimport) extern
-    #endif
-#elif defined(macintosh)
-    #if defined(__MWERKS__)
-        #define CF_EXPORT __declspec(export) extern
-    #endif
-#endif
-
-#if !defined(CF_EXPORT)
-    #define CF_EXPORT extern
-#endif
-
 #if !defined(CF_INLINE)
     #if defined(__GNUC__) && (__GNUC__ == 4) && !defined(DEBUG)
         #define CF_INLINE static __inline__ __attribute__((always_inline))
@@ -152,14 +153,22 @@ CF_EXTERN_C_BEGIN
 	#define CF_INLINE static inline
     #elif defined(_MSC_VER)
         #define CF_INLINE static __inline
-    #elif defined(__WIN32__)
+    #elif TARGET_OS_WIN32
 	#define CF_INLINE static __inline__
     #endif
+#endif
+
+// Marks functions which return a CF type that needs to be released by the caller but whose names are not consistent with CoreFoundation naming rules. The recommended fix to this is the rename the functions, but this macro can be used to let the clang static analyzer know of any exceptions that cannot be fixed.
+#if defined(__clang__)
+#define CF_RETURNS_RETAINED __attribute__((cf_returns_retained))
+#else
+#define CF_RETURNS_RETAINED
 #endif
 
 
 CF_EXPORT double kCFCoreFoundationVersionNumber;
 
+#if TARGET_OS_MAC
 #define kCFCoreFoundationVersionNumber10_0	196.40
 #define kCFCoreFoundationVersionNumber10_0_3	196.50
 #define kCFCoreFoundationVersionNumber10_1	226.00
@@ -202,6 +211,20 @@ CF_EXPORT double kCFCoreFoundationVersionNumber;
 #define kCFCoreFoundationVersionNumber10_4_9	368.28
 #define kCFCoreFoundationVersionNumber10_4_10	368.28
 #define kCFCoreFoundationVersionNumber10_4_11	368.31
+#define kCFCoreFoundationVersionNumber10_5	476.00
+#define kCFCoreFoundationVersionNumber10_5_1	476.00
+#define kCFCoreFoundationVersionNumber10_5_2	476.10
+#define kCFCoreFoundationVersionNumber10_5_3	476.13
+#define kCFCoreFoundationVersionNumber10_5_4	476.14
+#define kCFCoreFoundationVersionNumber10_5_5	476.15
+#define kCFCoreFoundationVersionNumber10_5_6	476.17
+#endif
+
+#if TARGET_OS_IPHONE
+#define kCFCoreFoundationVersionNumber_iPhoneOS_2_0	478.23
+#define kCFCoreFoundationVersionNumber_iPhoneOS_2_1 478.26
+#define kCFCoreFoundationVersionNumber_iPhoneOS_2_2 478.29
+#endif
 
 typedef unsigned long CFTypeID;
 typedef unsigned long CFOptionFlags;

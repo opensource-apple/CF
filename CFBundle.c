@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -20,9 +20,9 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-/*	CFBundle.c
-	Copyright (c) 1999-2007 Apple Inc.  All rights reserved.
-	Responsibility: Doug Davidson
+/*      CFBundle.c
+        Copyright (c) 1999-2009, Apple Inc.  All rights reserved.
+        Responsibility: Doug Davidson
 */
 
 #include "CFBundle_Internal.h"
@@ -32,13 +32,21 @@
 #include <CoreFoundation/CFURLAccess.h>
 #include <CoreFoundation/CFError.h>
 #include <string.h>
-#include "CFPriv.h"
+#include <CoreFoundation/CFPriv.h>
 #include "CFInternal.h"
 #include <CoreFoundation/CFByteOrder.h>
 #include "CFBundle_BinaryTypes.h"
 #include <ctype.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+
+#define AVOID_WEAK_COLLECTIONS 1
+
+#if !defined(AVOID_WEAK_COLLECTIONS)
+#include "CFHashTable.h"
+#include "CFMapTable.h"
+#include "CFPointerArray.h"
+#endif /* !AVOID_WEAK_COLLECTIONS */
 
 #if defined(BINARY_SUPPORT_DYLD)
 // Import the mach-o headers that define the macho magic numbers
@@ -50,14 +58,28 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <crt_externs.h>
+#if defined(USE_DYLD_PRIV)
+#include <mach-o/dyld_priv.h>
+#endif /* USE_DYLD_PRIV */
 #endif /* BINARY_SUPPORT_DYLD */
 
 #if defined(BINARY_SUPPORT_DLFCN)
 #include <dlfcn.h>
 #endif /* BINARY_SUPPORT_DLFCN */
 
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 #include <fcntl.h>
+#elif DEPLOYMENT_TARGET_WINDOWS
+#define strncasecmp_l(a, b, c, d) _strnicmp(a, b, c)
+#include <fcntl.h>
+#include <io.h>
+
+#define open _NS_open
+#define stat(x,y) _NS_stat(x,y)
+
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
 
@@ -70,6 +92,11 @@ CONST_STRING_DECL(kCFBundleIdentifierKey, "CFBundleIdentifier")
 CONST_STRING_DECL(kCFBundleVersionKey, "CFBundleVersion")
 CONST_STRING_DECL(kCFBundleDevelopmentRegionKey, "CFBundleDevelopmentRegion")
 CONST_STRING_DECL(kCFBundleLocalizationsKey, "CFBundleLocalizations")
+
+// Private CFBundle Info plist keys, possible candidates for public constants
+CONST_STRING_DECL(_kCFBundleAllowMixedLocalizationsKey, "CFBundleAllowMixedLocalizations")
+CONST_STRING_DECL(_kCFBundleSupportedPlatformsKey, "CFBundleSupportedPlatforms")
+CONST_STRING_DECL(_kCFBundleResourceSpecificationKey, "CFBundleResourceSpecification")
 
 // Finder stuff
 CONST_STRING_DECL(_kCFBundlePackageTypeKey, "CFBundlePackageType")
@@ -121,7 +148,6 @@ CONST_STRING_DECL(_kCFBundleNumericVersionKey, "CFBundleNumericVersion")
 CONST_STRING_DECL(_kCFBundleExecutablePathKey, "CFBundleExecutablePath")
 CONST_STRING_DECL(_kCFBundleResourcesFileMappedKey, "CSResourcesFileMapped")
 CONST_STRING_DECL(_kCFBundleCFMLoadAsBundleKey, "CFBundleCFMLoadAsBundle")
-CONST_STRING_DECL(_kCFBundleAllowMixedLocalizationsKey, "CFBundleAllowMixedLocalizations")
 
 // Keys used by NSBundle for loaded Info plists.
 CONST_STRING_DECL(_kCFBundleInitialPathKey, "NSBundleInitialPath")
@@ -164,6 +190,8 @@ struct __CFBundle {
 
     _CFPlugInData _plugInData;
 
+    CFSpinLock_t _bundleLoadingLock;
+
 #if defined(BINARY_SUPPORT_DLL)
     HMODULE _hModule;
 #endif /* BINARY_SUPPORT_DLL */
@@ -172,21 +200,21 @@ struct __CFBundle {
 
 static CFSpinLock_t CFBundleGlobalDataLock = CFSpinLockInit;
 
-static CFMutableDictionaryRef _bundlesByURL = NULL;
 static CFMutableDictionaryRef _bundlesByIdentifier = NULL;
-
-// For scheduled lazy unloading.  Used by CFPlugIn.
-static CFMutableSetRef _bundlesToUnload = NULL;
-static Boolean _scheduledBundlesAreUnloading = false;
-
-// Various lists of all bundles.
+#if defined(AVOID_WEAK_COLLECTIONS)
+static CFMutableDictionaryRef _bundlesByURL = NULL;
 static CFMutableArrayRef _allBundles = NULL;
+static CFMutableSetRef _bundlesToUnload = NULL;
+#else /* AVOID_WEAK_COLLECTIONS */
+static __CFMapTable *_bundlesByURL = nil;
+static __CFHashTable *_allBundles = nil;
+static __CFHashTable *_bundlesToUnload = nil;
+#endif /* AVOID_WEAK_COLLECTIONS */
+static Boolean _scheduledBundlesAreUnloading = false;
 
 static Boolean _initedMainBundle = false;
 static CFBundleRef _mainBundle = NULL;
 static CFStringRef _defaultLocalization = NULL;
-
-static Boolean _useDlfcn = false;
 
 // Forward declares functions.
 static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked, Boolean doFinalProcessing);
@@ -198,19 +226,25 @@ static void _CFBundleCheckWorkarounds(CFBundleRef bundle);
 static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath);
 static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths);
 #if defined(BINARY_SUPPORT_DYLD)
-static CFDictionaryRef _CFBundleGrokInfoDictFromMainExecutable(void);
+static CFMutableDictionaryRef _CFBundleGrokInfoDictFromMainExecutable(void);
 static Boolean _CFBundleGrokObjCImageInfoFromMainExecutable(uint32_t *objcVersion, uint32_t *objcFlags);
 static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p);
+#if !defined(BINARY_SUPPORT_DLFCN)
 static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFStringRef symbolName, Boolean globalSearch);
+#endif /* !BINARY_SUPPORT_DLFCN */
 #endif /* BINARY_SUPPORT_DYLD */
 #if defined(BINARY_SUPPORT_DLFCN)
-static CFStringRef _CFBundleDlfcnCopyLoadedImagePathForPointer(void *p);
 static void *_CFBundleDlfcnGetSymbolByNameWithSearch(CFBundleRef bundle, CFStringRef symbolName, Boolean globalSearch);
+#if !defined(BINARY_SUPPORT_DYLD)
+static CFStringRef _CFBundleDlfcnCopyLoadedImagePathForPointer(void *p);
+#endif /* !BINARY_SUPPORT_DYLD */
 #endif /* BINARY_SUPPORT_DLFCN */
 #if defined(BINARY_SUPPORT_DYLD) && defined(BINARY_SUPPORT_CFM)
 static void *_CFBundleFunctionPointerForTVector(CFAllocatorRef allocator, void *tvp);
 static void *_CFBundleTVectorForFunctionPointer(CFAllocatorRef allocator, void *fp);
 #endif /* BINARY_SUPPORT_DYLD && BINARY_SUPPORT_CFM */
+
+#if defined(AVOID_WEAK_COLLECTIONS)
 
 static void _CFBundleAddToTables(CFBundleRef bundle, Boolean alreadyLocked) {
     CFStringRef bundleID = CFBundleGetIdentifier(bundle);
@@ -270,11 +304,8 @@ static void _CFBundleAddToTables(CFBundleRef bundle, Boolean alreadyLocked) {
     if (!alreadyLocked) __CFSpinUnlock(&CFBundleGlobalDataLock);
 }
 
-static void _CFBundleRemoveFromTables(CFBundleRef bundle) {
-    CFStringRef bundleID = CFBundleGetIdentifier(bundle);
-
+static void _CFBundleRemoveFromTables(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef bundleID) {
     __CFSpinLock(&CFBundleGlobalDataLock);
-
     // Remove from the various lists
     if (_allBundles) {
         CFIndex i = CFArrayGetFirstIndexOfValue(_allBundles, CFRangeMake(0, CFArrayGetCount(_allBundles)), bundle);
@@ -282,7 +313,10 @@ static void _CFBundleRemoveFromTables(CFBundleRef bundle) {
     }
 
     // Remove from the table that maps urls to bundles
-    if (_bundlesByURL) CFDictionaryRemoveValue(_bundlesByURL, bundle->_url);
+    if (bundleURL && _bundlesByURL) {
+        CFBundleRef bundleForURL = (CFBundleRef)CFDictionaryGetValue(_bundlesByURL, bundleURL);
+        if (bundleForURL == bundle) CFDictionaryRemoveValue(_bundlesByURL, bundleURL);
+    }
     
     // Remove from the table that maps identifiers to bundles
     if (bundleID && _bundlesByIdentifier) {
@@ -293,17 +327,181 @@ static void _CFBundleRemoveFromTables(CFBundleRef bundle) {
             if (0 == CFArrayGetCount(bundlesWithThisID)) CFDictionaryRemoveValue(_bundlesByIdentifier, bundleID);
         }
     }
-    
     __CFSpinUnlock(&CFBundleGlobalDataLock);
 }
 
-__private_extern__ CFBundleRef _CFBundleFindByURL(CFURLRef url, Boolean alreadyLocked) {
+static CFBundleRef _CFBundleCopyBundleForURL(CFURLRef url, Boolean alreadyLocked) {
     CFBundleRef result = NULL;
     if (!alreadyLocked) __CFSpinLock(&CFBundleGlobalDataLock);
     if (_bundlesByURL) result = (CFBundleRef)CFDictionaryGetValue(_bundlesByURL, url);
+    if (result && !result->_url) {
+        result = NULL;
+        CFDictionaryRemoveValue(_bundlesByURL, url);
+    }
+    if (result) CFRetain(result);
     if (!alreadyLocked) __CFSpinUnlock(&CFBundleGlobalDataLock);
     return result;
 }
+
+static CFBundleRef _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(CFStringRef bundleID) {
+    CFBundleRef result = NULL, bundle;
+    if (_bundlesByIdentifier && bundleID) {
+        // Note that this array is maintained in descending order by version number
+        CFArrayRef bundlesWithThisID = (CFArrayRef)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
+        if (bundlesWithThisID) {
+            CFIndex i, count = CFArrayGetCount(bundlesWithThisID);
+            if (count > 0) {
+                // First check for loaded bundles so we will always prefer a loaded to an unloaded bundle
+                for (i = 0; !result && i < count; i++) {
+                    bundle = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, i);
+                    if (CFBundleIsExecutableLoaded(bundle)) result = bundle;
+                }
+                // If no loaded bundle, simply take the first item in the array, i.e. the one with the latest version number
+                if (!result) result = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, 0);
+            }
+        }
+    }
+    return result;
+}
+
+#else /* AVOID_WEAK_COLLECTIONS */
+
+static void _CFBundleAddToTables(CFBundleRef bundle, Boolean alreadyLocked) {
+    CFStringRef bundleID = CFBundleGetIdentifier(bundle);
+
+    if (!alreadyLocked) __CFSpinLock(&CFBundleGlobalDataLock);
+    
+    // Add to the _allBundles list
+    if (!_allBundles) _allBundles = [[__CFHashTable alloc] initWithOptions:CFPointerFunctionsZeroingWeakMemory capacity:0];
+    [_allBundles addObject:(id)bundle];
+    
+    // Add to the table that maps urls to bundles
+    if (!_bundlesByURL) _bundlesByURL = [[__CFMapTable alloc] initWithKeyOptions:CFPointerFunctionsStrongMemory valueOptions:CFPointerFunctionsZeroingWeakMemory capacity:0];
+    [_bundlesByURL setObject:(id)bundle forKey:(id)bundle->_url];
+
+    // Add to the table that maps identifiers to bundles
+    if (bundleID) {
+        __CFPointerArray *bundlesWithThisID = nil;
+        CFBundleRef existingBundle = NULL;
+        if (!_bundlesByIdentifier) {
+            // Create this from the default allocator
+            _bundlesByIdentifier = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        }
+        bundlesWithThisID = (__CFPointerArray *)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
+        if (bundlesWithThisID) {
+            CFIndex i, count = (CFIndex)[bundlesWithThisID count];
+            UInt32 existingVersion, newVersion = CFBundleGetVersionNumber(bundle);
+            for (i = 0; i < count; i++) {
+                existingBundle = (CFBundleRef)[bundlesWithThisID pointerAtIndex:i];
+                if (!existingBundle) continue;
+                existingVersion = CFBundleGetVersionNumber(existingBundle);
+                // If you load two bundles with the same identifier and the same version, the last one wins.
+                if (newVersion >= existingVersion) break;
+            }
+            if (i < count) {
+                [bundlesWithThisID insertPointer:bundle atIndex:i];
+            } else {
+                [bundlesWithThisID addPointer:bundle];
+            }
+        } else {
+            bundlesWithThisID = [[__CFPointerArray alloc] initWithOptions:CFPointerFunctionsZeroingWeakMemory];
+            [bundlesWithThisID addPointer:bundle];
+            CFDictionarySetValue(_bundlesByIdentifier, bundleID, bundlesWithThisID);
+            [bundlesWithThisID release];
+        }
+    }
+    if (!alreadyLocked) __CFSpinUnlock(&CFBundleGlobalDataLock);
+}
+
+static void _CFBundleRemoveFromTables(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef bundleID) {
+    __CFSpinLock(&CFBundleGlobalDataLock);
+    // Remove from the various lists
+    if (_allBundles && [_allBundles member:(id)bundle]) [_allBundles removeObject:(id)bundle];
+
+    // Remove from the table that maps urls to bundles
+    if (bundleURL && _bundlesByURL) {
+        CFBundleRef bundleForURL = (CFBundleRef)[_bundlesByURL objectForKey:(id)bundleURL];
+        if (bundleForURL == bundle) [_bundlesByURL removeObjectForKey:(id)bundleURL];
+    }
+    
+    // Remove from the table that maps identifiers to bundles
+    if (bundleID && _bundlesByIdentifier) {
+        __CFPointerArray *bundlesWithThisID = (__CFPointerArray *)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
+        if (bundlesWithThisID) {
+            CFIndex count = (CFIndex)[bundlesWithThisID count];
+            while (count-- > 0) if (bundle == (CFBundleRef)[bundlesWithThisID pointerAtIndex:count]) [bundlesWithThisID removePointerAtIndex:count];
+            [bundlesWithThisID compact];
+            if (0 == [bundlesWithThisID count]) CFDictionaryRemoveValue(_bundlesByIdentifier, bundleID);
+        }
+    }
+    __CFSpinUnlock(&CFBundleGlobalDataLock);
+}
+
+static CFBundleRef _CFBundleCopyBundleForURL(CFURLRef url, Boolean alreadyLocked) {
+    CFBundleRef result = NULL;
+    if (!alreadyLocked) __CFSpinLock(&CFBundleGlobalDataLock);
+    if (_bundlesByURL) result = (CFBundleRef)[_bundlesByURL objectForKey:(id)url];
+    if (result && !result->_url) {
+        result = NULL;
+        [_bundlesByURL removeObjectForKey:(id)url];
+    }
+    if (result) CFRetain(result);
+    if (!alreadyLocked) __CFSpinUnlock(&CFBundleGlobalDataLock);
+    return result;
+}
+
+static CFBundleRef _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(CFStringRef bundleID) {
+    CFBundleRef result = NULL;
+    if (_bundlesByIdentifier && bundleID) {
+        // Note that this array is maintained in descending order by version number
+        __CFPointerArray *bundlesWithThisID = (__CFPointerArray *)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
+        if (bundlesWithThisID && [bundlesWithThisID count] > 0) {
+            // First check for loaded bundles so we will always prefer a loaded to an unloaded bundle
+            for (id bundle in bundlesWithThisID) {
+                if (bundle && CFBundleIsExecutableLoaded((CFBundleRef)bundle)) {
+                    result = (CFBundleRef)bundle;
+                    break;
+                }
+            }
+            // If no loaded bundle, simply take the first item in the array, i.e. the one with the latest version number
+            if (!result) {
+                for (id bundle in bundlesWithThisID) {
+                    if (bundle) {
+                        result = (CFBundleRef)bundle;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+
+#endif /* AVOID_WEAK_COLLECTIONS */
+
+#if 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+static CFStringRef _CFBundleCopyWrapperInBinaryDirectory(CFStringRef strippedExeName) {
+    char buff[CFMaxPathSize];
+    CFIndex buffLen;
+    int i;
+
+    CFArrayRef binaryDirs = _CFGetWindowsBinaryDirectories();
+    int count = CFArrayGetCount(binaryDirs);
+    CFStringRef str;
+    struct stat garbage;
+    for (i = 0; i < count; i++) {
+        str = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@\\%@.app"), CFArrayGetValueAtIndex(binaryDirs,i), strippedExeName);
+        buffLen = CFStringGetLength(str);
+        CFStringGetFileSystemRepresentation(str, buff, CFMaxPathSize);
+        if (stat(buff, &garbage) == 0) return str;
+        CFRelease(str);
+    }
+    return NULL;
+}
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
 
 static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
     //!!! need to handle frameworks, NT; need to integrate with NSBundle - drd
@@ -316,14 +514,54 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
     if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
     CFStringGetCharacters(str, CFRangeMake(0, buffLen), buff);
 
-    if (!url) {
-	buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);  // Remove exe name
+#if 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+    CFIndex startOfBinaryName = _CFLengthAfterDeletingLastPathComponent(buff, buffLen) + 1;  // Remove exe name
+    CFIndex endOfBinaryName = _CFLengthAfterDeletingPathExtension(buff, buffLen);
+    if (startOfBinaryName > 0 && startOfBinaryName < buffLen && endOfBinaryName > 0 && endOfBinaryName <= buffLen) {
+        CFStringRef strippedExeName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfBinaryName]), endOfBinaryName - startOfBinaryName);
+        CFStringRef wrapperInBinaryDirectory = _CFBundleCopyWrapperInBinaryDirectory(strippedExeName);
+        if (wrapperInBinaryDirectory) {
+            buffLen = CFStringGetLength(wrapperInBinaryDirectory);
+            if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
+            CFStringGetCharacters(wrapperInBinaryDirectory, CFRangeMake(0, buffLen), buff);
+            CFRelease(wrapperInBinaryDirectory);
+            outstr = CFStringCreateWithCharactersNoCopy(kCFAllocatorSystemDefault, buff, buffLen, kCFAllocatorNull);
+            url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, outstr, PLATFORM_PATH_STYLE, true);
+            CFRelease(outstr);
+            return url;
+        }
+    }
+#elif DEPLOYMENT_TARGET_WINDOWS
+    // Is this a .dll or .exe?
+    if (buffLen >= 5 && (_wcsnicmp((wchar_t *)&(buff[buffLen-4]), L".dll", 4) == 0 || _wcsnicmp((wchar_t *)&(buff[buffLen-4]), L".exe", 4) == 0)) {
+        CFIndex extensionLength = CFStringGetLength(_CFBundleWindowsResourceDirectoryExtension);
+        buffLen -= 4;
+        // If this is an _debug, we should strip that before looking for the bundle
+        if (buffLen >= 7 && (_wcsnicmp((wchar_t *)&buff[buffLen-6], L"_debug", 6) == 0)) buffLen -= 6;
 
-#if DEPLOYMENT_TARGET_MACOSX
+        if (buffLen + 1 + extensionLength < CFMaxPathSize) {
+            buff[buffLen] = '.';
+            buffLen ++;
+            CFStringGetCharacters(_CFBundleWindowsResourceDirectoryExtension, CFRangeMake(0, extensionLength), buff + buffLen);
+            buffLen += extensionLength;
+            outstr = CFStringCreateWithCharactersNoCopy(kCFAllocatorSystemDefault, buff, buffLen, kCFAllocatorNull);
+            url = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, outstr, PLATFORM_PATH_STYLE, true);
+            CFRelease(outstr);
+        }
+    }
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
+
+    if (!url) {
+        buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);  // Remove exe name
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
         if (buffLen > 0) {
             // See if this is a new bundle.  If it is, we have to remove more path components.
             CFIndex startOfLastDir = _CFStartOfLastPathComponent(buff, buffLen);
-            if ((startOfLastDir > 0) && (startOfLastDir < buffLen)) {
+            if (startOfLastDir > 0 && startOfLastDir < buffLen) {
                 CFStringRef lastDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfLastDir]), buffLen - startOfLastDir);
 
                 if (CFEqual(lastDirName, _CFBundleGetPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetAlternatePlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherAlternatePlatformExecutablesSubdirectoryName())) {
@@ -335,7 +573,7 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
                     if (buffLen > 0) {
                         // Remove executables folder (if present)
                         CFIndex startOfNextDir = _CFStartOfLastPathComponent(buff, buffLen);
-                        if ((startOfNextDir > 0) && (startOfNextDir < buffLen)) {
+                        if (startOfNextDir > 0 && startOfNextDir < buffLen) {
                             CFStringRef nextDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfNextDir]), buffLen - startOfNextDir);
                             if (CFEqual(nextDirName, _CFBundleExecutablesDirectoryName)) buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
                             CFRelease(nextDirName);
@@ -344,13 +582,46 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
                     if (buffLen > 0) {
                         // Remove support files folder
                         buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
+#elif 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+    if (buffLen > 0) {
+        // See if this is a new bundle.  If it is, we have to remove more path components.
+        CFIndex startOfLastDir = _CFStartOfLastPathComponent(buff, buffLen);
+        if (startOfLastDir > 0 && startOfLastDir < buffLen) {
+            CFStringRef lastDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfLastDir]), buffLen - startOfLastDir);
+
+            if (CFEqual(lastDirName, _CFBundleGetPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetAlternatePlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherPlatformExecutablesSubdirectoryName()) || CFEqual(lastDirName, _CFBundleGetOtherAlternatePlatformExecutablesSubdirectoryName())) {
+                // This is a new bundle.  Back off a few more levels
+                if (buffLen > 0) {
+                    // Remove platform folder
+                    buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
+                }
+                if (buffLen > 0) {
+                    // Remove executables folder (if present)
+                    CFIndex startOfNextDir = _CFStartOfLastPathComponent(buff, buffLen);
+                    if (startOfNextDir > 0 && startOfNextDir < buffLen) {
+                        CFStringRef nextDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfNextDir]), buffLen - startOfNextDir);
+                        if (CFEqual(nextDirName, _CFBundleExecutablesDirectoryName)) buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
+                        CFRelease(nextDirName);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
                     }
                 }
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
                 CFRelease(lastDirName);
             }
         }
+#elif 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+                if (buffLen > 0) {
+                    // Remove support files folder
+                    buffLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
+                }
+            }
+            CFRelease(lastDirName);
+        }
+    }
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
         if (buffLen > 0) {
@@ -374,9 +645,16 @@ static CFURLRef _CFBundleCopyResolvedURLForExecutableURL(CFURLRef url) {
         if (buffLen > CFMaxPathSize) buffLen = CFMaxPathSize;
         CFStringGetCharacters(str, CFRangeMake(0, buffLen), buff);
         len1 = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
-        if (len1 > 0 && len1 + 1 < buffLen) {
+        if (len1 > 0 && len1 + 1 < buffLen) {          
             str1 = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, buff, len1);
-            str2 = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, buff + len1 + 1, buffLen - len1 - 1);
+            CFIndex skipSlashCount = 1;
+#if DEPLOYMENT_TARGET_WINDOWS
+            // On Windows, _CFLengthAfterDeletingLastPathComponent will return a value of 3 if the path is at the root (e.g. C:\). This includes the \, which is not the case for URLs with subdirectories
+            if (len1 == 3 && buff[1] == ':' && buff[2] == '\\') {
+                skipSlashCount = 0;
+            }
+#endif
+            str2 = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, buff + len1 + skipSlashCount, buffLen - len1 - skipSlashCount);
             if (str1 && str2) {
                 url1 = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, str1, PLATFORM_PATH_STYLE, true);
                 if (url1) {
@@ -414,41 +692,48 @@ CFURLRef _CFBundleCopyBundleURLForExecutableURL(CFURLRef url) {
     return outurl;
 }
 
-CFBundleRef _CFBundleCreateIfLooksLikeBundle(CFAllocatorRef allocator, CFURLRef url) {
-    CFBundleRef bundle = CFBundleCreate(allocator, url);
-    
+static uint8_t _CFBundleEffectiveLayoutVersion(CFBundleRef bundle) {
+    uint8_t localVersion = bundle->_version;
     // exclude type 0 bundles with no binary (or CFM binary) and no Info.plist, since they give too many false positives
-    if (bundle && 0 == bundle->_version) {
+    if (0 == localVersion) {
         CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
         if (!infoDict || 0 == CFDictionaryGetCount(infoDict)) {
-#if defined(BINARY_SUPPORT_CFM) && defined(BINARY_SUPPORT_DYLD)
+#if defined(BINARY_SUPPORT_DYLD)
             CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
             if (executableURL) {
                 if (bundle->_binaryType == __CFBundleUnknownBinary) bundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
                 if (bundle->_binaryType == __CFBundleCFMBinary || bundle->_binaryType == __CFBundleUnreadableBinary) {
-                    bundle->_version = 4;
+                    localVersion = 4;
                 } else {
                     bundle->_resourceData._executableLacksResourceFork = true;
                 }
                 CFRelease(executableURL);
             } else {
-                bundle->_version = 4;
+                localVersion = 4;
             }
 #elif defined(BINARY_SUPPORT_CFM)
-            bundle->_version = 4;
+            localVersion = 4;
 #else 
             CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
             if (executableURL) {
                 CFRelease(executableURL);
             } else {
-                bundle->_version = 4;
+                localVersion = 4;
             }
 #endif /* BINARY_SUPPORT_CFM && BINARY_SUPPORT_DYLD */
         }
     }
-    if (bundle && (3 == bundle->_version || 4 == bundle->_version)) {
-        CFRelease(bundle);
-        bundle = NULL;
+    return localVersion;
+}
+
+CFBundleRef _CFBundleCreateIfLooksLikeBundle(CFAllocatorRef allocator, CFURLRef url) {
+    CFBundleRef bundle = CFBundleCreate(allocator, url);
+    if (bundle) {
+        uint8_t localVersion = _CFBundleEffectiveLayoutVersion(bundle);
+        if (3 == localVersion || 4 == localVersion) {
+            CFRelease(bundle);
+            bundle = NULL;
+        }
     }
     return bundle;
 }
@@ -469,6 +754,64 @@ CFBundleRef _CFBundleCreateWithExecutableURLIfLooksLikeBundle(CFAllocatorRef all
     CFURLRef bundleURL = _CFBundleCopyBundleURLForExecutableURL(url), resolvedURL = _CFBundleCopyResolvedURLForExecutableURL(url);
     if (bundleURL && resolvedURL) {
         bundle = _CFBundleCreateIfLooksLikeBundle(allocator, bundleURL);
+        if (bundle) {
+            CFURLRef executableURL = _CFBundleCopyExecutableURLIgnoringCache(bundle);
+            char buff1[CFMaxPathSize], buff2[CFMaxPathSize];
+            if (!executableURL || !CFURLGetFileSystemRepresentation(resolvedURL, true, (uint8_t *)buff1, CFMaxPathSize) || !CFURLGetFileSystemRepresentation(executableURL, true, (uint8_t *)buff2, CFMaxPathSize) || 0 != strcmp(buff1, buff2)) {
+                CFRelease(bundle);
+                bundle = NULL;
+            }
+            if (executableURL) CFRelease(executableURL);
+        }
+    }
+    if (bundleURL) CFRelease(bundleURL);
+    if (resolvedURL) CFRelease(resolvedURL);
+    return bundle;
+}
+
+CFBundleRef _CFBundleCreateIfMightBeBundle(CFAllocatorRef allocator, CFURLRef url) {
+    CFBundleRef bundle = CFBundleCreate(allocator, url);
+    if (bundle) {
+        Boolean mightBeBundle = true, isDir = false;
+        uint8_t localVersion = _CFBundleEffectiveLayoutVersion(bundle);
+        if (3 == localVersion) {
+            CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
+            CFURLRef executableURL, supportFilesURL, resourceSpecificationFileURL;
+            CFArrayRef supportedPlatforms;
+            CFStringRef resourceSpecificationFile;
+            
+            mightBeBundle = false;
+            if (infoDict && CFDictionaryGetValue(infoDict, kCFBundleExecutableKey) && (executableURL = _CFBundleCopyExecutableURLIgnoringCache(bundle))) {
+                supportedPlatforms = _CFBundleGetSupportedPlatforms(bundle);
+                resourceSpecificationFile = (CFStringRef)CFDictionaryGetValue(infoDict, _kCFBundleResourceSpecificationKey);
+                if (supportedPlatforms && CFArrayGetCount(supportedPlatforms) > 0 && CFArrayGetFirstIndexOfValue(supportedPlatforms, CFRangeMake(0, CFArrayGetCount(supportedPlatforms)), CFSTR("iPhoneOS")) >= 0) {
+                    mightBeBundle = true;
+                } else if (resourceSpecificationFile && CFGetTypeID(resourceSpecificationFile) == CFStringGetTypeID() && (supportFilesURL = CFBundleCopySupportFilesDirectoryURL(bundle))) {
+                    resourceSpecificationFileURL = CFURLCreateWithFileSystemPathRelativeToBase(allocator, resourceSpecificationFile, kCFURLPOSIXPathStyle, false, supportFilesURL);
+                    if (resourceSpecificationFileURL) {
+                        if (_CFIsResourceAtURL(resourceSpecificationFileURL, &isDir) && !isDir) mightBeBundle = true;
+                        CFRelease(resourceSpecificationFileURL);
+                    }
+                    CFRelease(supportFilesURL);
+                }
+                CFRelease(executableURL);
+            }
+        } else if (4 == localVersion) {
+            mightBeBundle = false;
+        }
+        if (!mightBeBundle) {
+            CFRelease(bundle);
+            bundle = NULL;
+        }
+    }
+    return bundle;
+}
+
+CFBundleRef _CFBundleCreateWithExecutableURLIfMightBeBundle(CFAllocatorRef allocator, CFURLRef url) {
+    CFBundleRef bundle = NULL;
+    CFURLRef bundleURL = _CFBundleCopyBundleURLForExecutableURL(url), resolvedURL = _CFBundleCopyResolvedURLForExecutableURL(url);
+    if (bundleURL && resolvedURL) {
+        bundle = _CFBundleCreateIfMightBeBundle(allocator, bundleURL);
         if (bundle) {
             CFURLRef executableURL = _CFBundleCopyExecutableURLIgnoringCache(bundle);
             char buff1[CFMaxPathSize], buff2[CFMaxPathSize];
@@ -522,7 +865,7 @@ static void _CFBundleInitializeMainBundleInfoDictionaryAlreadyLocked(CFStringRef
 #if defined(BINARY_SUPPORT_DYLD)
         if (_mainBundle->_binaryType == __CFBundleDYLDExecutableBinary) {
             if (_mainBundle->_infoDict) CFRelease(_mainBundle->_infoDict);
-            _mainBundle->_infoDict = _CFBundleGrokInfoDictFromMainExecutable();
+            _mainBundle->_infoDict = (CFDictionaryRef)_CFBundleGrokInfoDictFromMainExecutable();
         }
 #endif /* BINARY_SUPPORT_DYLD */
 #if defined(BINARY_SUPPORT_CFM)
@@ -553,6 +896,21 @@ static void _CFBundleInitializeMainBundleInfoDictionaryAlreadyLocked(CFStringRef
             if (_mainBundle->_binaryType == __CFBundleUnreadableBinary && _mainBundle->_infoDict && CFDictionaryGetValue(_mainBundle->_infoDict, kCFBundleDevelopmentRegionKey)) versRegionOverrides = true;
         }
 #endif /* BINARY_SUPPORT_CFM */
+    } else {
+#if defined(BINARY_SUPPORT_DYLD)
+        if (_mainBundle->_binaryType == __CFBundleDYLDExecutableBinary) {
+            // if dyld and not main executable for bundle, prefer info dictionary from executable
+            CFStringRef executableName = _CFBundleCopyExecutableName(kCFAllocatorSystemDefault, _mainBundle, NULL, NULL);
+            if (!executableName || !executablePath || !CFStringHasSuffix(executablePath, executableName)) {
+                CFDictionaryRef infoDictFromExecutable = (CFDictionaryRef)_CFBundleGrokInfoDictFromMainExecutable();
+                if (infoDictFromExecutable && CFDictionaryGetCount(infoDictFromExecutable) > 0) {
+                    if (_mainBundle->_infoDict) CFRelease(_mainBundle->_infoDict);
+                    _mainBundle->_infoDict = infoDictFromExecutable;
+                }
+            }
+            if (executableName) CFRelease(executableName);
+        }
+#endif /* BINARY_SUPPORT_DYLD */
     }
     if (!_mainBundle->_infoDict) _mainBundle->_infoDict = CFDictionaryCreateMutable(CFGetAllocator(_mainBundle), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!CFDictionaryGetValue(_mainBundle->_infoDict, _kCFBundleExecutablePathKey)) CFDictionarySetValue((CFMutableDictionaryRef)(_mainBundle->_infoDict), _kCFBundleExecutablePathKey, executablePath);
@@ -632,22 +990,26 @@ static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
                         _mainBundle->_binaryType = __CFBundleNoBinary;
                     } else {
                         _mainBundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
-#if defined(BINARY_SUPPORT_CFM)
                         if (_mainBundle->_binaryType != __CFBundleCFMBinary && _mainBundle->_binaryType != __CFBundleUnreadableBinary) _mainBundle->_resourceData._executableLacksResourceFork = true;
-#endif /* BINARY_SUPPORT_CFM */
                     }
                 }                
 #endif /* BINARY_SUPPORT_DYLD */
-#if defined(BINARY_SUPPORT_DYLD)
                 // get cookie for already-loaded main bundle
+#if defined(BINARY_SUPPORT_DLFCN)
+                if (!_mainBundle->_handleCookie) {
+                    _mainBundle->_handleCookie = dlopen(NULL, RTLD_NOLOAD | RTLD_FIRST);
+#if LOG_BUNDLE_LOAD
+                    printf("main bundle %p getting handle %p\n", _mainBundle, _mainBundle->_handleCookie);
+#endif /* LOG_BUNDLE_LOAD */
+                }
+#elif defined(BINARY_SUPPORT_DYLD)
                 if (_mainBundle->_binaryType == __CFBundleDYLDExecutableBinary && !_mainBundle->_imageCookie) {
-                    // ??? need better way to specify main executable image
                     _mainBundle->_imageCookie = (void *)_dyld_get_image_header(0);
 #if LOG_BUNDLE_LOAD
                     printf("main bundle %p getting image %p\n", _mainBundle, _mainBundle->_imageCookie);
 #endif /* LOG_BUNDLE_LOAD */
                 }
-#endif /* BINARY_SUPPORT_DYLD */
+#endif /* BINARY_SUPPORT_DLFCN */
                 _CFBundleInitializeMainBundleInfoDictionaryAlreadyLocked(str);
                 // Perform delayed final processing steps.
                 // This must be done after _isLoaded has been set, for security reasons (3624341).
@@ -676,52 +1038,41 @@ CFBundleRef CFBundleGetMainBundle(void) {
 
 CFBundleRef CFBundleGetBundleWithIdentifier(CFStringRef bundleID) {
     CFBundleRef result = NULL;
-    CFArrayRef bundlesWithThisID;
     if (bundleID) {
         __CFSpinLock(&CFBundleGlobalDataLock);
         (void)_CFBundleGetMainBundleAlreadyLocked();
-        if (_bundlesByIdentifier) {
-            bundlesWithThisID = (CFArrayRef)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
-            if (bundlesWithThisID && CFArrayGetCount(bundlesWithThisID) > 0) result = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, 0);
-        }
-#if DEPLOYMENT_TARGET_MACOSX
+        result = _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(bundleID);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
         if (!result) {
             // Try to create the bundle for the caller and try again
             void *p = __builtin_return_address(0);
             if (p) {
                 CFStringRef imagePath = NULL;
-#if defined(BINARY_SUPPORT_DLFCN)
-                if (!imagePath && _useDlfcn) imagePath = _CFBundleDlfcnCopyLoadedImagePathForPointer(p);
-#endif /* BINARY_SUPPORT_DLFCN */
 #if defined(BINARY_SUPPORT_DYLD)
                 if (!imagePath) imagePath = _CFBundleDYLDCopyLoadedImagePathForPointer(p);
+#elif defined(BINARY_SUPPORT_DLFCN)
+                if (!imagePath) imagePath = _CFBundleDlfcnCopyLoadedImagePathForPointer(p);
 #endif /* BINARY_SUPPORT_DYLD */
                 if (imagePath) {
                     _CFBundleEnsureBundleExistsForImagePath(imagePath);
                     CFRelease(imagePath);
                 }
-                if (_bundlesByIdentifier) {
-                    bundlesWithThisID = (CFArrayRef)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
-                    if (bundlesWithThisID && CFArrayGetCount(bundlesWithThisID) > 0) result = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, 0);
-                }
+                result = _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(bundleID);
             }
         }
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
         if (!result) {
             // Try to guess the bundle from the identifier and try again
             _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(bundleID);
-            if (_bundlesByIdentifier) {
-                bundlesWithThisID = (CFArrayRef)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
-                if (bundlesWithThisID && CFArrayGetCount(bundlesWithThisID) > 0) result = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, 0);
-            }
+            result = _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(bundleID);
         }
         if (!result) {
             // Make sure all bundles have been created and try again.
             _CFBundleEnsureAllBundlesUpToDateAlreadyLocked();
-            if (_bundlesByIdentifier) {
-                bundlesWithThisID = (CFArrayRef)CFDictionaryGetValue(_bundlesByIdentifier, bundleID);
-                if (bundlesWithThisID && CFArrayGetCount(bundlesWithThisID) > 0) result = (CFBundleRef)CFArrayGetValueAtIndex(bundlesWithThisID, 0);
-            }
+            result = _CFBundlePrimitiveGetBundleWithIdentifierAlreadyLocked(bundleID);
         }
         __CFSpinUnlock(&CFBundleGlobalDataLock);
     }
@@ -756,9 +1107,9 @@ static CFStringRef __CFBundleCopyDescription(CFTypeRef cf) {
             break;
     }
     if (((CFBundleRef)cf)->_plugInData._isPlugIn) {
-        retval = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFBundle/CFPlugIn %p <%@> (%@%sloaded)"), cf, path, binaryType, ((CFBundleRef)cf)->_isLoaded ? "" : "not ");
+        retval = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFBundle/CFPlugIn %p <%@> (%@%@loaded)"), cf, path, binaryType, ((CFBundleRef)cf)->_isLoaded ? CFSTR("") : CFSTR("not "));
     } else {
-        retval = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFBundle %p <%@> (%@%sloaded)"), cf, path, binaryType, ((CFBundleRef)cf)->_isLoaded ? "" : "not ");
+        retval = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFBundle %p <%@> (%@%@loaded)"), cf, path, binaryType, ((CFBundleRef)cf)->_isLoaded ? CFSTR("") : CFSTR("not "));
     }
     if (path) CFRelease(path);
     return retval;
@@ -772,22 +1123,20 @@ static void _CFBundleDeallocateGlue(const void *key, const void *value, void *co
 static void __CFBundleDeallocate(CFTypeRef cf) {
     CFBundleRef bundle = (CFBundleRef)cf;
     CFAllocatorRef allocator;
+    CFURLRef bundleURL;
+    CFStringRef bundleID = NULL;
     
     __CFGenericValidateType(cf, __kCFBundleTypeID);
-
     allocator = CFGetAllocator(bundle);
-
-    /* Unload it */
+    bundleURL = bundle->_url;
+    bundle->_url = NULL;
+    if (bundle->_infoDict) bundleID = (CFStringRef)CFDictionaryGetValue(bundle->_infoDict, kCFBundleIdentifierKey);
+    _CFBundleRemoveFromTables(bundle, bundleURL, bundleID);
     CFBundleUnloadExecutable(bundle);
-
-    // Clean up plugIn stuff
-    _CFBundleDeallocatePlugIn(bundle);
-    
-    _CFBundleRemoveFromTables(bundle);
-
-    if (bundle->_url) {
-        _CFBundleFlushCachesForURL(bundle->_url);
-        CFRelease(bundle->_url);
+    _CFBundleDeallocatePlugIn(bundle);    
+    if (bundleURL) {
+        _CFBundleFlushCachesForURL(bundleURL);
+        CFRelease(bundleURL);
     }
     if (bundle->_infoDict) CFRelease(bundle->_infoDict);
     if (bundle->_modDate) CFRelease(bundle->_modDate);
@@ -814,16 +1163,6 @@ static const CFRuntimeClass __CFBundleClass = {
 
 __private_extern__ void __CFBundleInitialize(void) {
     __kCFBundleTypeID = _CFRuntimeRegisterClass(&__CFBundleClass);
-#if defined(BINARY_SUPPORT_DLFCN)
-    _useDlfcn = true;
-#if defined(BINARY_SUPPORT_DYLD)
-    if (getenv("CFBundleUseDYLD")) _useDlfcn = false;
-#endif /* BINARY_SUPPORT_DYLD */
-#endif /* BINARY_SUPPORT_DLFCN */
-}
-
-Boolean _CFBundleUseDlfcn(void) {
-    return _useDlfcn;
 }
 
 CFTypeID CFBundleGetTypeID(void) {
@@ -839,7 +1178,8 @@ CFBundleRef _CFBundleGetExistingBundleWithBundleURL(CFURLRef bundleURL) {
     
     newURL = CFURLCreateFromFileSystemRepresentation(kCFAllocatorSystemDefault, (uint8_t *)buff, strlen(buff), true);
     if (!newURL) newURL = (CFURLRef)CFRetain(bundleURL);
-    bundle = _CFBundleFindByURL(newURL, false);
+    bundle = _CFBundleCopyBundleForURL(newURL, false);
+    if (bundle) CFRelease(bundle);
     CFRelease(newURL);
     return bundle;
 }
@@ -857,16 +1197,29 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
 
     newURL = CFURLCreateFromFileSystemRepresentation(allocator, (uint8_t *)buff, strlen(buff), true);
     if (!newURL) newURL = (CFURLRef)CFRetain(bundleURL);
-    bundle = _CFBundleFindByURL(newURL, alreadyLocked);
+    bundle = _CFBundleCopyBundleForURL(newURL, alreadyLocked);
     if (bundle) {
-        CFRetain(bundle);
         CFRelease(newURL);
         return bundle;
     }
     
     if (!_CFBundleURLLooksLikeBundleVersion(newURL, &localVersion)) {
         localVersion = 3;
-        if (_CFGetFileProperties(allocator, newURL, &exists, &mode, NULL, &modDate, NULL, NULL) == 0) {
+        SInt32 res = _CFGetFileProperties(allocator, newURL, &exists, &mode, NULL, &modDate, NULL, NULL);
+#if DEPLOYMENT_TARGET_WINDOWS
+        if (!(res == 0 && exists && ((mode & S_IFMT) == S_IFDIR))) {
+            // 2nd chance at finding a bundle path - remove the last path component (e.g., mybundle.resources) and try again
+            if (modDate) {
+                CFRelease(modDate);
+                modDate = NULL;
+            }
+            CFURLRef shorterPath = CFURLCreateCopyDeletingLastPathComponent(allocator, newURL);
+            CFRelease(newURL);
+            newURL = shorterPath;
+            res = _CFGetFileProperties(allocator, newURL, &exists, &mode, NULL, &modDate, NULL, NULL);
+        }
+#endif
+        if (res == 0) {
             if (!exists || ((mode & S_IFMT) != S_IFDIR)) {
                 if (modDate) CFRelease(modDate);
                 CFRelease(newURL);
@@ -910,11 +1263,14 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
     bundle->_isLoaded = false;
     bundle->_sharesStringsFiles = false;
     
-    if (!getenv("CFBundleDisableStringsSharing") && 
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    if (!__CFgetenv("CFBundleDisableStringsSharing") && 
         (strncmp(buff, "/System/Library/Frameworks", 26) == 0) && 
-#endif
         (strncmp(buff + strlen(buff) - 10, ".framework", 10) == 0)) bundle->_sharesStringsFiles = true;
+#elif DEPLOYMENT_TARGET_WINDOWS
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
 
     bundle->_connectionCookie = NULL;
     bundle->_handleCookie = NULL;
@@ -923,11 +1279,7 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
 
     bundle->_glueDict = NULL;
     
-#if defined(BINARY_SUPPORT_CFM)
     bundle->_resourceData._executableLacksResourceFork = false;
-#else /* BINARY_SUPPORT_CFM */
-    bundle->_resourceData._executableLacksResourceFork = true;
-#endif /* BINARY_SUPPORT_CFM */
     bundle->_resourceData._infoDictionaryFromResourceFork = false;
     bundle->_resourceData._stringTableCache = NULL;
 
@@ -937,6 +1289,8 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
     bundle->_plugInData._instanceCount = 0;
     bundle->_plugInData._factories = NULL;
 
+    bundle->_bundleLoadingLock = CFSpinLockInit;
+    
     CFBundleGetInfoDictionary(bundle);
     
     _CFBundleAddToTables(bundle, alreadyLocked);
@@ -953,7 +1307,9 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
     return bundle;
 }
 
-CFBundleRef CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL) {return _CFBundleCreate(allocator, bundleURL, false, true);}
+CFBundleRef CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL) {
+    return _CFBundleCreate(allocator, bundleURL, false, true);
+}
 
 CFArrayRef CFBundleCreateBundlesFromDirectory(CFAllocatorRef alloc, CFURLRef directoryURL, CFStringRef bundleType) {
     CFMutableArrayRef bundles = CFArrayCreateMutable(alloc, 0, &kCFTypeArrayCallBacks);
@@ -975,9 +1331,7 @@ CFArrayRef CFBundleCreateBundlesFromDirectory(CFAllocatorRef alloc, CFURLRef dir
 }
 
 CFURLRef CFBundleCopyBundleURL(CFBundleRef bundle) {
-    if (bundle->_url) {
-        CFRetain(bundle->_url);
-    }
+    if (bundle->_url) CFRetain(bundle->_url);
     return bundle->_url;
 }
 
@@ -991,7 +1345,10 @@ CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle) {
     if (!bundle->_searchLanguages) {
         CFMutableArrayRef langs = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
         CFStringRef devLang = CFBundleGetDevelopmentRegion(bundle);
-        
+
+#if DEPLOYMENT_TARGET_WINDOWS
+        if (_defaultLocalization) CFArrayAppendValue(langs, _defaultLocalization);
+#endif
         _CFBundleAddPreferredLprojNamesInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version, bundle->_infoDict, langs, devLang);
 
         if (CFArrayGetCount(langs) == 0) {
@@ -1002,9 +1359,7 @@ CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle) {
             // if none of the preferred localizations are present, fall back on a random localization that is present
             CFArrayRef localizations = CFBundleCopyBundleLocalizations(bundle);
             if (localizations) {
-                if (CFArrayGetCount(localizations) > 0) {
-                    _CFBundleAddPreferredLprojNamesInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version, bundle->_infoDict, langs, (CFStringRef)CFArrayGetValueAtIndex(localizations, 0));
-                }
+                if (CFArrayGetCount(localizations) > 0) _CFBundleAddPreferredLprojNamesInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version, bundle->_infoDict, langs, (CFStringRef)CFArrayGetValueAtIndex(localizations, 0));
                 CFRelease(localizations);
             }
         }
@@ -1036,22 +1391,28 @@ CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle) {
                 CFArrayAppendValue(langs, CFSTR("en"));
             }
         }
-        bundle->_searchLanguages = langs;
+        if (!OSAtomicCompareAndSwapPtrBarrier(NULL, (void *)langs, (void * volatile *)&(bundle->_searchLanguages))) CFRelease(langs);
     }
     return bundle->_searchLanguages;
 }
 
-CFDictionaryRef CFBundleCopyInfoDictionaryInDirectory(CFURLRef url) {return _CFBundleCopyInfoDictionaryInDirectory(kCFAllocatorSystemDefault, url, NULL);}
+CFDictionaryRef CFBundleCopyInfoDictionaryInDirectory(CFURLRef url) {
+    return _CFBundleCopyInfoDictionaryInDirectory(kCFAllocatorSystemDefault, url, NULL);
+}
 
 CFDictionaryRef CFBundleGetInfoDictionary(CFBundleRef bundle) {
     if (!bundle->_infoDict) bundle->_infoDict = _CFBundleCopyInfoDictionaryInDirectoryWithVersion(CFGetAllocator(bundle), bundle->_url, bundle->_version);
     return bundle->_infoDict;
 }
 
-CFDictionaryRef _CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {return CFBundleGetLocalInfoDictionary(bundle);}
+CFDictionaryRef _CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
+    return CFBundleGetLocalInfoDictionary(bundle);
+}
 
 CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
-    if (!bundle->_localInfoDict) {
+    static CFSpinLock_t CFBundleLocalInfoLock = CFSpinLockInit;
+    CFDictionaryRef localInfoDict = bundle->_localInfoDict;
+    if (!localInfoDict) {
         CFURLRef url = CFBundleCopyResourceURL(bundle, _CFBundleLocalInfoName, _CFBundleStringTableType, NULL);
         if (url) {
             CFDataRef data;
@@ -1059,21 +1420,31 @@ CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
             CFStringRef errStr = NULL;
             
             if (CFURLCreateDataAndPropertiesFromResource(CFGetAllocator(bundle), url, &data, NULL, NULL, &errCode)) {
-                bundle->_localInfoDict = (CFDictionaryRef)CFPropertyListCreateFromXMLData(CFGetAllocator(bundle), data, kCFPropertyListImmutable, &errStr);
+                localInfoDict = (CFDictionaryRef)CFPropertyListCreateFromXMLData(CFGetAllocator(bundle), data, kCFPropertyListImmutable, &errStr);
                 if (errStr) CFRelease(errStr);
-                if (bundle->_localInfoDict && CFDictionaryGetTypeID() != CFGetTypeID(bundle->_localInfoDict)) {
-                    CFRelease(bundle->_localInfoDict);
-                    bundle->_localInfoDict = NULL;
+                if (localInfoDict && CFDictionaryGetTypeID() != CFGetTypeID(localInfoDict)) {
+                    CFRelease(localInfoDict);
+                    localInfoDict = NULL;
                 }
                 CFRelease(data);
             }
             CFRelease(url);
         }
+        __CFSpinLock(&CFBundleLocalInfoLock);
+        if (!bundle->_localInfoDict) {
+            bundle->_localInfoDict = localInfoDict;
+        } else {
+            if (localInfoDict) CFRelease(localInfoDict);
+            localInfoDict = bundle->_localInfoDict;
+        }
+        __CFSpinUnlock(&CFBundleLocalInfoLock);
     }
-    return bundle->_localInfoDict;
+    return localInfoDict;
 }
 
-CFPropertyListRef _CFBundleGetValueForInfoKey(CFBundleRef bundle, CFStringRef key) {return (CFPropertyListRef)CFBundleGetValueForInfoDictionaryKey(bundle, key);}
+CFPropertyListRef _CFBundleGetValueForInfoKey(CFBundleRef bundle, CFStringRef key) {
+    return (CFPropertyListRef)CFBundleGetValueForInfoDictionaryKey(bundle, key);
+}
 
 CFTypeRef CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFStringRef key) {
     // Look in InfoPlist.strings first.  Then look in Info.plist
@@ -1103,7 +1474,7 @@ CFStringRef CFBundleGetIdentifier(CFBundleRef bundle) {
 
 #define MAX_VERS_LEN 10
 
-CF_INLINE Boolean _isDigit(UniChar aChar) {return (((aChar >= (UniChar)'0') && (aChar <= (UniChar)'9')) ? true : false);}
+CF_INLINE Boolean _isDigit(UniChar aChar) {return ((aChar >= (UniChar)'0' && aChar <= (UniChar)'9') ? true : false);}
 
 __private_extern__ CFStringRef _CFCreateStringFromVersionNumber(CFAllocatorRef alloc, UInt32 vers) {
     CFStringRef result = NULL;
@@ -1124,9 +1495,9 @@ __private_extern__ CFStringRef _CFCreateStringFromVersionNumber(CFAllocatorRef a
         }
     } else {
         if (major1 > 0) {
-            result = CFStringCreateWithFormat(alloc, NULL, CFSTR("%d%d.%d.%d%s%d"), major1, major2, minor1, minor2, ((stage == DEVELOPMENT_STAGE) ? "d" : ((stage == ALPHA_STAGE) ? "a" : "b")), build);
+            result = CFStringCreateWithFormat(alloc, NULL, CFSTR("%d%d.%d.%d%C%d"), major1, major2, minor1, minor2, ((stage == DEVELOPMENT_STAGE) ? 'd' : ((stage == ALPHA_STAGE) ? 'a' : 'b')), build);
         } else {
-            result = CFStringCreateWithFormat(alloc, NULL, CFSTR("%d.%d.%d%s%d"), major2, minor1, minor2, ((stage == DEVELOPMENT_STAGE) ? "d" : ((stage == ALPHA_STAGE) ? "a" : "b")), build);
+            result = CFStringCreateWithFormat(alloc, NULL, CFSTR("%d.%d.%d%C%d"), major2, minor1, minor2, ((stage == DEVELOPMENT_STAGE) ? 'd' : ((stage == ALPHA_STAGE) ? 'a' : 'b')), build);
         }
     }
     return result;
@@ -1143,10 +1514,8 @@ __private_extern__ UInt32 _CFVersionNumberFromString(CFStringRef versStr) {
     Boolean digitsDone = false;
 
     if (!versStr) return 0;
-
     len = CFStringGetLength(versStr);
-
-    if ((len == 0) || (len > MAX_VERS_LEN)) return 0;
+    if (len <= 0 || len > MAX_VERS_LEN) return 0;
 
     CFStringGetCharacters(versStr, CFRangeMake(0, len), versChars);
     chars = versChars;
@@ -1278,7 +1647,7 @@ __private_extern__ UInt32 _CFVersionNumberFromString(CFStringRef versStr) {
     }
 
     // Range check the build number and make sure we exhausted the string.
-    if ((build > 0xFF) || (len > 0)) return 0;
+    if (build > 0xFF || len > 0) return 0;
 
     // Build the number
     theVers = major1 << 28;
@@ -1363,6 +1732,24 @@ static Boolean _urlExists(CFAllocatorRef alloc, CFURLRef url) {
     return url && (0 == _CFGetFileProperties(alloc, url, &exists, NULL, NULL, NULL, NULL, NULL)) && exists;
 }
 
+// This is here because on iPhoneOS with the dyld shared cache, we remove binaries from their
+// original locations on disk, so checking whether a binary's path exists is no longer sufficient.
+// For performance reasons, we only call dlopen_preflight() after we've verified that the binary 
+// does not exist at its original path with _urlExists().
+// See <rdar://problem/6956670>
+static Boolean _binaryLoadable(CFAllocatorRef alloc, CFURLRef url) {
+    Boolean loadable = _urlExists(alloc, url);
+#if DEPLOYMENT_TARGET_EMBEDDED
+    if (!loadable) {
+	uint8_t path[PATH_MAX];
+	if (url && CFURLGetFileSystemRepresentation(url, true, path, sizeof(path))) {
+	    loadable = dlopen_preflight((char *)path);
+	}
+    }
+#endif
+    return loadable;
+}
+
 __private_extern__ CFURLRef _CFBundleCopySupportFilesDirectoryURLInDirectory(CFAllocatorRef alloc, CFURLRef bundleURL, uint8_t version) {
     CFURLRef result = NULL;
     if (bundleURL) {
@@ -1377,7 +1764,9 @@ __private_extern__ CFURLRef _CFBundleCopySupportFilesDirectoryURLInDirectory(CFA
     return result;
 }
 
-CF_EXPORT CFURLRef CFBundleCopySupportFilesDirectoryURL(CFBundleRef bundle) {return _CFBundleCopySupportFilesDirectoryURLInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version);}
+CF_EXPORT CFURLRef CFBundleCopySupportFilesDirectoryURL(CFBundleRef bundle) {
+    return _CFBundleCopySupportFilesDirectoryURLInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version);
+}
 
 __private_extern__ CFURLRef _CFBundleCopyResourcesDirectoryURLInDirectory(CFAllocatorRef alloc, CFURLRef bundleURL, uint8_t version) {
     CFURLRef result = NULL;
@@ -1395,15 +1784,17 @@ __private_extern__ CFURLRef _CFBundleCopyResourcesDirectoryURLInDirectory(CFAllo
     return result;
 }
 
-CFURLRef CFBundleCopyResourcesDirectoryURL(CFBundleRef bundle) {return _CFBundleCopyResourcesDirectoryURLInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version);}
+CFURLRef CFBundleCopyResourcesDirectoryURL(CFBundleRef bundle) {
+    return _CFBundleCopyResourcesDirectoryURLInDirectory(CFGetAllocator(bundle), bundle->_url, bundle->_version);
+}
 
 static CFURLRef _CFBundleCopyExecutableURLRaw(CFAllocatorRef alloc, CFURLRef urlPath, CFStringRef exeName) {
     // Given an url to a folder and a name, this returns the url to the executable in that folder with that name, if it exists, and NULL otherwise.  This function deals with appending the ".exe" or ".dll" on Windows.
     CFURLRef executableURL = NULL;
     if (!urlPath || !exeName) return NULL;
     
-#if DEPLOYMENT_TARGET_MACOSX
-    const uint8_t *image_suffix = (uint8_t *)getenv("DYLD_IMAGE_SUFFIX");
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+    const uint8_t *image_suffix = (uint8_t *)__CFgetenv("DYLD_IMAGE_SUFFIX");
     if (image_suffix) {
         CFStringRef newExeName, imageSuffix;
         imageSuffix = CFStringCreateWithCString(kCFAllocatorSystemDefault, (char *)image_suffix, kCFStringEncodingUTF8);
@@ -1415,21 +1806,75 @@ static CFURLRef _CFBundleCopyExecutableURLRaw(CFAllocatorRef alloc, CFURLRef url
             newExeName = CFStringCreateWithFormat(alloc, NULL, CFSTR("%@%@"), exeName, imageSuffix);
         }
         executableURL = CFURLCreateWithFileSystemPathRelativeToBase(alloc, newExeName, kCFURLPOSIXPathStyle, false, urlPath);
-        if (executableURL && !_urlExists(alloc, executableURL)) {
+        if (executableURL && !_binaryLoadable(alloc, executableURL)) {
             CFRelease(executableURL);
             executableURL = NULL;
         }
         CFRelease(newExeName);
         CFRelease(imageSuffix);
     }
-#endif
     if (!executableURL) {
         executableURL = CFURLCreateWithFileSystemPathRelativeToBase(alloc, exeName, kCFURLPOSIXPathStyle, false, urlPath);
+        if (executableURL && !_binaryLoadable(alloc, executableURL)) {
+            CFRelease(executableURL);
+            executableURL = NULL;
+        }
+    }
+#elif DEPLOYMENT_TARGET_WINDOWS
+    if (!executableURL) {
+        executableURL = CFURLCreateWithFileSystemPathRelativeToBase(alloc, exeName, kCFURLWindowsPathStyle, false, urlPath);
         if (executableURL && !_urlExists(alloc, executableURL)) {
             CFRelease(executableURL);
             executableURL = NULL;
         }
     }
+    if (!executableURL) {
+        if (!CFStringFindWithOptions(exeName, CFSTR(".dll"), CFRangeMake(0, CFStringGetLength(exeName)), kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL)) {
+            CFStringRef newExeName = CFStringCreateWithFormat(alloc, NULL, CFSTR("%@%@"), exeName, CFSTR(".dll"));
+            executableURL = CFURLCreateWithString(alloc, newExeName, urlPath);
+            if (executableURL && !_binaryLoadable(alloc, executableURL)) {
+                CFRelease(executableURL);
+                executableURL = NULL;
+            }
+            CFRelease(newExeName);
+        }
+    }
+    if (!executableURL) {
+        if (!CFStringFindWithOptions(exeName, CFSTR(".dll"), CFRangeMake(0, CFStringGetLength(exeName)), kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL)) {
+            CFStringRef newExeName = CFStringCreateWithFormat(alloc, NULL, CFSTR("%@%@"), exeName, CFSTR("_debug.dll"));
+            executableURL = CFURLCreateWithString(alloc, newExeName, urlPath);
+            if (executableURL && !_urlExists(alloc, executableURL)) {
+                CFRelease(executableURL);
+                executableURL = NULL;
+            }
+            CFRelease(newExeName);
+        }
+    }
+    if (!executableURL) {
+        if (!CFStringFindWithOptions(exeName, CFSTR(".exe"), CFRangeMake(0, CFStringGetLength(exeName)), kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL)) {
+            CFStringRef newExeName = CFStringCreateWithFormat(alloc, NULL, CFSTR("%@%@"), exeName, CFSTR(".exe"));
+            executableURL = CFURLCreateWithString(alloc, newExeName, urlPath);
+            if (executableURL && !_binaryLoadable(alloc, executableURL)) {
+                CFRelease(executableURL);
+                executableURL = NULL;
+            }
+            CFRelease(newExeName);
+        }
+    }
+    if (!executableURL) {
+        if (!CFStringFindWithOptions(exeName, CFSTR(".exe"), CFRangeMake(0, CFStringGetLength(exeName)), kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL)) {
+            CFStringRef newExeName = CFStringCreateWithFormat(alloc, NULL, CFSTR("%@%@"), exeName, CFSTR("_debug.exe"));
+            executableURL = CFURLCreateWithString(alloc, newExeName, urlPath);
+            if (executableURL && !_urlExists(alloc, executableURL)) {
+                CFRelease(executableURL);
+                executableURL = NULL;
+            }
+            CFRelease(newExeName);
+        }
+    }
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
     return executableURL;
 }
 
@@ -1466,9 +1911,7 @@ static CFStringRef _CFBundleCopyExecutableName(CFAllocatorRef alloc, CFBundleRef
         startOfBundleName = _CFStartOfLastPathComponent(buff, len);
         endOfBundleName = _CFLengthAfterDeletingPathExtension(buff, len);
 
-        if ((startOfBundleName <= len) && (endOfBundleName <= len) && (startOfBundleName < endOfBundleName)) {
-            executableName = CFStringCreateWithCharacters(alloc, &(buff[startOfBundleName]), (endOfBundleName - startOfBundleName));
-        }
+        if (startOfBundleName <= len && endOfBundleName <= len && startOfBundleName < endOfBundleName) executableName = CFStringCreateWithCharacters(alloc, &(buff[startOfBundleName]), endOfBundleName - startOfBundleName);
         CFRelease(bundlePath);
     }
     
@@ -1490,7 +1933,9 @@ __private_extern__ CFURLRef _CFBundleCopyResourceForkURLMayBeLocal(CFBundleRef b
     return resourceForkURL;
 }
 
-CFURLRef _CFBundleCopyResourceForkURL(CFBundleRef bundle) {return _CFBundleCopyResourceForkURLMayBeLocal(bundle, true);}
+CFURLRef _CFBundleCopyResourceForkURL(CFBundleRef bundle) {
+    return _CFBundleCopyResourceForkURLMayBeLocal(bundle, true);
+}
 
 static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRef alloc, CFBundleRef bundle, CFURLRef url, CFStringRef executableName, Boolean ignoreCache, Boolean useOtherPlatform) {
     uint8_t version = 0;
@@ -1499,6 +1944,7 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRe
     CFURLRef executableURL = NULL;
     Boolean foundIt = false;
     Boolean lookupMainExe = (executableName ? false : true);
+    static CFSpinLock_t CFBundleExecutablePathLock = CFSpinLockInit;
     
     if (bundle) {
         infoDict = CFBundleGetInfoDictionary(bundle);
@@ -1509,27 +1955,37 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRe
 
     // If we have a bundle instance and an info dict, see if we have already cached the path
     if (lookupMainExe && !ignoreCache && !useOtherPlatform && bundle && infoDict) {
+        __CFSpinLock(&CFBundleExecutablePathLock);
         executablePath = (CFStringRef)CFDictionaryGetValue(infoDict, _kCFBundleExecutablePathKey);
+        if (executablePath) CFRetain(executablePath);
+        __CFSpinUnlock(&CFBundleExecutablePathLock);
         if (executablePath) {
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
             executableURL = CFURLCreateWithFileSystemPath(alloc, executablePath, kCFURLPOSIXPathStyle, false);
+#elif DEPLOYMENT_TARGET_WINDOWS
+            executableURL = CFURLCreateWithFileSystemPath(alloc, executablePath, kCFURLWindowsPathStyle, false);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif 
-            if (executableURL) foundIt = true;
-            if (!foundIt) {
-                executablePath = NULL;
+            if (executableURL) {
+                foundIt = true;
+            } else {
+                __CFSpinLock(&CFBundleExecutablePathLock);
                 CFDictionaryRemoveValue((CFMutableDictionaryRef)infoDict, _kCFBundleExecutablePathKey);
+                __CFSpinUnlock(&CFBundleExecutablePathLock);
             }
+            CFRelease(executablePath);
         }
     }
 
     if (!foundIt) {
-        if (lookupMainExe) {
-            executableName = _CFBundleCopyExecutableName(alloc, bundle, url, infoDict);
-        }
+        if (lookupMainExe) executableName = _CFBundleCopyExecutableName(alloc, bundle, url, infoDict);
         if (executableName) {
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_EMBEDDED
+            Boolean doExecSearch = false;
+#else
             Boolean doExecSearch = true;
-#endif 
+#endif
             // Now, look for the executable inside the bundle.
             if (doExecSearch && 0 != version) {
                 CFURLRef exeDirURL;
@@ -1540,8 +1996,18 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRe
                 } else if (2 == version) {
                     exeDirURL = CFURLCreateWithString(alloc, _CFBundleExecutablesURLFromBase2, url);
                 } else {
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_WINDOWS
+                    // On Windows, if the bundle URL is foo.resources, then the executable is at the same level as the .resources directory
+                    CFStringRef extension = CFURLCopyPathExtension(url);
+                    if (extension && CFEqual(extension, _CFBundleWindowsResourceDirectoryExtension)) {
+                        exeDirURL = CFURLCreateCopyDeletingLastPathComponent(alloc, url);
+                    } else {
+                        exeDirURL = (CFURLRef)CFRetain(url);
+                    }
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
                     exeDirURL = (CFURLRef)CFRetain(url);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
                 }
                 CFStringRef platformSubDir = useOtherPlatform ? _CFBundleGetOtherPlatformExecutablesSubdirectoryName() : _CFBundleGetPlatformExecutablesSubdirectoryName();
@@ -1565,48 +2031,74 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRe
                     exeSubdirURL = CFURLCreateWithFileSystemPathRelativeToBase(alloc, platformSubDir, kCFURLPOSIXPathStyle, true, exeDirURL);
                     executableURL = _CFBundleCopyExecutableURLRaw(alloc, exeSubdirURL, executableName);
                 }
-                if (!executableURL) {
-                    executableURL = _CFBundleCopyExecutableURLRaw(alloc, exeDirURL, executableName);
-                }
-
+                if (!executableURL) executableURL = _CFBundleCopyExecutableURLRaw(alloc, exeDirURL, executableName);
                 CFRelease(exeDirURL);
                 CFRelease(exeSubdirURL);
             }
 
-            // If this was an old bundle, or we did not find the executable in the Excutables subdirectory, look directly in the bundle wrapper.
+            // If this was an old bundle, or we did not find the executable in the Executables subdirectory, look directly in the bundle wrapper.
             if (!executableURL) executableURL = _CFBundleCopyExecutableURLRaw(alloc, url, executableName);
+
+#if DEPLOYMENT_TARGET_WINDOWS
+            // Windows only: If we still haven't found the exe, look in the Executables folder.
+            // But only for the main bundle exe
+            if (lookupMainExe && !executableURL) {
+                CFURLRef exeDirURL = CFURLCreateWithString(alloc, CFSTR("../../Executables"), url);
+                executableURL = _CFBundleCopyExecutableURLRaw(alloc, exeDirURL, executableName);
+                CFRelease(exeDirURL);
+            }
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
 
             if (lookupMainExe && !ignoreCache && !useOtherPlatform && bundle && infoDict && executableURL) {
                 // We found it.  Cache the path.
                 CFURLRef absURL = CFURLCopyAbsoluteURL(executableURL);
-#if DEPLOYMENT_TARGET_MACOSX
+#if DEPLOYMENT_TARGET_WINDOWS
+                executablePath = CFURLCopyFileSystemPath(absURL, kCFURLWindowsPathStyle);
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
                 executablePath = CFURLCopyFileSystemPath(absURL, kCFURLPOSIXPathStyle);
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
                 CFRelease(absURL);
+                __CFSpinLock(&CFBundleExecutablePathLock);
                 CFDictionarySetValue((CFMutableDictionaryRef)infoDict, _kCFBundleExecutablePathKey, executablePath);
+                __CFSpinUnlock(&CFBundleExecutablePathLock);
                 CFRelease(executablePath);
             }
             if (lookupMainExe && !useOtherPlatform && bundle && !executableURL) bundle->_binaryType = __CFBundleNoBinary;
             if (lookupMainExe) CFRelease(executableName);
         }
     }
-
     if (!bundle && infoDict) CFRelease(infoDict);
-
     return executableURL;
 }
 
-CFURLRef _CFBundleCopyExecutableURLInDirectory(CFURLRef url) {return _CFBundleCopyExecutableURLInDirectoryWithAllocator(kCFAllocatorSystemDefault, NULL, url, NULL, true, false);}
+CFURLRef _CFBundleCopyExecutableURLInDirectory(CFURLRef url) {
+    return _CFBundleCopyExecutableURLInDirectoryWithAllocator(kCFAllocatorSystemDefault, NULL, url, NULL, true, false);
+}
 
-CFURLRef _CFBundleCopyOtherExecutableURLInDirectory(CFURLRef url) {return _CFBundleCopyExecutableURLInDirectoryWithAllocator(kCFAllocatorSystemDefault, NULL, url, NULL, true, true);}
+CFURLRef _CFBundleCopyOtherExecutableURLInDirectory(CFURLRef url) {
+    return _CFBundleCopyExecutableURLInDirectoryWithAllocator(kCFAllocatorSystemDefault, NULL, url, NULL, true, true);
+}
 
-CFURLRef CFBundleCopyExecutableURL(CFBundleRef bundle) {return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, NULL, false, false);}
+CFURLRef CFBundleCopyExecutableURL(CFBundleRef bundle) {
+    return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, NULL, false, false);
+}
 
-static CFURLRef _CFBundleCopyExecutableURLIgnoringCache(CFBundleRef bundle) {return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, NULL, true, false);}
+static CFURLRef _CFBundleCopyExecutableURLIgnoringCache(CFBundleRef bundle) {
+    return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, NULL, true, false);
+}
 
-CFURLRef CFBundleCopyAuxiliaryExecutableURL(CFBundleRef bundle, CFStringRef executableName) {return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, executableName, true, false);}
+CFURLRef CFBundleCopyAuxiliaryExecutableURL(CFBundleRef bundle, CFStringRef executableName) {
+    return _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFGetAllocator(bundle), bundle, bundle->_url, executableName, true, false);
+}
 
-Boolean CFBundleIsExecutableLoaded(CFBundleRef bundle) {return bundle->_isLoaded;}
+Boolean CFBundleIsExecutableLoaded(CFBundleRef bundle) {
+    return bundle->_isLoaded;
+}
 
 CFBundleExecutableType CFBundleGetExecutableType(CFBundleRef bundle) {
     CFBundleExecutableType result = kCFBundleOtherExecutableType;
@@ -1616,9 +2108,7 @@ CFBundleExecutableType CFBundleGetExecutableType(CFBundleRef bundle) {
 #if defined(BINARY_SUPPORT_DYLD)
     if (bundle->_binaryType == __CFBundleUnknownBinary) {
         bundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
-#if defined(BINARY_SUPPORT_CFM)
         if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) bundle->_resourceData._executableLacksResourceFork = true;
-#endif /* BINARY_SUPPORT_CFM */
     }
 #endif /* BINARY_SUPPORT_DYLD */
     if (executableURL) CFRelease(executableURL);
@@ -1635,6 +2125,23 @@ CFBundleExecutableType CFBundleGetExecutableType(CFBundleRef bundle) {
     return result;
 }
 
+static SInt32 _CFBundleCurrentArchitecture(void) {
+    SInt32 arch = 0;
+#if defined(__ppc__)
+    arch = kCFBundleExecutableArchitecturePPC;
+#elif defined(__ppc64__)
+    arch = kCFBundleExecutableArchitecturePPC64;
+#elif defined(__i386__)
+    arch = kCFBundleExecutableArchitectureI386;
+#elif defined(__x86_64__)
+    arch = kCFBundleExecutableArchitectureX86_64;
+#elif defined(BINARY_SUPPORT_DYLD)
+    const NXArchInfo *archInfo = NXGetLocalArchInfo();
+    if (archInfo) arch = archInfo->cputype;
+#endif
+    return arch;
+}
+
 #define UNKNOWN_FILETYPE 0x0
 #define PEF_FILETYPE 0x1000
 #define PEF_MAGIC 0x4a6f7921
@@ -1643,6 +2150,8 @@ CFBundleExecutableType CFBundleGetExecutableType(CFBundleRef bundle) {
 #define PLIST_SECTION "__info_plist"
 #define OBJC_SEGMENT "__OBJC"
 #define IMAGE_INFO_SECTION "__image_info"
+#define OBJC_SEGMENT_64 "__DATA"
+#define IMAGE_INFO_SECTION_64 "__objc_imageinfo"
 #define LIB_X11 "/usr/X11R6/lib/libX"
 
 #define XLS_NAME "Book"
@@ -1661,7 +2170,7 @@ static const uint32_t __CFBundleMagicNumbersArray[] = {
     0x53495444, 0x53747566, 0x30373037, 0x3c212d2d, 0x25215053, 0xd0cf11e0, 0x62656769, 0x3d796265,
     0x6b6f6c79, 0x3026b275, 0x0000000c, 0xfe370023, 0x09020600, 0x09040600, 0x4f676753, 0x664c6143, 
     0x00010000, 0x74727565, 0x4f54544f, 0x41433130, 0xc809fe02, 0x0809fe02, 0x2356524d, 0x67696d70, 
-    0x3c435058, 0x28445746, 0x424f4d53, 0x49544f4c, 0x72746664
+    0x3c435058, 0x28445746, 0x424f4d53, 0x49544f4c, 0x72746664, 0x63616666, 0x802a5fd7, 0x762f3101
 };
 
 // string, with groups of 5 characters being 1 element in the array
@@ -1673,13 +2182,13 @@ static const char * __CFBundleExtensionsArray =
     "sit\0\0" "sit\0\0" "cpio\0"  "html\0"  "ps\0\0\0""ole\0\0" "uu\0\0\0""ync\0\0"
     "dmg\0\0" "wmv\0\0" "jp2\0\0" "doc\0\0" "xls\0\0" "xls\0\0" "ogg\0\0" "flac\0"
     "ttf\0\0" "ttf\0\0" "otf\0\0" "dwg\0\0" "dgn\0\0" "dgn\0\0" "wrl\0\0" "xcf\0\0"
-    "cpx\0\0" "dwf\0\0" "bom\0\0" "lit\0\0" "rtfd\0";
+    "cpx\0\0" "dwf\0\0" "bom\0\0" "lit\0\0" "rtfd\0"  "caf\0\0" "cin\0\0" "exr\0\0";
 
 static const char * __CFBundleOOExtensionsArray = "sxc\0\0" "sxd\0\0" "sxg\0\0" "sxi\0\0" "sxm\0\0" "sxw\0\0";
 static const char * __CFBundleODExtensionsArray = "odc\0\0" "odf\0\0" "odg\0\0" "oth\0\0" "odi\0\0" "odm\0\0" "odp\0\0" "ods\0\0" "odt\0\0";
 
 #define EXTENSION_LENGTH                5
-#define NUM_EXTENSIONS                  61
+#define NUM_EXTENSIONS                  64
 #define MAGIC_BYTES_TO_READ             512
 #define DMG_BYTES_TO_READ               512
 #define ZIP_BYTES_TO_READ               1024
@@ -1692,7 +2201,7 @@ static const char * __CFBundleODExtensionsArray = "odc\0\0" "odf\0\0" "odg\0\0" 
 CF_INLINE uint32_t _CFBundleSwapInt32Conditional(uint32_t arg, Boolean swap) {return swap ? CFSwapInt32(arg) : arg;}
 CF_INLINE uint32_t _CFBundleSwapInt64Conditional(uint64_t arg, Boolean swap) {return swap ? CFSwapInt64(arg) : arg;}
 
-static CFDictionaryRef _CFBundleGrokInfoDictFromData(const char *bytes, uint32_t length) {
+static CFMutableDictionaryRef _CFBundleGrokInfoDictFromData(const char *bytes, uint32_t length) {
     CFMutableDictionaryRef result = NULL;
     CFDataRef infoData = NULL;
     if (bytes && 0 < length) {
@@ -1710,22 +2219,54 @@ static CFDictionaryRef _CFBundleGrokInfoDictFromData(const char *bytes, uint32_t
     return result;
 }
 
-static CFDictionaryRef _CFBundleGrokInfoDictFromMainExecutable() {
+static char *_CFBundleGetSectData(const char *segname, const char *sectname, unsigned long *size) {
+    char *retval = NULL;
+    unsigned long localSize = 0;
+    uint32_t i, numImages = _dyld_image_count();
+    const void *mhp = (const void *)_NSGetMachExecuteHeader();
+    
+    for (i = 0; i < numImages; i++) {
+        if (mhp == (void *)_dyld_get_image_header(i)) {
+#if __LP64__
+            const struct section_64 *sp = getsectbynamefromheader_64((const struct mach_header_64 *)mhp, segname, sectname);
+            if (sp) {
+                retval = (char *)(sp->addr + _dyld_get_image_vmaddr_slide(i));
+                localSize = (unsigned long)sp->size;
+            }
+#else /* __LP64__ */
+            const struct section *sp = getsectbynamefromheader((const struct mach_header *)mhp, segname, sectname);
+            if (sp) {
+                retval = (char *)(sp->addr + _dyld_get_image_vmaddr_slide(i));
+                localSize = (unsigned long)sp->size;
+            }
+#endif /* __LP64__ */
+            break;
+        }
+    }
+    if (size) *size = localSize;
+    return retval;
+}
+
+static CFMutableDictionaryRef _CFBundleGrokInfoDictFromMainExecutable() {
+    char *bytes = NULL;
     unsigned long length = 0;
-    char *bytes = getsectdata(TEXT_SEGMENT, PLIST_SECTION, &length);
+    if (getsegbyname(TEXT_SEGMENT)) bytes = _CFBundleGetSectData(TEXT_SEGMENT, PLIST_SECTION, &length);
     return _CFBundleGrokInfoDictFromData(bytes, length);
 }
 
 static Boolean _CFBundleGrokObjCImageInfoFromMainExecutable(uint32_t *objcVersion, uint32_t *objcFlags) {
     Boolean retval = false;
     uint32_t localVersion = 0, localFlags = 0;
-    if (getsegbyname(OBJC_SEGMENT)) {
-        unsigned long length = 0;
-        char *bytes = getsectdata(OBJC_SEGMENT, IMAGE_INFO_SECTION, &length);
-        if (bytes && length >= 8) {
-            localVersion = *(uint32_t *)bytes;
-            localFlags = *(uint32_t *)(bytes + 4);
-        }
+    char *bytes = NULL;
+    unsigned long length = 0;
+#if __LP64__
+    if (getsegbyname(OBJC_SEGMENT_64)) bytes = _CFBundleGetSectData(OBJC_SEGMENT_64, IMAGE_INFO_SECTION_64, &length);
+#else /* __LP64__ */
+    if (getsegbyname(OBJC_SEGMENT)) bytes = _CFBundleGetSectData(OBJC_SEGMENT, IMAGE_INFO_SECTION, &length);
+#endif /* __LP64__ */
+    if (bytes && length >= 8) {
+        localVersion = *(uint32_t *)bytes;
+        localFlags = *(uint32_t *)(bytes + 4);
         retval = true;
     }
     if (objcVersion) *objcVersion = localVersion;
@@ -1779,9 +2320,7 @@ static Boolean _CFBundleGrokX11FromFile(int fd, const void *bytes, CFIndex lengt
             }
         }
     }
-    
     if (buffer) free(buffer);
-    
     return result;
 }
     
@@ -1819,7 +2358,7 @@ static CFDictionaryRef _CFBundleGrokInfoDictFromFile(int fd, const void *bytes, 
                             uint32_t sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
                             const char *sectbytes = loc + offset + sectoffset;
                             // we don't support huge-sized plists
-                            if (sectlength64 <= 0xffffffff && loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = _CFBundleGrokInfoDictFromData(sectbytes, sectlength);
+                            if (sectlength64 <= 0xffffffff && loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = (CFDictionaryRef)_CFBundleGrokInfoDictFromData(sectbytes, sectlength);
                             foundit = true;
                         }
                         sp = (struct section_64 *)((char *)sp + sizeof(struct section_64));
@@ -1843,7 +2382,7 @@ static CFDictionaryRef _CFBundleGrokInfoDictFromFile(int fd, const void *bytes, 
                             uint32_t sectlength = _CFBundleSwapInt32Conditional(sp->size, swapped);
                             uint32_t sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
                             const char *sectbytes = loc + offset + sectoffset;
-                            if (loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = _CFBundleGrokInfoDictFromData(sectbytes, sectlength);
+                            if (loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = (CFDictionaryRef)_CFBundleGrokInfoDictFromData(sectbytes, sectlength);
                             foundit = true;
                         }
                         sp = (struct section *)((char *)sp + sizeof(struct section));
@@ -1884,8 +2423,8 @@ static void _CFBundleGrokObjcImageInfoFromFile(int fd, const void *bytes, CFInde
                     struct section_64 *sp = (struct section_64 *)((char *)sgp + sizeof(struct segment_command_64));
                     uint32_t nsects = _CFBundleSwapInt32Conditional(sgp->nsects, swapped);
                     for (j = 0; !foundit && j < nsects && startofcmds <= (char *)sp && (char *)sp < endofcmds; j++) {
-                        if (0 == strncmp(sp->segname, OBJC_SEGMENT, sizeof(sp->segname))) localHasObjc = true;
-                        if (0 == strncmp(sp->sectname, IMAGE_INFO_SECTION, sizeof(sp->sectname)) && 0 == strncmp(sp->segname, OBJC_SEGMENT, sizeof(sp->segname))) {
+                        if (0 == strncmp(sp->segname, OBJC_SEGMENT_64, sizeof(sp->segname))) localHasObjc = true;
+                        if (0 == strncmp(sp->sectname, IMAGE_INFO_SECTION_64, sizeof(sp->sectname)) && 0 == strncmp(sp->segname, OBJC_SEGMENT_64, sizeof(sp->segname))) {
                             uint64_t sectlength64 = _CFBundleSwapInt64Conditional(sp->size, swapped);
                             sectlength = (uint32_t)(sectlength64 & 0xffffffff);
                             sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
@@ -1930,19 +2469,21 @@ static void _CFBundleGrokObjcImageInfoFromFile(int fd, const void *bytes, CFInde
             }
         }
     }
-    
     if (buffer) free(buffer);
-    
     if (hasObjc) *hasObjc = localHasObjc;
     if (objcVersion) *objcVersion = localVersion;
     if (objcFlags) *objcFlags = localFlags;
 }
     
-static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, const void *bytes, CFIndex length, Boolean *isX11, CFArrayRef *architectures, CFDictionaryRef *infodict, Boolean *hasObjc, uint32_t *objcVersion, uint32_t *objcFlags) {
-    UInt32 machtype = UNKNOWN_FILETYPE, magic, numFatHeaders = ((struct fat_header *)bytes)->nfat_arch, maxFatHeaders = (length - sizeof(struct fat_header)) / sizeof(struct fat_arch), i;
+static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, const void *bytes, CFIndex length, Boolean swap, Boolean *isX11, CFArrayRef *architectures, CFDictionaryRef *infodict, Boolean *hasObjc, uint32_t *objcVersion, uint32_t *objcFlags) {
+    CFIndex headerLength = length;
+    unsigned char headerBuffer[MAGIC_BYTES_TO_READ];
+    UInt32 machtype = UNKNOWN_FILETYPE, magic, numFatHeaders, maxFatHeaders, i;
     unsigned char buffer[sizeof(struct mach_header_64)];
     const unsigned char *moreBytes = NULL;
     const NXArchInfo *archInfo = NXGetLocalArchInfo();
+    SInt32 curArch = _CFBundleCurrentArchitecture();
+    
     struct fat_arch *fat = NULL;
 
     if (isX11) *isX11 = false;
@@ -1951,14 +2492,23 @@ static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, const void *bytes, CFIndex
     if (hasObjc) *hasObjc = false;
     if (objcVersion) *objcVersion = 0;
     if (objcFlags) *objcFlags = 0;
+
+    if (headerLength > MAGIC_BYTES_TO_READ) headerLength = MAGIC_BYTES_TO_READ;
+    (void)memmove(headerBuffer, bytes, headerLength);
+    if (swap) {
+        for (i = 0; i < headerLength; i += 4) *(UInt32 *)(headerBuffer + i) = CFSwapInt32(*(UInt32 *)(headerBuffer + i));
+    }
+    numFatHeaders = ((struct fat_header *)headerBuffer)->nfat_arch;
+    maxFatHeaders = (headerLength - sizeof(struct fat_header)) / sizeof(struct fat_arch);
     if (numFatHeaders > maxFatHeaders) numFatHeaders = maxFatHeaders;
     if (numFatHeaders > 0) {
-        fat = NXFindBestFatArch(archInfo->cputype, archInfo->cpusubtype, (struct fat_arch *)(bytes + sizeof(struct fat_header)), numFatHeaders);
-        if (!fat) fat = (struct fat_arch *)(bytes + sizeof(struct fat_header));
+        if (archInfo) fat = NXFindBestFatArch(archInfo->cputype, archInfo->cpusubtype, (struct fat_arch *)(headerBuffer + sizeof(struct fat_header)), numFatHeaders);
+        if (!fat && curArch != 0) fat = NXFindBestFatArch((cpu_type_t)curArch, (cpu_subtype_t)0, (struct fat_arch *)(headerBuffer + sizeof(struct fat_header)), numFatHeaders);
+        if (!fat) fat = (struct fat_arch *)(headerBuffer + sizeof(struct fat_header));
         if (architectures) {
             CFMutableArrayRef mutableArchitectures = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
             for (i = 0; i < numFatHeaders; i++) {
-                CFNumberRef architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, bytes + sizeof(struct fat_header) + i * sizeof(struct fat_arch));
+                CFNumberRef architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, headerBuffer + sizeof(struct fat_header) + i * sizeof(struct fat_arch));
                 if (CFArrayGetFirstIndexOfValue(mutableArchitectures, CFRangeMake(0, CFArrayGetCount(mutableArchitectures)), architecture) < 0) CFArrayAppendValue(mutableArchitectures, architecture);
                 CFRelease(architecture);
             }
@@ -2000,9 +2550,8 @@ static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, const void *bytes, CFIndex
 }
 
 static UInt32 _CFBundleGrokMachType(int fd, const void *bytes, CFIndex length, Boolean *isX11, CFArrayRef *architectures, CFDictionaryRef *infodict, Boolean *hasObjc, uint32_t *objcVersion, uint32_t *objcFlags) {
-    unsigned int magic = *((UInt32 *)bytes), machtype = UNKNOWN_FILETYPE;
+    unsigned int magic = *((UInt32 *)bytes), machtype = UNKNOWN_FILETYPE, cputype;
     CFNumberRef architecture = NULL;
-    CFIndex i;
 
     if (isX11) *isX11 = false;
     if (architectures) *architectures = NULL;
@@ -2012,35 +2561,36 @@ static UInt32 _CFBundleGrokMachType(int fd, const void *bytes, CFIndex length, B
     if (objcFlags) *objcFlags = 0;
     if (MH_MAGIC == magic) {
         machtype = ((struct mach_header *)bytes)->filetype;
+        cputype = ((struct mach_header *)bytes)->cputype;
+        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, &cputype);
         if (isX11 && MH_EXECUTE == machtype) *isX11 = _CFBundleGrokX11FromFile(fd, bytes, length, 0, false, false);
-        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, bytes + 4);
         if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, false, false);
         if (hasObjc || objcVersion || objcFlags) _CFBundleGrokObjcImageInfoFromFile(fd, bytes, length, 0, false, false, hasObjc, objcVersion, objcFlags);
     } else if (MH_CIGAM == magic) {
-        for (i = 0; i < length; i += 4) *(UInt32 *)(bytes + i) = CFSwapInt32(*(UInt32 *)(bytes + i));
-        machtype = ((struct mach_header *)bytes)->filetype;
+        machtype = CFSwapInt32(((struct mach_header *)bytes)->filetype);
+        cputype = CFSwapInt32(((struct mach_header *)bytes)->cputype);
+        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, &cputype);
         if (isX11 && MH_EXECUTE == machtype) *isX11 = _CFBundleGrokX11FromFile(fd, bytes, length, 0, true, false);
-        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, bytes + 4);
         if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, true, false);
         if (hasObjc || objcVersion || objcFlags) _CFBundleGrokObjcImageInfoFromFile(fd, bytes, length, 0, true, false, hasObjc, objcVersion, objcFlags);
     } else if (MH_MAGIC_64 == magic) {
         machtype = ((struct mach_header_64 *)bytes)->filetype;
+        cputype = ((struct mach_header_64 *)bytes)->cputype;
+        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, &cputype);
         if (isX11 && MH_EXECUTE == machtype) *isX11 = _CFBundleGrokX11FromFile(fd, bytes, length, 0, false, true);
-        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, bytes + 4);
         if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, false, true);
         if (hasObjc || objcVersion || objcFlags) _CFBundleGrokObjcImageInfoFromFile(fd, bytes, length, 0, false, true, hasObjc, objcVersion, objcFlags);
     } else if (MH_CIGAM_64 == magic) {
-        for (i = 0; i < length; i += 4) *(UInt32 *)(bytes + i) = CFSwapInt32(*(UInt32 *)(bytes + i));
-        machtype = ((struct mach_header_64 *)bytes)->filetype;
+        machtype = CFSwapInt32(((struct mach_header_64 *)bytes)->filetype);
+        cputype = CFSwapInt32(((struct mach_header_64 *)bytes)->cputype);
+        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, &cputype);
         if (isX11 && MH_EXECUTE == machtype) *isX11 = _CFBundleGrokX11FromFile(fd, bytes, length, 0, true, true);
-        if (architectures) architecture = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt32Type, bytes + 4);
         if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, true, true);
         if (hasObjc || objcVersion || objcFlags) _CFBundleGrokObjcImageInfoFromFile(fd, bytes, length, 0, true, true, hasObjc, objcVersion, objcFlags);
     } else if (FAT_MAGIC == magic) {
-        machtype = _CFBundleGrokMachTypeForFatFile(fd, bytes, length, isX11, architectures, infodict, hasObjc, objcVersion, objcFlags);
+        machtype = _CFBundleGrokMachTypeForFatFile(fd, bytes, length, false, isX11, architectures, infodict, hasObjc, objcVersion, objcFlags);
     } else if (FAT_CIGAM == magic) {
-        for (i = 0; i < length; i += 4) *(UInt32 *)(bytes + i) = CFSwapInt32(*(UInt32 *)(bytes + i));
-        machtype = _CFBundleGrokMachTypeForFatFile(fd, bytes, length, isX11, architectures, infodict, hasObjc, objcVersion, objcFlags);
+        machtype = _CFBundleGrokMachTypeForFatFile(fd, bytes, length, true, isX11, architectures, infodict, hasObjc, objcVersion, objcFlags);
     } else if (PEF_MAGIC == magic || PEF_CIGAM == magic) {
         machtype = PEF_FILETYPE;
     }
@@ -2208,16 +2758,20 @@ static const char *_CFBundleGrokFileTypeForOLEFile(int fd, const void *bytes, CF
             else foundit = false;
         }
     }
-
     if (buffer) free(buffer);
-
     return ext;
 }
 
+#if DEPLOYMENT_TARGET_WINDOWS
+// Windows isspace implementation limits the input chars to < 256 in the ASCII range.  It will
+// assert in debug builds.  This is annoying.  We merrily grok chars > 256.
+static inline BOOL isspace(char c) {
+    return (c == ' ' || c == '\t' || c == '\n' || c == '\r'|| c == '\v' || c == '\f');
+}
+#endif
+
 static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *extension, UInt32 *machtype, CFArrayRef *architectures, CFDictionaryRef *infodict, Boolean *hasObjc, uint32_t *objcVersion, uint32_t *objcFlags) {
-    struct stat statBuf;
     int fd = -1;
-    char path[CFMaxPathSize];
     const unsigned char *bytes = NULL;
     unsigned char buffer[MAGIC_BYTES_TO_READ];
     CFIndex i, length = 0;
@@ -2227,8 +2781,8 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
 #if defined(BINARY_SUPPORT_DYLD)
     Boolean isX11 = false;
 #endif /* BINARY_SUPPORT_DYLD */
-    Boolean isFile = false, isPlain = true, isZero = true, isHTML = false;
-    // extensions returned:  o, tool, x11app, pef, core, dylib, bundle, elf, jpeg, jp2, tiff, gif, png, pict, icns, ico, rtf, rtfd, pdf, ra, rm, au, aiff, aifc, wav, avi, wmv, ogg, flac, psd, mpeg, mid, zip, jar, sit, cpio, html, ps, mov, qtif, ttf, otf, sfont, bmp, hqx, bin, class, tar, txt, gz, Z, uu, ync, bz, bz2, sh, pl, py, rb, dvi, sgi, tga, mp3, xml, plist, xls, doc, ppt, mp4, m4a, m4b, m4p, dmg, cwk, webarchive, dwg, dgn, pfa, pfb, afm, tfm, xcf, cpx, dwf, swf, swc, abw, bom, lit, svg, rdf, x3d, oeb, dtb, docx, xlsx, pptx, sxc, sxd, sxg, sxi, sxm, sxw, odc, odf, odg, oth, odi, odm, odp, ods
+    Boolean isFile = false, isPlain = true, isZero = true, isSpace = true, hasBOM = false;
+    // extensions returned:  o, tool, x11app, pef, core, dylib, bundle, elf, jpeg, jp2, tiff, gif, png, pict, icns, ico, rtf, rtfd, pdf, ra, rm, au, aiff, aifc, caf, wav, avi, wmv, ogg, flac, psd, mpeg, mid, zip, jar, sit, cpio, html, ps, mov, qtif, ttf, otf, sfont, bmp, hqx, bin, class, tar, txt, gz, Z, uu, ync, bz, bz2, sh, pl, py, rb, dvi, sgi, tga, mp3, xml, plist, xls, doc, ppt, mp4, m4a, m4b, m4p, m4v, 3gp, 3g2, dmg, cwk, webarchive, dwg, dgn, pfa, pfb, afm, tfm, xcf, cpx, dwf, swf, swc, abw, bom, lit, svg, rdf, x3d, oeb, dtb, docx, xlsx, pptx, sxc, sxd, sxg, sxi, sxm, sxw, odc, odf, odg, oth, odi, odm, odp, ods, cin, exr
     // ??? we do not distinguish between different wm types, returning wmv for any of wmv, wma, or asf
     // ??? we do not distinguish between ordinary documents and template versions (often there is no difference in file contents)
     // ??? the distinctions between docx, xlsx, and pptx may not be entirely reliable
@@ -2237,12 +2791,25 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
     if (hasObjc) *hasObjc = false;
     if (objcVersion) *objcVersion = 0;
     if (objcFlags) *objcFlags = 0;
-    if (url && CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize) && stat(path, &statBuf) == 0 && (statBuf.st_mode & S_IFMT) == S_IFREG && (fd = open(path, O_RDONLY, 0777)) >= 0) {
-        length = read(fd, buffer, MAGIC_BYTES_TO_READ);
-        fileLength = statBuf.st_size;
-        bytes = buffer;
-        isFile = true;
-    } else if (data) {
+    if (url) {
+        Boolean gotPath = FALSE;
+        char path[CFMaxPathSize];
+        gotPath = CFURLGetFileSystemRepresentation(url, true, (uint8_t *)path, CFMaxPathSize);
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+        struct stat statBuf;
+#elif DEPLOYMENT_TARGET_WINDOWS
+        struct _stat statBuf;
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
+        if (gotPath && stat(path, &statBuf) == 0 && (statBuf.st_mode & S_IFMT) == S_IFREG && (fd = open(path, O_RDONLY | CF_OPENFLGS, 0777)) >= 0) {
+            length = read(fd, buffer, MAGIC_BYTES_TO_READ);
+            fileLength = statBuf.st_size;
+            bytes = buffer;
+            isFile = true;
+        }
+    }
+    if (!isFile && data) {
         length = CFDataGetLength(data);
         fileLength = (off_t)length;
         bytes = CFDataGetBytePtr(data);
@@ -2267,6 +2834,7 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
                 else if (MH_BUNDLE == mt) ext = "bundle";
 #endif /* BINARY_SUPPORT_DYLD */
                 else if (0x7b5c7274 == magic && (6 > length || 'f' != bytes[4])) ext = NULL;
+                else if (0x25504446 == magic && (6 > length || '-' != bytes[4])) ext = NULL;
                 else if (0x00010000 == magic && (6 > length || 0 != bytes[4])) ext = NULL;
                 else if (0x47494638 == magic && (6 > length || (0x3761 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))) && 0x3961 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))))  ext = NULL;
                 else if (0x0000000c == magic && (6 > length || 0x6a50 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))) ext = NULL;
@@ -2282,9 +2850,13 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
                 else if (0x49544f4c == magic && (8 > length || 0x49544c53 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
                 else if (0x72746664 == magic && (8 > length || 0x00000000 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
                 else if (0x3d796265 == magic && (12 > length || 0x67696e20 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || (0x6c696e65 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8))) && 0x70617274 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))))) ext = NULL;
-                else if (0x25215053 == magic && 14 <= length && 0 == ustrncmp(bytes + 4, "-AdobeFont", 10)) ext = "pfa"; 
+                else if (0x63616666 == magic && (12 > length || 0 != bytes[4] || 0x64657363 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8))))) ext = NULL;
                 else if (0x504b0304 == magic) ext = _CFBundleGrokFileTypeForZipFile(fd, bytes, length, fileLength);
-                else if (0x464f524d == magic) {
+                else if (0x25215053 == magic) {
+                    if (11 <= length && 0 == ustrncmp(bytes + 4, "-Adobe-", 7)) ext = "ps";
+                    else if (14 <= length && 0 == ustrncmp(bytes + 4, "-AdobeFont", 10)) ext = "pfa";
+                    else ext = NULL;
+                } else if (0x464f524d == magic) {
                     // IFF
                     ext = NULL;
                     if (12 <= length) {
@@ -2327,18 +2899,27 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
                         if (0 == ustrncmp(bytes + i, "WebMainResource", 15)) ext = "webarchive";
                     }
                     if (!ext) ext = "plist";
-                } else if (12 <= length && 0x66747970 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) {
-                    // ??? list of ftyp values needs to be checked
-                    if (0x6d703432 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "mp4";
-                    else if (0x4d344120 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4a";
-                    else if (0x4d344220 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4b";
-                    else if (0x4d345020 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4p";
-                } else if (0x424d == shortMagic && 18 <= length && 40 == CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 14)))) ext = "bmp";
-                else if (20 <= length && 0 == ustrncmp(bytes + 6, "%!PS-AdobeFont", 14)) ext = "pfb";
+                } else if (0 == shortMagic && 12 <= length && 0x66747970 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) {
+                    // ??? may want more ftyp values
+                    UInt32 ftyp = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)));
+                    if (0x6d703431 == ftyp || 0x6d703432 == ftyp || 0x69736f6d == ftyp || 0x69736f32 == ftyp) ext = "mp4";
+                    else if (0x4d344120 == ftyp) ext = "m4a";
+                    else if (0x4d344220 == ftyp) ext = "m4b";
+                    else if (0x4d345020 == ftyp) ext = "m4p";
+                    else if (0x4d345620 == ftyp || 0x4d345648 == ftyp || 0x4d345650 == ftyp) ext = "m4v";
+                    else if (0x3367 == (ftyp >> 16)) {
+                        UInt16 remainder = (ftyp & 0xffff);
+                        if (0x6536 == remainder || 0x6537 == remainder || 0x6736 == remainder || 0x7034 == remainder || 0x7035 == remainder || 0x7036 == remainder || 0x7236 == remainder || 0x7336 == remainder || 0x7337 == remainder) ext = "3gp";
+                        else if (0x3261 == remainder) ext = "3g2";
+                    }
+                } else if (0x424d == shortMagic && 18 <= length) {
+                    UInt32 btyp = CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 14)));
+                    if (40 == btyp || btyp == 12 || btyp == 64 || btyp == 108 || btyp == 124) ext = "bmp";
+                } else if (20 <= length && 0 == ustrncmp(bytes + 6, "%!PS-AdobeFont", 14)) ext = "pfb";
                 else if (40 <= length && 0x42696e48 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 34))) && 0x6578 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 38)))) ext = "hqx";
                 else if (128 <= length && 0x6d42494e == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 102)))) ext = "bin";
                 else if (128 <= length && 0 == bytes[0] && 0 < bytes[1] && bytes[1] < 64 && 0 == bytes[74] && 0 == bytes[82] && 0 == (fileLength % 128)) {
-                    unsigned df = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 83))), rf = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 87))), blocks = 1 + (df + 127) / 128 + (rf + 127) / 128;
+                    UInt32 df = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 83))), rf = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 87))), blocks = 1 + (df + 127) / 128 + (rf + 127) / 128;
                     if (df < 0x00800000 && rf < 0x00800000 && 1 < blocks && (off_t)(128 * blocks) == fileLength) ext = "bin";
                 } else if (265 <= length && 0x75737461 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 257))) && (0x72202000 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 261))) || 0x7200 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 261))))) ext = "tar";
                 else if (0xfeff == shortMagic || 0xfffe == shortMagic) ext = "txt";
@@ -2366,46 +2947,56 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *
                 else if (0x425a == shortMagic && isdigit(bytes[2]) && isdigit(bytes[3])) ext = "bz";
                 else if (0x425a == shortMagic && 'h' == bytes[2] && isdigit(bytes[3]) && 8 <= length && (0x31415926 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || 0x17724538 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = "bz2";
                 else if (0x0011 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 2))) || 0x0012 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 2)))) ext = "tfm";
-                else if ('<' == bytes[0] && 14 <= length) {
-                    if (0 == ustrncasecmp(bytes + 1, "!doctype html", 13) || 0 == ustrncasecmp(bytes + 1, "head", 4) || 0 == ustrncasecmp(bytes + 1, "title", 5) || 0 == ustrncasecmp(bytes + 1, "html", 4)) {
+            }
+        }
+        if (extension && !ext) {
+            //??? what about MacOSRoman?
+            if (0xef == bytes[0] && 0xbb == bytes[1] && 0xbf == bytes[2]) {   // UTF-8 BOM
+                hasBOM = true;
+                isZero = false;
+            }
+            for (i = (hasBOM ? 3 : 0); (isPlain || isZero) && !ext && i < length && i < 512; i++) {
+                char c = bytes[i];
+                if (isPlain && '<' == c && i + 14 <= length && 0 == ustrncasecmp(bytes + i + 1, "!doctype html", 13)) ext = "html";
+                if (isSpace && '<' == c && i + 14 <= length) {
+                    if (0 == ustrncasecmp(bytes + i + 1, "!doctype html", 13) || 0 == ustrncasecmp(bytes + i + 1, "head", 4) || 0 == ustrncasecmp(bytes + i + 1, "title", 5) || 0 == ustrncasecmp(bytes + i + 1, "script", 6) || 0 == ustrncasecmp(bytes + i + 1, "html", 4)) {
                         ext = "html";
-                    } else if (0 == ustrncasecmp(bytes + 1, "?xml", 4)) {
-                        for (i = 4; !ext && i < 128 && i + 20 <= length; i++) {
+                    } else if (0 == ustrncasecmp(bytes + i + 1, "?xml", 4)) {
+                        for (i += 4; !ext && i < 128 && i + 20 <= length; i++) {
                             if ('<' == bytes[i]) {
                                 if (0 == ustrncasecmp(bytes + i + 1, "abiword", 7)) ext = "abw";
                                 else if (0 == ustrncasecmp(bytes + i + 1, "!doctype svg", 12)) ext = "svg";
                                 else if (0 == ustrncasecmp(bytes + i + 1, "!doctype rdf", 12)) ext = "rdf";
                                 else if (0 == ustrncasecmp(bytes + i + 1, "!doctype x3d", 12)) ext = "x3d";
                                 else if (0 == ustrncasecmp(bytes + i + 1, "!doctype html", 13)) ext = "html";
-                                else if (0 == ustrncasecmp(bytes + i + 1, "!doctype plist", 14)) ext = "plist";
                                 else if (0 == ustrncasecmp(bytes + i + 1, "!doctype posingfont", 19)) ext = "sfont";
+                                else if (0 == ustrncasecmp(bytes + i + 1, "!doctype plist", 14)) {
+                                    for (i += 14; !ext && i < 256 && i + 16 <= length; i++) {
+                                        if (0 == ustrncmp(bytes + i, "WebMainResource", 15)) ext = "webarchive";
+                                    }
+                                    if (!ext) ext = "plist";
+                                }
                             }
                         }
                         if (!ext) ext = "xml";
                     }
                 }
-            }
-        }
-        if (extension && !ext) {
-            //??? what about MacOSRoman?
-            for (i = 0; (isPlain || isZero) && !isHTML && i < length && i < 512; i++) {
-                char c = bytes[i];
-                if (0x7f <= c || (0x20 > c && !isspace(c))) isPlain = false;
                 if (0 != c) isZero = false;
-                if (isPlain && '<' == c && i + 14 <= length && 0 == ustrncasecmp(bytes + i + 1, "!doctype html", 13)) isHTML = true;
+                if (isZero || 0x7f <= c || (0x20 > c && !isspace(c))) isPlain = false;
+                if (isZero || !isspace(c)) isSpace = false;
             }
-            if (isHTML) {
-                ext = "html";
-            } else if (isPlain) {
-                if (16 <= length && 0 == ustrncmp(bytes, "StartFontMetrics", 16)) ext = "afm";
-                else ext = "txt";
-            } else if (isZero && length >= MAGIC_BYTES_TO_READ && fileLength >= 526) {
-                if (isFile) {
-                    if (lseek(fd, 512, SEEK_SET) == 512 && read(fd, buffer, MAGIC_BYTES_TO_READ) >= 14) {
-                        if (0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(buffer + 10)))) ext = "pict";
+            if (!ext) {
+                if (isPlain) {
+                    if (16 <= length && 0 == ustrncmp(bytes, "StartFontMetrics", 16)) ext = "afm";
+                    else ext = "txt";
+                } else if (isZero && length >= MAGIC_BYTES_TO_READ && fileLength >= 526) {
+                    if (isFile) {
+                        if (lseek(fd, 512, SEEK_SET) == 512 && read(fd, buffer, MAGIC_BYTES_TO_READ) >= 14) {
+                            if (0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(buffer + 10)))) ext = "pict";
+                        }
+                    } else {
+                        if (526 <= length && 0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 522)))) ext = "pict";
                     }
-                } else {
-                    if (526 <= length && 0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 522)))) ext = "pict";
                 }
             }
         }
@@ -2449,16 +3040,18 @@ __private_extern__ CFArrayRef _CFBundleCopyArchitecturesForExecutable(CFURLRef u
     return result;
 }
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 static Boolean _CFBundleGetObjCImageInfoForExecutable(CFURLRef url, uint32_t *objcVersion, uint32_t *objcFlags) {
     Boolean retval = false;
     (void)_CFBundleGrokFileType(url, NULL, NULL, NULL, NULL, NULL, &retval, objcVersion, objcFlags);
     return retval;
 }
+#endif
 
 #if defined(BINARY_SUPPORT_DYLD)
 
 __private_extern__ __CFPBinaryType _CFBundleGrokBinaryType(CFURLRef executableURL) {
-    // Attempt to grok the type of the binary by looking for DYLD magic numbers.  If one of the DYLD magic numbers is found, find out what type of Mach-o file it is.  Otherwise, look for the PEF magic numbers to see if it is CFM (if we understand CFM).
+    // Attempt to grok the type of the binary by looking for DYLD magic numbers.  If one of the DYLD magic numbers is found, find out what type of Mach-o file it is.  Otherwise, look for the PEF magic numbers to see if it is CFM.
     __CFPBinaryType result = executableURL ? __CFBundleUnreadableBinary : __CFBundleNoBinary;
     UInt32 machtype = UNKNOWN_FILETYPE;
     if (_CFBundleGrokFileType(executableURL, NULL, NULL, &machtype, NULL, NULL, NULL, NULL, NULL)) {
@@ -2472,11 +3065,9 @@ __private_extern__ __CFPBinaryType _CFBundleGrokBinaryType(CFURLRef executableUR
             case MH_DYLIB:
                 result = __CFBundleDYLDFrameworkBinary;
                 break;
-#if defined(BINARY_SUPPORT_CFM)
             case PEF_FILETYPE:
                 result = __CFBundleCFMBinary;
                 break;
-#endif /* BINARY_SUPPORT_CFM */
         }
     }
     return result;
@@ -2486,9 +3077,7 @@ __private_extern__ __CFPBinaryType _CFBundleGrokBinaryType(CFURLRef executableUR
 
 void _CFBundleSetCFMConnectionID(CFBundleRef bundle, void *connectionID) {
 #if defined(BINARY_SUPPORT_CFM)
-    if (bundle->_binaryType == __CFBundleUnknownBinary || bundle->_binaryType == __CFBundleUnreadableBinary) {
-        bundle->_binaryType = __CFBundleCFMBinary;
-    }
+    if (bundle->_binaryType == __CFBundleUnknownBinary || bundle->_binaryType == __CFBundleUnreadableBinary) bundle->_binaryType = __CFBundleCFMBinary;
 #endif /* BINARY_SUPPORT_CFM */
     bundle->_connectionCookie = connectionID;
     bundle->_isLoaded = true;
@@ -2519,28 +3108,28 @@ static CFErrorRef _CFBundleCreateErrorDebug(CFAllocatorRef allocator, CFBundleRe
         CFStringRef name = (CFStringRef)CFBundleGetValueForInfoDictionaryKey(bundle, kCFBundleNameKey);
         name = name ? (CFStringRef)CFRetain(name) : _CFBundleCopyLastPathComponent(bundle);
         if (CFBundleExecutableNotFoundError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr4"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded because its executable could not be located."), "NSFileNoSuchFileError");
-            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr4-C"), CFSTR("Error"), bdl, CFSTR("The bundle\\U2019s executable could not be located."), "NSFileNoSuchFileError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr4"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded because its executable couldn\\U2019t be located."), "NSFileNoSuchFileError");
+            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr4-C"), CFSTR("Error"), bdl, CFSTR("The bundle\\U2019s executable couldn\\U2019t be located."), "NSFileNoSuchFileError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr4-R"), CFSTR("Error"), bdl, CFSTR("Try reinstalling the bundle."), "NSFileNoSuchFileError");
         } else if (CFBundleExecutableNotLoadableError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3584"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded because its executable is not loadable."), "NSExecutableNotLoadableError");
-            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3584-C"), CFSTR("Error"), bdl, CFSTR("The bundle\\U2019s executable is not loadable."), "NSExecutableNotLoadableError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3584"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded because its executable isn\\U2019t loadable."), "NSExecutableNotLoadableError");
+            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3584-C"), CFSTR("Error"), bdl, CFSTR("The bundle\\U2019s executable isn\\U2019t loadable."), "NSExecutableNotLoadableError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3584-R"), CFSTR("Error"), bdl, CFSTR("Try reinstalling the bundle."), "NSExecutableNotLoadableError");
         } else if (CFBundleExecutableArchitectureMismatchError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3585"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded because it does not contain a version for the current architecture."), "NSExecutableArchitectureMismatchError");
-            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3585-C"), CFSTR("Error"), bdl, CFSTR("The bundle does not contain a version for the current architecture."), "NSExecutableArchitectureMismatchError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3585"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded because it doesn\\U2019t contain a version for the current architecture."), "NSExecutableArchitectureMismatchError");
+            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3585-C"), CFSTR("Error"), bdl, CFSTR("The bundle doesn\\U2019t contain a version for the current architecture."), "NSExecutableArchitectureMismatchError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3585-R"), CFSTR("Error"), bdl, CFSTR("Try installing a universal version of the bundle."), "NSExecutableArchitectureMismatchError");
         } else if (CFBundleExecutableRuntimeMismatchError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3586"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded because it is not compatible with the current application."), "NSExecutableRuntimeMismatchError");
-            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3586-C"), CFSTR("Error"), bdl, CFSTR("The bundle is not compatible with this application."), "NSExecutableRuntimeMismatchError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3586"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded because it isn\\U2019t compatible with the current application."), "NSExecutableRuntimeMismatchError");
+            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3586-C"), CFSTR("Error"), bdl, CFSTR("The bundle isn\\U2019t compatible with this application."), "NSExecutableRuntimeMismatchError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3586-R"), CFSTR("Error"), bdl, CFSTR("Try installing a newer version of the bundle."), "NSExecutableRuntimeMismatchError");
         } else if (CFBundleExecutableLoadError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3587"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded because it is damaged or missing necessary resources."), "NSExecutableLoadError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3587"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded because it is damaged or missing necessary resources."), "NSExecutableLoadError");
             reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3587-C"), CFSTR("Error"), bdl, CFSTR("The bundle is damaged or missing necessary resources."), "NSExecutableLoadError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3587-R"), CFSTR("Error"), bdl, CFSTR("Try reinstalling the bundle."), "NSExecutableLoadError");
         } else if (CFBundleExecutableLinkError == code) {
-            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3588"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d could not be loaded."), "NSExecutableLinkError");
-            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3588-C"), CFSTR("Error"), bdl, CFSTR("The bundle could not be loaded."), "NSExecutableLinkError");
+            descFormat = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3588"), CFSTR("Error"), bdl, CFSTR("The bundle \\U201c%@\\U201d couldn\\U2019t be loaded."), "NSExecutableLinkError");
+            reason = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3588-C"), CFSTR("Error"), bdl, CFSTR("The bundle couldn\\U2019t be loaded."), "NSExecutableLinkError");
             suggestion = CFCopyLocalizedStringWithDefaultValue(CFSTR("BundleErr3588-R"), CFSTR("Error"), bdl, CFSTR("Try reinstalling the bundle."), "NSExecutableLinkError");
         }
         if (descFormat) {
@@ -2600,34 +3189,57 @@ Boolean _CFBundleLoadExecutableAndReturnError(CFBundleRef bundle, Boolean forceG
     CFErrorRef localError = NULL, *subError = (error ? &localError : NULL);
     CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
 
+    __CFSpinLock(&(bundle->_bundleLoadingLock));
     if (!executableURL) bundle->_binaryType = __CFBundleNoBinary;
     // make sure we know whether bundle is already loaded or not
 #if defined(BINARY_SUPPORT_DLFCN)
-    if (!bundle->_isLoaded && _useDlfcn) _CFBundleDlfcnCheckLoaded(bundle);
+    if (!bundle->_isLoaded) _CFBundleDlfcnCheckLoaded(bundle);
+#elif defined(BINARY_SUPPORT_DYLD)
+    if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
 #endif /* BINARY_SUPPORT_DLFCN */
 #if defined(BINARY_SUPPORT_DYLD)
-    if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
     // We might need to figure out what it is
     if (bundle->_binaryType == __CFBundleUnknownBinary) {
         bundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
-#if defined(BINARY_SUPPORT_CFM)
         if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) bundle->_resourceData._executableLacksResourceFork = true;
-#endif /* BINARY_SUPPORT_CFM */
     }
 #endif /* BINARY_SUPPORT_DYLD */
     if (executableURL) CFRelease(executableURL);
     
     if (bundle->_isLoaded) {
+        __CFSpinUnlock(&(bundle->_bundleLoadingLock));
         // Remove from the scheduled unload set if we are there.
         __CFSpinLock(&CFBundleGlobalDataLock);
+#if defined(AVOID_WEAK_COLLECTIONS)
         if (_bundlesToUnload) CFSetRemoveValue(_bundlesToUnload, bundle);
+#else /* AVOID_WEAK_COLLECTIONS */
+        if (_bundlesToUnload) [_bundlesToUnload removeObject:(id)bundle];
+#endif /* AVOID_WEAK_COLLECTIONS */
         __CFSpinUnlock(&CFBundleGlobalDataLock);
         return true;
     }
 
     // Unload bundles scheduled for unloading
-    if (!_scheduledBundlesAreUnloading) _CFBundleUnloadScheduledBundles();
+    if (!_scheduledBundlesAreUnloading) {
+        __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+        _CFBundleUnloadScheduledBundles();
+        __CFSpinLock(&(bundle->_bundleLoadingLock));
+    }
     
+    if (bundle->_isLoaded) {
+        __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+        // Remove from the scheduled unload set if we are there.
+        __CFSpinLock(&CFBundleGlobalDataLock);
+#if defined(AVOID_WEAK_COLLECTIONS)
+        if (_bundlesToUnload) CFSetRemoveValue(_bundlesToUnload, bundle);
+#else /* AVOID_WEAK_COLLECTIONS */
+        if (_bundlesToUnload) [_bundlesToUnload removeObject:(id)bundle];
+#endif /* AVOID_WEAK_COLLECTIONS */
+        __CFSpinUnlock(&CFBundleGlobalDataLock);
+        return true;
+    }
+    __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+
     switch (bundle->_binaryType) {
 #if defined(BINARY_SUPPORT_CFM)
         case __CFBundleCFMBinary:
@@ -2642,19 +3254,24 @@ Boolean _CFBundleLoadExecutableAndReturnError(CFBundleRef bundle, Boolean forceG
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
-            if (_useDlfcn) result = _CFBundleDlfcnLoadBundle(bundle, forceGlobal, subError); else
-#endif /* BINARY_SUPPORT_DLFCN */
+            result = _CFBundleDlfcnLoadBundle(bundle, forceGlobal, subError);
+#else /* BINARY_SUPPORT_DLFCN */
             result = _CFBundleDYLDLoadBundle(bundle, forceGlobal, subError);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
         case __CFBundleDYLDFrameworkBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
-            if (_useDlfcn) result = _CFBundleDlfcnLoadFramework(bundle, subError); else
-#endif /* BINARY_SUPPORT_DLFCN */
+            result = _CFBundleDlfcnLoadFramework(bundle, subError);
+#else /* BINARY_SUPPORT_DLFCN */
             result = _CFBundleDYLDLoadFramework(bundle, subError);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
         case __CFBundleDYLDExecutableBinary:
-            CFLog(__kCFLogBundle, CFSTR("Attempt to load executable of a type that cannot be dynamically loaded for %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotLoadableError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotLoadableError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Attempt to load executable of a type that cannot be dynamically loaded for %@"), bundle);
+            }
             break;
 #endif /* BINARY_SUPPORT_DYLD */
 #if defined(BINARY_SUPPORT_DLFCN)
@@ -2669,16 +3286,21 @@ Boolean _CFBundleLoadExecutableAndReturnError(CFBundleRef bundle, Boolean forceG
             break;
 #endif /* BINARY_SUPPORT_DLL */
         case __CFBundleNoBinary:
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for %@"), bundle);
+            }
             break;     
         default:
-            CFLog(__kCFLogBundle, CFSTR("Cannot recognize type of executable for %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotLoadableError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotLoadableError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot recognize type of executable for %@"), bundle);
+            }
             break;
     }
     if (result && bundle->_plugInData._isPlugIn) _CFBundlePlugInLoaded(bundle);
-
     if (!result && error) *error = localError;
     return result;
 }
@@ -2693,27 +3315,34 @@ Boolean CFBundleLoadExecutable(CFBundleRef bundle) {
 
 Boolean CFBundlePreflightExecutable(CFBundleRef bundle, CFErrorRef *error) {
     Boolean result = false;
-    CFErrorRef localError = NULL, *subError = (error ? &localError : NULL);
+    CFErrorRef localError = NULL;
+#if defined(BINARY_SUPPORT_DLFCN)
+    CFErrorRef *subError = (error ? &localError : NULL);
+#endif
     CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
 
+    __CFSpinLock(&(bundle->_bundleLoadingLock));
     if (!executableURL) bundle->_binaryType = __CFBundleNoBinary;
     // make sure we know whether bundle is already loaded or not
 #if defined(BINARY_SUPPORT_DLFCN)
-    if (!bundle->_isLoaded && _useDlfcn) _CFBundleDlfcnCheckLoaded(bundle);
+    if (!bundle->_isLoaded) _CFBundleDlfcnCheckLoaded(bundle);
+#elif defined(BINARY_SUPPORT_DYLD)
+    if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
 #endif /* BINARY_SUPPORT_DLFCN */
 #if defined(BINARY_SUPPORT_DYLD)
-    if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
     // We might need to figure out what it is
     if (bundle->_binaryType == __CFBundleUnknownBinary) {
         bundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
-#if defined(BINARY_SUPPORT_CFM)
         if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) bundle->_resourceData._executableLacksResourceFork = true;
-#endif /* BINARY_SUPPORT_CFM */
     }
 #endif /* BINARY_SUPPORT_DYLD */
     if (executableURL) CFRelease(executableURL);
     
-    if (bundle->_isLoaded) return true;
+    if (bundle->_isLoaded) {
+        __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+        return true;
+    }
+    __CFSpinUnlock(&(bundle->_bundleLoadingLock));
     
     switch (bundle->_binaryType) {
 #if defined(BINARY_SUPPORT_CFM)
@@ -2775,6 +3404,7 @@ CFArrayRef CFBundleCopyExecutableArchitectures(CFBundleRef bundle) {
     return result;
 }
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
 static Boolean _CFBundleGetObjCImageInfo(CFBundleRef bundle, uint32_t *objcVersion, uint32_t *objcFlags) {
     Boolean retval = false;
     uint32_t localVersion = 0, localFlags = 0;
@@ -2787,6 +3417,7 @@ static Boolean _CFBundleGetObjCImageInfo(CFBundleRef bundle, uint32_t *objcVersi
     if (objcFlags) *objcFlags = localFlags;
     return retval;
 }
+#endif
 
 void CFBundleUnloadExecutable(CFBundleRef bundle) {
     // First unload bundles scheduled for unloading (if that's not what we are already doing.)
@@ -2796,11 +3427,22 @@ void CFBundleUnloadExecutable(CFBundleRef bundle) {
     
     // Remove from the scheduled unload set if we are there.
     if (!_scheduledBundlesAreUnloading) __CFSpinLock(&CFBundleGlobalDataLock);
+#if defined(AVOID_WEAK_COLLECTIONS)
     if (_bundlesToUnload) CFSetRemoveValue(_bundlesToUnload, bundle);
+#else /* AVOID_WEAK_COLLECTIONS */
+    if (_bundlesToUnload) [_bundlesToUnload removeObject:(id)bundle];
+#endif /* AVOID_WEAK_COLLECTIONS */
     if (!_scheduledBundlesAreUnloading) __CFSpinUnlock(&CFBundleGlobalDataLock);
     
     // Give the plugIn code a chance to realize this...
     _CFPlugInWillUnload(bundle);
+
+    __CFSpinLock(&(bundle->_bundleLoadingLock));
+    if (!bundle->_isLoaded) {
+        __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+        return;
+    }
+    __CFSpinUnlock(&(bundle->_bundleLoadingLock));
 
     switch (bundle->_binaryType) {
 #if defined(BINARY_SUPPORT_CFM)
@@ -2811,9 +3453,10 @@ void CFBundleUnloadExecutable(CFBundleRef bundle) {
 #if defined(BINARY_SUPPORT_DYLD)
         case __CFBundleDYLDBundleBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
-            if (bundle->_handleCookie) _CFBundleDlfcnUnload(bundle); else
-#endif /* BINARY_SUPPORT_DLFCN */
+            if (bundle->_handleCookie) _CFBundleDlfcnUnload(bundle);
+#else /* BINARY_SUPPORT_DLFCN */
             _CFBundleDYLDUnloadBundle(bundle);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
         case __CFBundleDYLDFrameworkBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
@@ -2839,6 +3482,8 @@ void CFBundleUnloadExecutable(CFBundleRef bundle) {
     }
 }
 
+#if defined(AVOID_WEAK_COLLECTIONS)
+
 __private_extern__ void _CFBundleScheduleForUnloading(CFBundleRef bundle) {
     __CFSpinLock(&CFBundleGlobalDataLock);
     if (!_bundlesToUnload) {
@@ -2854,18 +3499,15 @@ __private_extern__ void _CFBundleScheduleForUnloading(CFBundleRef bundle) {
 
 __private_extern__ void _CFBundleUnscheduleForUnloading(CFBundleRef bundle) {
     __CFSpinLock(&CFBundleGlobalDataLock);
-    if (_bundlesToUnload) {
-        CFSetRemoveValue(_bundlesToUnload, bundle);
-    }
+    if (_bundlesToUnload) CFSetRemoveValue(_bundlesToUnload, bundle);
     __CFSpinUnlock(&CFBundleGlobalDataLock);
 }
 
 __private_extern__ void _CFBundleUnloadScheduledBundles(void) {
     __CFSpinLock(&CFBundleGlobalDataLock);
     if (_bundlesToUnload) {
-        CFIndex c = CFSetGetCount(_bundlesToUnload);
+        CFIndex i, c = CFSetGetCount(_bundlesToUnload);
         if (c > 0) {
-            CFIndex i;
             CFBundleRef *unloadThese = (CFBundleRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(CFBundleRef) * c, 0);
             CFSetGetValues(_bundlesToUnload, (const void **)unloadThese);
             _scheduledBundlesAreUnloading = true;
@@ -2879,6 +3521,43 @@ __private_extern__ void _CFBundleUnloadScheduledBundles(void) {
     }
     __CFSpinUnlock(&CFBundleGlobalDataLock);
 }
+
+#else /* AVOID_WEAK_COLLECTIONS */
+
+__private_extern__ void _CFBundleScheduleForUnloading(CFBundleRef bundle) {
+    __CFSpinLock(&CFBundleGlobalDataLock);
+    if (!_bundlesToUnload) _bundlesToUnload = [[__CFHashTable alloc] initWithOptions:CFPointerFunctionsZeroingWeakMemory capacity:0];
+    [_bundlesToUnload addObject:(id)bundle];
+    __CFSpinUnlock(&CFBundleGlobalDataLock);
+}
+
+__private_extern__ void _CFBundleUnscheduleForUnloading(CFBundleRef bundle) {
+    __CFSpinLock(&CFBundleGlobalDataLock);
+    if (_bundlesToUnload) [_bundlesToUnload removeObject:(id)bundle];
+    __CFSpinUnlock(&CFBundleGlobalDataLock);
+}
+
+__private_extern__ void _CFBundleUnloadScheduledBundles(void) {
+    __CFSpinLock(&CFBundleGlobalDataLock);
+    if (_bundlesToUnload && [_bundlesToUnload count] > 0) {
+        CFIndex i, c;
+        CFMutableArrayRef unloadThese = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+        for (id value in _bundlesToUnload) CFArrayAppendValue(unloadThese, value);
+        c = CFArrayGetCount(unloadThese);
+        if (c > 0) {
+            _scheduledBundlesAreUnloading = true;
+            for (i = 0; i < c; i++) {
+                // This will cause them to be removed from the set.  (Which is why we copied all the values out of the set up front.)
+                CFBundleUnloadExecutable((CFBundleRef)CFArrayGetValueAtIndex(unloadThese, i));
+            }
+            _scheduledBundlesAreUnloading = false;
+        }
+        CFRelease(unloadThese);
+    }
+    __CFSpinUnlock(&CFBundleGlobalDataLock);
+}
+
+#endif /* AVOID_WEAK_COLLECTIONS */
 
 void *CFBundleGetFunctionPointerForName(CFBundleRef bundle, CFStringRef funcName) {
     void *tvp = NULL;
@@ -2899,8 +3578,9 @@ void *CFBundleGetFunctionPointerForName(CFBundleRef bundle, CFStringRef funcName
         case __CFBundleDYLDExecutableBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
             if (bundle->_handleCookie) return _CFBundleDlfcnGetSymbolByName(bundle, funcName);
-#endif /* BINARY_SUPPORT_DLFCN */
+#else /* BINARY_SUPPORT_DLFCN */
             return _CFBundleDYLDGetSymbolByName(bundle, funcName);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
 #endif /* BINARY_SUPPORT_DYLD */
 #if defined(BINARY_SUPPORT_DLL)
@@ -2946,9 +3626,10 @@ void *_CFBundleGetCFMFunctionPointerForName(CFBundleRef bundle, CFStringRef func
         case __CFBundleDYLDFrameworkBinary:
         case __CFBundleDYLDExecutableBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
-            if (bundle->_handleCookie) fp = _CFBundleDlfcnGetSymbolByNameWithSearch(bundle, funcName, true); else
-#endif /* BINARY_SUPPORT_DLFCN */
+            if (bundle->_handleCookie) fp = _CFBundleDlfcnGetSymbolByNameWithSearch(bundle, funcName, true);
+#else /* BINARY_SUPPORT_DLFCN */
             fp = _CFBundleDYLDGetSymbolByNameWithSearch(bundle, funcName, true);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
 #endif /* BINARY_SUPPORT_DYLD */
         default:
@@ -2978,9 +3659,7 @@ void CFBundleGetFunctionPointersForNames(CFBundleRef bundle, CFArrayRef function
     if (!ftbl) return;
 
     c = CFArrayGetCount(functionNames);
-    for (i = 0; i < c; i++) {
-        ftbl[i] = CFBundleGetFunctionPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(functionNames, i));
-    }
+    for (i = 0; i < c; i++) ftbl[i] = CFBundleGetFunctionPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(functionNames, i));
 }
 
 void _CFBundleGetCFMFunctionPointersForNames(CFBundleRef bundle, CFArrayRef functionNames, void *ftbl[]) {
@@ -2989,17 +3668,13 @@ void _CFBundleGetCFMFunctionPointersForNames(CFBundleRef bundle, CFArrayRef func
     if (!ftbl) return;
 
     c = CFArrayGetCount(functionNames);
-    for (i = 0; i < c; i++) {
-        ftbl[i] = _CFBundleGetCFMFunctionPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(functionNames, i));
-    }
+    for (i = 0; i < c; i++) ftbl[i] = _CFBundleGetCFMFunctionPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(functionNames, i));
 }
 
 void *CFBundleGetDataPointerForName(CFBundleRef bundle, CFStringRef symbolName) {
     void *dp = NULL;
     // Load if necessary
-    if (!bundle->_isLoaded) {
-        if (!CFBundleLoadExecutable(bundle)) return NULL;
-    }
+    if (!bundle->_isLoaded && !CFBundleLoadExecutable(bundle)) return NULL;
     
     switch (bundle->_binaryType) {
 #if defined(BINARY_SUPPORT_CFM)
@@ -3012,9 +3687,10 @@ void *CFBundleGetDataPointerForName(CFBundleRef bundle, CFStringRef symbolName) 
         case __CFBundleDYLDFrameworkBinary:
         case __CFBundleDYLDExecutableBinary:
 #if defined(BINARY_SUPPORT_DLFCN)
-            if (bundle->_handleCookie) dp = _CFBundleDlfcnGetSymbolByName(bundle, symbolName); else
-#endif /* BINARY_SUPPORT_DLFCN */
+            if (bundle->_handleCookie) dp = _CFBundleDlfcnGetSymbolByName(bundle, symbolName);
+#else /* BINARY_SUPPORT_DLFCN */
             dp = _CFBundleDYLDGetSymbolByName(bundle, symbolName);
+#endif /* BINARY_SUPPORT_DLFCN */
             break;
 #endif /* BINARY_SUPPORT_DYLD */
 #if defined(BINARY_SUPPORT_DLL)
@@ -3037,9 +3713,7 @@ void CFBundleGetDataPointersForNames(CFBundleRef bundle, CFArrayRef symbolNames,
     if (!stbl) return;
 
     c = CFArrayGetCount(symbolNames);
-    for (i = 0; i < c; i++) {
-        stbl[i] = CFBundleGetDataPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(symbolNames, i));
-    }
+    for (i = 0; i < c; i++) stbl[i] = CFBundleGetDataPointerForName(bundle, (CFStringRef)CFArrayGetValueAtIndex(symbolNames, i));
 }
 
 __private_extern__ _CFResourceData *__CFBundleGetResourceData(CFBundleRef bundle) {
@@ -3047,11 +3721,7 @@ __private_extern__ _CFResourceData *__CFBundleGetResourceData(CFBundleRef bundle
 }
 
 CFPlugInRef CFBundleGetPlugIn(CFBundleRef bundle) {
-    if (bundle->_plugInData._isPlugIn) {
-        return (CFPlugInRef)bundle;
-    } else {
-        return NULL;
-    }
+    return (bundle->_plugInData._isPlugIn) ? (CFPlugInRef)bundle : NULL;
 }
 
 __private_extern__ _CFPlugInData *__CFBundleGetPlugInData(CFBundleRef bundle) {
@@ -3062,10 +3732,7 @@ __private_extern__ Boolean _CFBundleCouldBeBundle(CFURLRef url) {
     Boolean result = false;
     Boolean exists;
     SInt32 mode;
-
-    if (_CFGetFileProperties(kCFAllocatorSystemDefault, url, &exists, &mode, NULL, NULL, NULL, NULL) == 0) {
-        result = (exists && ((mode & S_IFMT) == S_IFDIR) && ((mode & 0444) != 0));
-    }
+    if (_CFGetFileProperties(kCFAllocatorSystemDefault, url, &exists, &mode, NULL, NULL, NULL, NULL) == 0) result = (exists && (mode & S_IFMT) == S_IFDIR && (mode & 0444) != 0);
     return result;
 }
 
@@ -3073,6 +3740,20 @@ __private_extern__ Boolean _CFBundleCouldBeBundle(CFURLRef url) {
 
 __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocatorRef alloc, CFStringRef executablePath) {
     // MF:!!! Implement me.  We need to be able to find the bundle from the exe, dealing with old vs. new as well as the Executables dir business on Windows.
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#elif 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+    UniChar executablesToFrameworksPathBuff[] = {'.', '.', '\\', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
+    UniChar executablesToPrivateFrameworksPathBuff[] = {'.', '.', '\\', 'P', 'r', 'i', 'v', 'a', 't', 'e', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
+    UniChar executablesToSystemFrameworksPathBuff[MAX_PATH+1] = { 0 };
+    SHGetFolderPathAndSubDirW(NULL, CSIDL_PROGRAM_FILES_COMMON, NULL, 0 /* SHGFP_TYPE_CURRENT */, L"Apple\\Mobile Device Support\\Frameworks", executablesToSystemFrameworksPathBuff);
+    UniChar frameworksExtension[] = {'f', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k'};
+#elif DEPLOYMENT_TARGET_WINDOWS
+    UniChar executablesToFrameworksPathBuff[] = {'.', '.', '\\', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
+    UniChar executablesToPrivateFrameworksPathBuff[] = {'.', '.', '\\', 'P', 'r', 'i', 'v', 'a', 't', 'e', 'F', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k', 's'};
+    UniChar frameworksExtension[] = {'f', 'r', 'a', 'm', 'e', 'w', 'o', 'r', 'k'};
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
     UniChar pathBuff[CFMaxPathSize];
     UniChar nameBuff[CFMaxPathSize];
     CFIndex length, nameStart, nameLength, savedLength;
@@ -3093,6 +3774,67 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
     length = _CFLengthAfterDeletingLastPathComponent(pathBuff, length);
     savedLength = length;
 
+#if DEPLOYMENT_TARGET_WINDOWS
+    // * (Windows-only) First check the "Executables" directory parallel to the "Frameworks" directory case.
+    if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToFrameworksPathBuff, LENGTH_OF(executablesToFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
+        CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+        bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+        if (!_CFBundleCouldBeBundle(bundleURL)) {
+            CFRelease(bundleURL);
+            bundleURL = NULL;
+        }
+    }
+    // * (Windows-only) Next check the "Executables" directory parallel to the "PrivateFrameworks" directory case.
+    if (!bundleURL) {
+        length = savedLength;
+        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToPrivateFrameworksPathBuff, LENGTH_OF(executablesToPrivateFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
+            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+            bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+            if (!_CFBundleCouldBeBundle(bundleURL)) {
+                CFRelease(bundleURL);
+                bundleURL = NULL;
+            }
+        }
+    }
+            
+#elif 0 && DEPLOYMENT_TARGET_WINDOWS_SYNC
+    // * (Windows-only) First check the "Executables" directory parallel to the "Frameworks" directory case.
+    if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToFrameworksPathBuff, LENGTH_OF(executablesToFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
+        CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+        bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+        if (!_CFBundleCouldBeBundle(bundleURL)) {
+            CFRelease(bundleURL);
+            bundleURL = NULL;
+        }
+    }
+    // * (Windows-only) Next check the "Executables" directory parallel to the "PrivateFrameworks" directory case.
+    if (!bundleURL) {
+        length = savedLength;
+        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToPrivateFrameworksPathBuff, LENGTH_OF(executablesToPrivateFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
+            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+            bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+            if (!_CFBundleCouldBeBundle(bundleURL)) {
+                CFRelease(bundleURL);
+                bundleURL = NULL;
+            }
+        }
+    }
+    // * (Windows-only) Next check the \Program Files\Apple\Mobile Device Support\Frameworks directory
+    if (!bundleURL) {
+        length = 0;
+        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToSystemFrameworksPathBuff, wcslen(executablesToSystemFrameworksPathBuff)) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, LENGTH_OF(frameworksExtension))) {
+            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+            bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+            if (!_CFBundleCouldBeBundle(bundleURL)) {
+                CFRelease(bundleURL);
+                bundleURL = NULL;
+            }
+        }
+    }
+#elif DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
     // * Finally check the executable inside the framework case.
     if (!bundleURL) {
         // MF:!!! This should ensure the framework name is the same as the library name!
@@ -3103,9 +3845,7 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
 
         while (length > 0) {
             curStart = _CFStartOfLastPathComponent(pathBuff, length);
-            if (curStart >= length) {
-                break;
-            }
+            if (curStart >= length) break;
             CFStringSetExternalCharactersNoCopy(cheapStr, &(pathBuff[curStart]), length - curStart, CFMaxPathSize - curStart);
             if (CFEqual(cheapStr, _CFBundleSupportFilesDirectoryName1) || CFEqual(cheapStr, _CFBundleSupportFilesDirectoryName2)) {
                 length = _CFLengthAfterDeletingLastPathComponent(pathBuff, length);
@@ -3128,10 +3868,8 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
             length = _CFLengthAfterDeletingLastPathComponent(pathBuff, length);
         }
     }
-
     CFStringSetExternalCharactersNoCopy(cheapStr, NULL, 0, 0);
     CFRelease(cheapStr);
-
     return bundleURL;
 }
 
@@ -3140,37 +3878,47 @@ static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath) {
     // If an image path corresponds to a bundle, we see if there is already a bundle instance.  If there is and it is NOT in the _dynamicBundles array, it is added to the staticBundles.  Do not add the main bundle to the list here.
     CFBundleRef bundle;
     CFURLRef curURL = _CFBundleCopyFrameworkURLForExecutablePath(kCFAllocatorSystemDefault, imagePath);
-    Boolean doFinalProcessing = false;
+    Boolean createdBundle = false;
 
     if (curURL) {
-        bundle = _CFBundleFindByURL(curURL, true);
+        bundle = _CFBundleCopyBundleForURL(curURL, true);
         if (!bundle) {
+            // Ensure bundle exists by creating it if necessary
+            // NB doFinalProcessing must be false here, see below
             bundle = _CFBundleCreate(kCFAllocatorSystemDefault, curURL, true, false);
-            doFinalProcessing = true;
+            createdBundle = true;
         }
-        if (bundle && !bundle->_isLoaded) {
-            // make sure that these bundles listed as loaded, and mark them frameworks (we probably can't see anything else here, and we cannot unload them)
-#if defined(BINARY_SUPPORT_DLFCN)
-            if (!bundle->_isLoaded && _useDlfcn) _CFBundleDlfcnCheckLoaded(bundle);
-#endif /* BINARY_SUPPORT_DLFCN */
-#if defined(BINARY_SUPPORT_DYLD)
-            if (bundle->_binaryType == __CFBundleUnknownBinary) bundle->_binaryType = __CFBundleDYLDFrameworkBinary;
-            if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) bundle->_resourceData._executableLacksResourceFork = true;
-            if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
-#endif /* BINARY_SUPPORT_DYLD */
-#if LOG_BUNDLE_LOAD
-            if (!bundle->_isLoaded) printf("ensure bundle %p set loaded fallback, handle %p image %p conn %p\n", bundle, bundle->_handleCookie, bundle->_imageCookie, bundle->_connectionCookie);
-#endif /* LOG_BUNDLE_LOAD */
-            bundle->_isLoaded = true;
-        }
-        // Perform delayed final processing steps.
-        // This must be done after _isLoaded has been set.
-        if (bundle && doFinalProcessing) {
-            _CFBundleCheckWorkarounds(bundle);
-            if (_CFBundleNeedsInitPlugIn(bundle)) {
-                __CFSpinUnlock(&CFBundleGlobalDataLock);
-                _CFBundleInitPlugIn(bundle);
-                __CFSpinLock(&CFBundleGlobalDataLock);
+        if (bundle) {
+            __CFSpinLock(&(bundle->_bundleLoadingLock));
+            if (!bundle->_isLoaded) {
+                // make sure that these bundles listed as loaded, and mark them frameworks (we probably can't see anything else here, and we cannot unload them)
+    #if defined(BINARY_SUPPORT_DLFCN)
+                if (!bundle->_isLoaded) _CFBundleDlfcnCheckLoaded(bundle);
+    #elif defined(BINARY_SUPPORT_DYLD)
+                if (!bundle->_isLoaded) _CFBundleDYLDCheckLoaded(bundle);
+    #endif /* BINARY_SUPPORT_DLFCN */
+    #if defined(BINARY_SUPPORT_DYLD)
+                if (bundle->_binaryType == __CFBundleUnknownBinary) bundle->_binaryType = __CFBundleDYLDFrameworkBinary;
+                if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) bundle->_resourceData._executableLacksResourceFork = true;
+    #endif /* BINARY_SUPPORT_DYLD */
+    #if LOG_BUNDLE_LOAD
+                if (!bundle->_isLoaded) printf("ensure bundle %p set loaded fallback, handle %p image %p conn %p\n", bundle, bundle->_handleCookie, bundle->_imageCookie, bundle->_connectionCookie);
+    #endif /* LOG_BUNDLE_LOAD */
+                bundle->_isLoaded = true;
+            }
+            __CFSpinUnlock(&(bundle->_bundleLoadingLock));
+            if (createdBundle) {
+                // Perform delayed final processing steps.
+                // This must be done after _isLoaded has been set, for security reasons (3624341).
+                _CFBundleCheckWorkarounds(bundle);
+                if (_CFBundleNeedsInitPlugIn(bundle)) {
+                    __CFSpinUnlock(&CFBundleGlobalDataLock);
+                    _CFBundleInitPlugIn(bundle);
+                    __CFSpinLock(&CFBundleGlobalDataLock);
+                }
+            } else {
+                // Release the bundle if we did not create it here
+                CFRelease(bundle);
             }
         }
         CFRelease(curURL);
@@ -3181,10 +3929,7 @@ static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths) {
     // This finds the bundles for the given paths.
     // If an image path corresponds to a bundle, we see if there is already a bundle instance.  If there is and it is NOT in the _dynamicBundles array, it is added to the staticBundles.  Do not add the main bundle to the list here (even if it appears in imagePaths).
     CFIndex i, imagePathCount = CFArrayGetCount(imagePaths);
-
-    for (i = 0; i < imagePathCount; i++) {
-        _CFBundleEnsureBundleExistsForImagePath((CFStringRef)CFArrayGetValueAtIndex(imagePaths, i));
-    }
+    for (i = 0; i < imagePathCount; i++) _CFBundleEnsureBundleExistsForImagePath((CFStringRef)CFArrayGetValueAtIndex(imagePaths, i));
 }
 
 static void _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(CFStringRef hint) {
@@ -3203,7 +3948,6 @@ static void _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(CFStringRef hint
 static void _CFBundleEnsureAllBundlesUpToDateAlreadyLocked(void) {
     // This method returns all the statically linked bundles.  This includes the main bundle as well as any frameworks that the process was linked against at launch time.  It does not include frameworks or opther bundles that were loaded dynamically.
     CFArrayRef imagePaths = NULL;
-
     // Tickle the main bundle into existence
     (void)_CFBundleGetMainBundleAlreadyLocked();
 
@@ -3226,13 +3970,32 @@ static void _CFBundleEnsureAllBundlesUpToDateAlreadyLocked(void) {
 
 CFArrayRef CFBundleGetAllBundles(void) {
     // To answer this properly, we have to have created the static bundles!
+#if !defined(AVOID_WEAK_COLLECTIONS)
+    static CFMutableArrayRef externalAllBundles = NULL;
+#endif /* AVOID_WEAK_COLLECTIONS */
+    CFArrayRef bundles;
     __CFSpinLock(&CFBundleGlobalDataLock);
     _CFBundleEnsureAllBundlesUpToDateAlreadyLocked();
+#if defined(AVOID_WEAK_COLLECTIONS)
+    bundles = _allBundles;
+#else /* AVOID_WEAK_COLLECTIONS */
+    if (!externalAllBundles) {
+        CFArrayCallBacks nonRetainingArrayCallbacks = kCFTypeArrayCallBacks;
+        nonRetainingArrayCallbacks.retain = NULL;
+        nonRetainingArrayCallbacks.release = NULL;
+        externalAllBundles = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &nonRetainingArrayCallbacks);
+    }
+    CFArrayRemoveAllValues(externalAllBundles);
+    for (id value in _allBundles) CFArrayAppendValue(externalAllBundles, value);
+    bundles = externalAllBundles;
+#endif /* AVOID_WEAK_COLLECTIONS */
     __CFSpinUnlock(&CFBundleGlobalDataLock);
-    return _allBundles;
+    return bundles;
 }
 
-uint8_t _CFBundleLayoutVersion(CFBundleRef bundle) {return bundle->_version;}
+uint8_t _CFBundleLayoutVersion(CFBundleRef bundle) {
+    return bundle->_version;
+}
 
 CF_EXPORT CFURLRef _CFBundleCopyInfoPlistURL(CFBundleRef bundle) {
     CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
@@ -3241,7 +4004,9 @@ CF_EXPORT CFURLRef _CFBundleCopyInfoPlistURL(CFBundleRef bundle) {
     return (url ? (CFURLRef)CFRetain(url) : NULL);
 }
 
-CF_EXPORT CFURLRef _CFBundleCopyPrivateFrameworksURL(CFBundleRef bundle) {return CFBundleCopyPrivateFrameworksURL(bundle);}
+CF_EXPORT CFURLRef _CFBundleCopyPrivateFrameworksURL(CFBundleRef bundle) {
+    return CFBundleCopyPrivateFrameworksURL(bundle);
+}
 
 CF_EXPORT CFURLRef CFBundleCopyPrivateFrameworksURL(CFBundleRef bundle) {
     CFURLRef result = NULL;
@@ -3256,7 +4021,9 @@ CF_EXPORT CFURLRef CFBundleCopyPrivateFrameworksURL(CFBundleRef bundle) {
     return result;
 }
 
-CF_EXPORT CFURLRef _CFBundleCopySharedFrameworksURL(CFBundleRef bundle) {return CFBundleCopySharedFrameworksURL(bundle);}
+CF_EXPORT CFURLRef _CFBundleCopySharedFrameworksURL(CFBundleRef bundle) {
+    return CFBundleCopySharedFrameworksURL(bundle);
+}
 
 CF_EXPORT CFURLRef CFBundleCopySharedFrameworksURL(CFBundleRef bundle) {
     CFURLRef result = NULL;
@@ -3271,7 +4038,9 @@ CF_EXPORT CFURLRef CFBundleCopySharedFrameworksURL(CFBundleRef bundle) {
     return result;
 }
 
-CF_EXPORT CFURLRef _CFBundleCopySharedSupportURL(CFBundleRef bundle) {return CFBundleCopySharedSupportURL(bundle);}
+CF_EXPORT CFURLRef _CFBundleCopySharedSupportURL(CFBundleRef bundle) {
+    return CFBundleCopySharedSupportURL(bundle);
+}
 
 CF_EXPORT CFURLRef CFBundleCopySharedSupportURL(CFBundleRef bundle) {
     CFURLRef result = NULL;
@@ -3286,7 +4055,9 @@ CF_EXPORT CFURLRef CFBundleCopySharedSupportURL(CFBundleRef bundle) {
     return result;
 }
 
-__private_extern__ CFURLRef _CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle) {return CFBundleCopyBuiltInPlugInsURL(bundle);}
+__private_extern__ CFURLRef _CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle) {
+    return CFBundleCopyBuiltInPlugInsURL(bundle);
+}
 
 CF_EXPORT CFURLRef CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle) {
     CFURLRef result = NULL, alternateResult = NULL;
@@ -3320,6 +4091,143 @@ CF_EXPORT CFURLRef CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle) {
 
 
 #if defined(BINARY_SUPPORT_DYLD)
+
+__private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint) {
+    uint32_t i, numImages = _dyld_image_count();
+    CFMutableArrayRef result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+    CFRange range = CFRangeMake(0, CFStringGetLength(hint)), altRange = CFRangeMake(0, 0), testRange = CFRangeMake(0, 0);
+    const char *processPath = _CFProcessPath();
+    const void *mhp = (const void *)_NSGetMachExecuteHeader();
+    
+    if (range.length > 14) {
+        // handle some common variations on framework bundle identifiers
+        if (CFStringFindWithOptions(hint, CFSTR(".framework"), range, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, &testRange) && testRange.location > 0 && testRange.length > 0) {
+            // identifier has .framework appended
+            altRange.length = testRange.location;
+        } else if (CFStringFindWithOptions(hint, CFSTR("framework"), range, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, &testRange) && testRange.location > 0 && testRange.length > 0) {
+            // identifier has Framework appended
+            altRange.length = testRange.location;
+        } else if (CFStringFindWithOptions(hint, CFSTR("fw"), range, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, &testRange) && testRange.location > 0 && testRange.length > 0) {
+            // identifier has FW appended
+            altRange.length = testRange.location;
+        }
+    }
+    for (i = 0; i < numImages; i++) {
+        const char *curName = _dyld_get_image_name(i), *lastComponent = NULL;
+        if (curName && (!processPath || 0 != strcmp(curName, processPath)) && mhp != (void *)_dyld_get_image_header(i)) lastComponent = strrchr(curName, '/');
+        if (lastComponent) {
+            CFStringRef str = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, lastComponent + 1);
+            if (str) {
+                if (CFStringFindWithOptions(hint, str, range, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL) || (altRange.length > 0 && CFStringFindWithOptions(hint, str, altRange, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL))) {
+                    CFStringRef curStr = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, curName);
+                    if (curStr) {
+                        CFArrayAppendValue(result, curStr);
+                        CFRelease(curStr);
+                    }
+                }
+                CFRelease(str);
+            }
+        }
+    }
+    return result;
+}
+
+static char *_cleanedPathForPath(const char *curName) {
+    char *thePath = strdup(curName);
+    if (thePath) {
+        // We are going to process the buffer replacing all "/./" and "//" with "/"
+        CFIndex srcIndex = 0, dstIndex = 0;
+        CFIndex len = strlen(thePath);
+        for (srcIndex=0; srcIndex<len; srcIndex++) {
+            thePath[dstIndex] = thePath[srcIndex];
+            dstIndex++;
+            while (srcIndex < len-1 && thePath[srcIndex] == '/' && (thePath[srcIndex+1] == '/' || (thePath[srcIndex+1] == '.' && srcIndex < len-2 && thePath[srcIndex+2] == '/'))) srcIndex += (thePath[srcIndex+1] == '/' ? 1 : 2);
+        }
+        thePath[dstIndex] = 0;
+    }
+    return thePath;
+}
+
+__private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void) {
+    // This returns an array of the paths of all the dyld images in the process.  These paths may not be absolute, they may point at things that are not bundles, they may be staticly linked bundles or dynamically loaded bundles, they may be NULL.
+    uint32_t i, numImages = _dyld_image_count();
+    CFMutableArrayRef result = NULL;
+    static uint32_t _cachedDYLDImageCount = -1;
+
+    if (numImages != _cachedDYLDImageCount) {
+        const char *curName;
+        char *cleanedCurName = NULL;
+        CFStringRef curStr;
+        const char *processPath = _CFProcessPath();
+        const void *mhp = (const void *)_NSGetMachExecuteHeader();
+
+        result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+
+        for (i = 0; i < numImages; i++) {
+            curName = _dyld_get_image_name(i);
+            if (curName && i == 0) cleanedCurName = _cleanedPathForPath(curName);
+            if (curName && (!processPath || 0 != strcmp(curName, processPath)) && (!processPath || !cleanedCurName || 0 != strcmp(cleanedCurName, processPath)) && mhp != (void *)_dyld_get_image_header(i)) {
+                curStr = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, curName);
+                if (curStr) {
+                    CFArrayAppendValue(result, curStr);
+                    CFRelease(curStr);
+                }
+            }
+            if (cleanedCurName) {
+                free(cleanedCurName);
+                cleanedCurName = NULL;
+            }
+        }
+        _cachedDYLDImageCount = numImages;
+    }
+    return result;
+}
+
+static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p) {
+    CFStringRef result = NULL;
+#if defined(USE_DYLD_PRIV)
+    const char *name = dyld_image_path_containing_address(p);
+    if (name) result = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, name);
+#else /* USE_DYLD_PRIV */
+    if (!result) {
+        uint32_t i, j, n = _dyld_image_count();
+        Boolean foundit = false;
+        const char *name;
+#if __LP64__
+#define MACH_HEADER_TYPE struct mach_header_64
+#define MACH_SEGMENT_CMD_TYPE struct segment_command_64
+#define MACH_SEGMENT_FLAVOR LC_SEGMENT_64
+#else
+#define MACH_HEADER_TYPE struct mach_header
+#define MACH_SEGMENT_CMD_TYPE struct segment_command
+#define MACH_SEGMENT_FLAVOR LC_SEGMENT
+#endif
+        for (i = 0; !foundit && i < n; i++) {
+            const MACH_HEADER_TYPE *mh = (const MACH_HEADER_TYPE *)_dyld_get_image_header(i);
+            uintptr_t addr = (uintptr_t)p - _dyld_get_image_vmaddr_slide(i);
+            if (mh) {
+                struct load_command *lc = (struct load_command *)((char *)mh + sizeof(MACH_HEADER_TYPE));
+                for (j = 0; !foundit && j < mh->ncmds; j++, lc = (struct load_command *)((char *)lc + lc->cmdsize)) {
+                    if (MACH_SEGMENT_FLAVOR == lc->cmd && ((MACH_SEGMENT_CMD_TYPE *)lc)->vmaddr <= addr && addr < ((MACH_SEGMENT_CMD_TYPE *)lc)->vmaddr + ((MACH_SEGMENT_CMD_TYPE *)lc)->vmsize) {
+                        foundit = true;
+                        name = _dyld_get_image_name(i);
+                        if (name) result = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, name);
+                    }
+                }
+            }
+        }
+#undef MACH_HEADER_TYPE
+#undef MACH_SEGMENT_CMD_TYPE
+#undef MACH_SEGMENT_FLAVOR
+    }
+#endif /* USE_DYLD_PRIV */
+#if LOG_BUNDLE_LOAD
+    printf("dyld image path for pointer %p is %p\n", p, result);
+#endif /* LOG_BUNDLE_LOAD */
+    return result;
+}
+
+#if !defined(BINARY_SUPPORT_DLFCN) 
 
 static const void *__CFBundleDYLDFindImage(char *buff) {
     const void *header = NULL;
@@ -3408,21 +4316,25 @@ __private_extern__ Boolean _CFBundleDYLDLoadBundle(CFBundleRef bundle, Boolean f
                     bundle->_isLoaded = true;
                 } else {
                     NSLinkEditError(&c, &errorNumber, &fileName, &errorString);
-                    CFLog(__kCFLogBundle, CFSTR("Error loading %s:  error code %d, error number %d (%s)"), fileName, c, errorNumber, errorString);
                     if (error) {
 #if defined(BINARY_SUPPORT_DLFCN)
                         _CFBundleDlfcnPreflight(bundle, subError);
 #endif /* BINARY_SUPPORT_DLFCN */
                         if (!localError) {
-                            CFStringRef debugString = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("error code %d, error number %d (%s)"), c, errorNumber, errorString);
+                            CFStringRef tempString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString), debugString = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("error code %d, error number %d (%@)"), c, errorNumber, tempString);
                             localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
-                            CFRelease(debugString);
+                            if (tempString) CFRelease(tempString);
+                            if (debugString) CFRelease(debugString);
                         }
+                    } else {
+                        CFStringRef tempString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString), executableString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, fileName);
+                        CFLog(__kCFLogBundle, CFSTR("Error loading %@:  error code %d, error number %d (%@)"), executableString, c, errorNumber, tempString);
+                        if (tempString) CFRelease(tempString);
+                        if (executableString) CFRelease(executableString);
                     }
                     (void)NSDestroyObjectFileImage(image);
                 }
             } else {
-                CFLog(__kCFLogBundle, CFSTR("dyld returns %d when trying to load %@"), retCode, executableURL);
                 if (error) {
                     if (retCode == NSObjectFileImageArch) {
                         localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableArchitectureMismatchError);
@@ -3447,11 +4359,16 @@ __private_extern__ Boolean _CFBundleDYLDLoadBundle(CFBundleRef bundle, Boolean f
                             CFRelease(debugString);
                         }
                     }
+                } else {
+                    CFLog(__kCFLogBundle, CFSTR("dyld returns %d when trying to load %@"), retCode, executableURL);
                 }
             }
         } else {
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
+            }
         }
         if (executableURL) CFRelease(executableURL);
     }
@@ -3481,21 +4398,29 @@ __private_extern__ Boolean _CFBundleDYLDLoadFramework(CFBundleRef bundle, CFErro
                 bundle->_isLoaded = true;
             } else {
                 NSLinkEditError(&c, &errorNumber, &fileName, &errorString);
-                CFLog(__kCFLogBundle, CFSTR("Error loading %s:  error code %d, error number %d (%s)"), fileName, c, errorNumber, errorString);
                 if (error) {
 #if defined(BINARY_SUPPORT_DLFCN)
                     _CFBundleDlfcnPreflight(bundle, subError);
 #endif /* BINARY_SUPPORT_DLFCN */
                     if (!localError) {
-                        CFStringRef debugString = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("error code %d, error number %d (%s)"), c, errorNumber, errorString);
+                        CFStringRef tempString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString), debugString = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("error code %d, error number %d (%@)"), c, errorNumber, tempString);
                         localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
-                        CFRelease(debugString);
+                        if (tempString) CFRelease(tempString);
+                        if (debugString) CFRelease(debugString);
                     }
+                } else {
+                    CFStringRef tempString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString), executableString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, fileName);
+                    CFLog(__kCFLogBundle, CFSTR("Error loading %@:  error code %d, error number %d (%@)"), executableString, c, errorNumber, tempString);
+                    if (tempString) CFRelease(tempString);
+                    if (executableString) CFRelease(executableString);
                 }
             }
         } else {
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
+            }
         }
         if (executableURL) CFRelease(executableURL);
     }
@@ -3519,7 +4444,9 @@ __private_extern__ void _CFBundleDYLDUnloadBundle(CFBundleRef bundle) {
     }
 }
 
-__private_extern__ void *_CFBundleDYLDGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName) {return _CFBundleDYLDGetSymbolByNameWithSearch(bundle, symbolName, false);}
+__private_extern__ void *_CFBundleDYLDGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName) {
+    return _CFBundleDYLDGetSymbolByNameWithSearch(bundle, symbolName, false);
+}
 
 static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFStringRef symbolName, Boolean globalSearch) {
     void *result = NULL;
@@ -3541,15 +4468,15 @@ static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFString
                 if (!CFStringGetCString(executableName, hintBuff, 1024, kCFStringEncodingUTF8)) hintBuff[0] = '\0';
                 CFRelease(executableName);
             }
-	    // Nowdays, NSIsSymbolNameDefinedWithHint() and NSLookupAndBindSymbolWithHint()
-	    // are identical, except the first just returns a bool, so checking with the
-	    // Is function first just causes a redundant lookup.
-	    // This returns NULL on failure.
+            // Nowdays, NSIsSymbolNameDefinedWithHint() and NSLookupAndBindSymbolWithHint()
+            // are identical, except the first just returns a bool, so checking with the
+            // Is function first just causes a redundant lookup.
+            // This returns NULL on failure.
             symbol = NSLookupAndBindSymbolWithHint(buff, hintBuff);
         }
         if (symbol) result = NSAddressOfSymbol(symbol);
 #if defined(DEBUG)
-        if (!result) CFLog(__kCFLogBundle, CFSTR("dyld cannot find symbol %s in %@"), buff, bundle);
+        if (!result) CFLog(__kCFLogBundle, CFSTR("dyld cannot find symbol %@ in %@"), symbolName, bundle);
 #endif /* DEBUG */
 #if LOG_BUNDLE_LOAD
         printf("bundle %p handle %p module %p image %p dyld returns symbol %p for %s\n", bundle, bundle->_handleCookie, bundle->_moduleCookie, bundle->_imageCookie, result, buff + 1);
@@ -3558,122 +4485,7 @@ static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFString
     return result;
 }
 
-static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p) {
-    CFStringRef result = NULL;
-    if (!result) {
-        uint32_t i, j, n = _dyld_image_count();
-        Boolean foundit = false;
-        const char *name;
-#if __LP64__
-#define MACH_HEADER_TYPE struct mach_header_64
-#define MACH_SEGMENT_CMD_TYPE struct segment_command_64
-#define MACH_SEGMENT_FLAVOR LC_SEGMENT_64
-#else
-#define MACH_HEADER_TYPE struct mach_header
-#define MACH_SEGMENT_CMD_TYPE struct segment_command
-#define MACH_SEGMENT_FLAVOR LC_SEGMENT
-#endif
-        for (i = 0; !foundit && i < n; i++) {
-            const MACH_HEADER_TYPE *mh = (const MACH_HEADER_TYPE *)_dyld_get_image_header(i);
-            uintptr_t addr = (uintptr_t)p - _dyld_get_image_vmaddr_slide(i);
-            if (mh) {
-                struct load_command *lc = (struct load_command *)((char *)mh + sizeof(MACH_HEADER_TYPE));
-                for (j = 0; !foundit && j < mh->ncmds; j++, lc = (struct load_command *)((char *)lc + lc->cmdsize)) {
-                    if (MACH_SEGMENT_FLAVOR == lc->cmd && ((MACH_SEGMENT_CMD_TYPE *)lc)->vmaddr <= addr && addr < ((MACH_SEGMENT_CMD_TYPE *)lc)->vmaddr + ((MACH_SEGMENT_CMD_TYPE *)lc)->vmsize) {
-                        foundit = true;
-                        name = _dyld_get_image_name(i);
-                        if (name) result = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, name);
-                    }
-                }
-            }
-        }
-#undef MACH_HEADER_TYPE
-#undef MACH_SEGMENT_CMD_TYPE
-#undef MACH_SEGMENT_FLAVOR
-    }
-#if LOG_BUNDLE_LOAD
-    printf("dyld image path for pointer %p is %p\n", p, result);
-#endif /* LOG_BUNDLE_LOAD */
-    return result;
-}
-
-__private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint) {
-    uint32_t i, numImages = _dyld_image_count();
-    CFMutableArrayRef result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
-    CFRange range = CFRangeMake(0, CFStringGetLength(hint));
-    const char *processPath = _CFProcessPath();
-    
-    for (i = 0; i < numImages; i++) {
-        const char *curName = _dyld_get_image_name(i), *lastComponent = NULL;
-        if (curName && (!processPath || 0 != strcmp(curName, processPath))) lastComponent = strrchr(curName, '/');
-        if (lastComponent) {
-            CFStringRef str = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, lastComponent + 1);
-            if (str) {
-                if (CFStringFindWithOptions(hint, str, range, kCFCompareAnchored|kCFCompareBackwards|kCFCompareCaseInsensitive, NULL)) {
-                    CFStringRef curStr = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, curName);
-                    if (curStr) {
-                        CFArrayAppendValue(result, curStr);
-                        CFRelease(curStr);
-                    }
-                }
-                CFRelease(str);
-            }
-        }
-    }
-    return result;
-}
-
-static char *_cleanedPathForPath(const char *curName) {
-    char *thePath = strdup(curName);
-    if (thePath) {
-        // We are going to process the buffer replacing all "/./" and "//" with "/"
-        CFIndex srcIndex = 0, dstIndex = 0;
-        CFIndex len = strlen(thePath);
-        for (srcIndex=0; srcIndex<len; srcIndex++) {
-            thePath[dstIndex] = thePath[srcIndex];
-            dstIndex++;
-            while (srcIndex < len-1 && thePath[srcIndex] == '/' && (thePath[srcIndex+1] == '/' || (thePath[srcIndex+1] == '.' && srcIndex < len-2 && thePath[srcIndex+2] == '/'))) srcIndex += (thePath[srcIndex+1] == '/' ? 1 : 2);
-        }
-        thePath[dstIndex] = 0;
-    }
-    return thePath;
-}
-
-__private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void) {
-    // This returns an array of the paths of all the dyld images in the process.  These paths may not be absolute, they may point at things that are not bundles, they may be staticly linked bundles or dynamically loaded bundles, they may be NULL.
-    static uint32_t _cachedDYLDImageCount = -1;
-
-    uint32_t i, numImages = _dyld_image_count();
-    CFMutableArrayRef result = NULL;
-
-    if (numImages != _cachedDYLDImageCount) {
-        const char *curName;
-        char *cleanedCurName = NULL;
-        CFStringRef curStr;
-        const char *processPath = _CFProcessPath();
-
-        result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
-
-        for (i = 0; i < numImages; i++) {
-            curName = _dyld_get_image_name(i);
-            if (curName && i == 0) cleanedCurName = _cleanedPathForPath(curName);
-            if (curName && (!processPath || 0 != strcmp(curName, processPath)) && (!processPath || !cleanedCurName || 0 != strcmp(cleanedCurName, processPath))) {
-                curStr = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, curName);
-                if (curStr) {
-                    CFArrayAppendValue(result, curStr);
-                    CFRelease(curStr);
-                }
-            }
-            if (cleanedCurName) {
-                free(cleanedCurName);
-                cleanedCurName = NULL;
-            }
-        }
-        _cachedDYLDImageCount = numImages;
-    }
-    return result;
-}
-
+#endif /* !BINARY_SUPPORT_DLFCN */
 #endif /* BINARY_SUPPORT_DYLD */
 
 #if defined(BINARY_SUPPORT_DLFCN)
@@ -3705,24 +4517,7 @@ __private_extern__ Boolean _CFBundleDlfcnCheckLoaded(CFBundleRef bundle) {
     return bundle->_isLoaded;
 }
 
-static SInt32 _CFBundleCurrentArchitecture(void) {
-    SInt32 arch = 0;
-#if defined(__ppc__)
-    arch = kCFBundleExecutableArchitecturePPC;
-#elif defined(__ppc64__)
-    arch = kCFBundleExecutableArchitecturePPC64;
-#elif defined(__i386__)
-    arch = kCFBundleExecutableArchitectureI386;
-#elif defined(__x86_64__)
-    arch = kCFBundleExecutableArchitectureX86_64;
-#elif defined(BINARY_SUPPORT_DYLD)
-    const NXArchInfo *archInfo = NXGetLocalArchInfo();
-    if (archInfo) arch = archInfo->cputype;
-#endif
-    return arch;
-}
-
-extern Boolean _CFBundleDlfcnPreflight(CFBundleRef bundle, CFErrorRef *error) {
+CF_EXPORT Boolean _CFBundleDlfcnPreflight(CFBundleRef bundle, CFErrorRef *error) {
     Boolean retval = true;
     CFErrorRef localError = NULL;
     if (!bundle->_isLoaded) {
@@ -3781,27 +4576,47 @@ __private_extern__ Boolean _CFBundleDlfcnLoadBundle(CFBundleRef bundle, Boolean 
         char buff[CFMaxPathSize];
         if (executableURL && CFURLGetFileSystemRepresentation(executableURL, true, (uint8_t *)buff, CFMaxPathSize)) {
             int mode = forceGlobal ? (RTLD_LAZY | RTLD_GLOBAL | RTLD_FIRST) : (RTLD_NOW | RTLD_LOCAL | RTLD_FIRST);
-            bundle->_handleCookie = dlopen(buff, mode);
+            void *cookie = dlopen(buff, mode);
 #if LOG_BUNDLE_LOAD
-            printf("dlfcn load bundle %p, dlopen of %s mode 0x%x returns handle %p\n", bundle, buff, mode, bundle->_handleCookie);
+            printf("dlfcn load bundle %p, dlopen of %s mode 0x%x returns handle %p\n", bundle, buff, mode, cookie);
 #endif /* LOG_BUNDLE_LOAD */
+            if (cookie && cookie == bundle->_handleCookie) {
+                // during the call to dlopen, arbitrary init routines may have run and caused bundle->_handleCookie to be set, in which case proper reference counting requires that reference to be released with dlclose
+#if LOG_BUNDLE_LOAD
+                printf("dlfcn load bundle %p closing existing reference to handle %p\n", bundle, cookie);
+#endif /* LOG_BUNDLE_LOAD */
+                dlclose(bundle->_handleCookie);
+            }
+            bundle->_handleCookie = cookie;
             if (bundle->_handleCookie) {
                 bundle->_isLoaded = true;
             } else {
-                CFStringRef debugString = NULL;
                 const char *errorString = dlerror();
-                if (errorString) {
-                    CFLog(__kCFLogBundle, CFSTR("Error loading %s:  %s"), buff, errorString);
-                    debugString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString);
+                if (error) {
+                    _CFBundleDlfcnPreflight(bundle, subError);
+                    if (!localError) {
+                        CFStringRef debugString = errorString ? CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString) : NULL;
+                        localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
+                        if (debugString) CFRelease(debugString);
+                    }
                 } else {
-                    CFLog(__kCFLogBundle, CFSTR("Error loading %s"), buff);
+                    CFStringRef executableString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, buff);
+                    if (errorString) {
+                        CFStringRef debugString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString);
+                        CFLog(__kCFLogBundle, CFSTR("Error loading %@:  %@"), executableString, debugString);
+                        if (debugString) CFRelease(debugString);
+                    } else {
+                        CFLog(__kCFLogBundle, CFSTR("Error loading %@"), executableString);
+                    }
+                    if (executableString) CFRelease(executableString);
                 }
-                if (error && _CFBundleDlfcnPreflight(bundle, subError)) localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
-                if (debugString) CFRelease(debugString);
             }
         } else {
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
+            }
         }
         if (executableURL) CFRelease(executableURL);
     }
@@ -3816,27 +4631,47 @@ __private_extern__ Boolean _CFBundleDlfcnLoadFramework(CFBundleRef bundle, CFErr
         char buff[CFMaxPathSize];
         if (executableURL && CFURLGetFileSystemRepresentation(executableURL, true, (uint8_t *)buff, CFMaxPathSize)) {
             int mode = RTLD_LAZY | RTLD_GLOBAL | RTLD_FIRST;
-            bundle->_handleCookie = dlopen(buff, mode);
+            void *cookie = dlopen(buff, mode);
 #if LOG_BUNDLE_LOAD
-            printf("dlfcn load framework %p, dlopen of %s mode 0x%x returns handle %p\n", bundle, buff, mode, bundle->_handleCookie);
+            printf("dlfcn load framework %p, dlopen of %s mode 0x%x returns handle %p\n", bundle, buff, mode, cookie);
 #endif /* LOG_BUNDLE_LOAD */
+            if (cookie && cookie == bundle->_handleCookie) {
+                // during the call to dlopen, arbitrary init routines may have run and caused bundle->_handleCookie to be set, in which case proper reference counting requires that reference to be released with dlclose
+#if LOG_BUNDLE_LOAD
+                printf("dlfcn load framework %p closing existing reference to handle %p\n", bundle, cookie);
+#endif /* LOG_BUNDLE_LOAD */
+                dlclose(bundle->_handleCookie);
+            }
+            bundle->_handleCookie = cookie;
             if (bundle->_handleCookie) {
                 bundle->_isLoaded = true;
             } else {
-                CFStringRef debugString = NULL;
                 const char *errorString = dlerror();
-                if (errorString) {
-                    CFLog(__kCFLogBundle, CFSTR("Error loading %s:  %s"), buff, errorString);
-                    debugString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString);
+                if (error) {
+                    _CFBundleDlfcnPreflight(bundle, subError);
+                    if (!localError) {
+                        CFStringRef debugString = errorString ? CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString) : NULL;
+                        localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
+                        if (debugString) CFRelease(debugString);
+                    }
                 } else {
-                    CFLog(__kCFLogBundle, CFSTR("Error loading %s"), buff);
+                    CFStringRef executableString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, buff);
+                    if (errorString) {
+                        CFStringRef debugString = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, errorString);
+                        CFLog(__kCFLogBundle, CFSTR("Error loading %@:  %@"), executableString, debugString);
+                        if (debugString) CFRelease(debugString);
+                    } else {
+                        CFLog(__kCFLogBundle, CFSTR("Error loading %@"), executableString);
+                    }
+                    if (executableString) CFRelease(executableString);
                 }
-                if (error && _CFBundleDlfcnPreflight(bundle, subError)) localError = _CFBundleCreateErrorDebug(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError, debugString);
-                if (debugString) CFRelease(debugString);
             }
         } else {
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
+            }
         }
         if (executableURL) CFRelease(executableURL);
     }
@@ -3859,7 +4694,9 @@ __private_extern__ void _CFBundleDlfcnUnload(CFBundleRef bundle) {
     }
 }
 
-__private_extern__ void *_CFBundleDlfcnGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName) {return _CFBundleDlfcnGetSymbolByNameWithSearch(bundle, symbolName, false);}
+__private_extern__ void *_CFBundleDlfcnGetSymbolByName(CFBundleRef bundle, CFStringRef symbolName) {
+    return _CFBundleDlfcnGetSymbolByNameWithSearch(bundle, symbolName, false);
+}
 
 static void *_CFBundleDlfcnGetSymbolByNameWithSearch(CFBundleRef bundle, CFStringRef symbolName, Boolean globalSearch) {
     void *result = NULL;
@@ -3869,7 +4706,7 @@ static void *_CFBundleDlfcnGetSymbolByNameWithSearch(CFBundleRef bundle, CFStrin
         result = dlsym(bundle->_handleCookie, buff);
         if (!result && globalSearch) result = dlsym(RTLD_DEFAULT, buff);
 #if defined(DEBUG)
-        if (!result) CFLog(__kCFLogBundle, CFSTR("dlsym cannot find symbol %s in %@"), buff, bundle);
+        if (!result) CFLog(__kCFLogBundle, CFSTR("dlsym cannot find symbol %@ in %@"), symbolName, bundle);
 #endif /* DEBUG */
 #if LOG_BUNDLE_LOAD
         printf("bundle %p handle %p module %p image %p dlsym returns symbol %p for %s\n", bundle, bundle->_handleCookie, bundle->_moduleCookie, bundle->_imageCookie, result, buff);
@@ -3877,6 +4714,8 @@ static void *_CFBundleDlfcnGetSymbolByNameWithSearch(CFBundleRef bundle, CFStrin
     }
     return result;
 }
+
+#if !defined(BINARY_SUPPORT_DYLD)
 
 static CFStringRef _CFBundleDlfcnCopyLoadedImagePathForPointer(void *p) {
     CFStringRef result = NULL;
@@ -3888,6 +4727,7 @@ static CFStringRef _CFBundleDlfcnCopyLoadedImagePathForPointer(void *p) {
     return result;
 }
 
+#endif /* !BINARY_SUPPORT_DYLD */
 #endif /* BINARY_SUPPORT_DLFCN */
 
 
@@ -3897,18 +4737,25 @@ __private_extern__ Boolean _CFBundleDLLLoad(CFBundleRef bundle, CFErrorRef *erro
     CFErrorRef localError = NULL;
     if (!bundle->_isLoaded) {
         CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
-        TCHAR buff[CFMaxPathSize];
+        wchar_t buff[CFMaxPathSize];
 
-        if (executableURL && CFURLGetFileSystemRepresentation(executableURL, true, (uint8_t *)buff, CFMaxPathSize)) {
-            bundle->_hModule = LoadLibrary(buff);
+        if (executableURL && _CFURLGetWideFileSystemRepresentation(executableURL, true, (wchar_t *)buff, CFMaxPathSize)) {
+            bundle->_hModule = LoadLibraryW(buff);
             if (bundle->_hModule) {
                 bundle->_isLoaded = true;
             } else {
-                if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError);
+                if (error) {
+                    localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableLinkError);
+                } else {
+                    CFLog(__kCFLogBundle, CFSTR("Failed to load bundle %@"), bundle);
+                }
             }
         } else {
-            CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
-            if (error) localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            if (error) {
+                localError = _CFBundleCreateError(CFGetAllocator(bundle), bundle, CFBundleExecutableNotFoundError);
+            } else {
+                CFLog(__kCFLogBundle, CFSTR("Cannot find executable for bundle %@"), bundle);
+            }
         }
         if (executableURL) CFRelease(executableURL);
     }
@@ -3935,7 +4782,7 @@ __private_extern__ void *_CFBundleDLLGetSymbolByName(CFBundleRef bundle, CFStrin
 
 /* Workarounds to be applied in the presence of certain bundles can go here. This is called on every bundle creation.
 */
-extern void _CFStringSetCompatibility(CFOptionFlags);
+CF_EXPORT void _CFStringSetCompatibility(CFOptionFlags);
 
 static void _CFBundleCheckWorkarounds(CFBundleRef bundle) {
 }
