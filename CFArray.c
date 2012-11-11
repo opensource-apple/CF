@@ -30,7 +30,6 @@
 #include <CoreFoundation/CFPriv.h>
 #include "CFInternal.h"
 #include <string.h>
-#include <CoreFoundation/CFVersionCheck.h>
 
 const CFArrayCallBacks kCFTypeArrayCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual};
 static const CFArrayCallBacks __kCFNullArrayCallBacks = {0, NULL, NULL, NULL, NULL};
@@ -1084,10 +1083,11 @@ CFIndex CFArrayBSearchValues(CFArrayRef array, CFRange range, const void *value,
     }
     SInt32 lg = flsl(range.length) - 1;	// lg2(range.length)
     item = CFArrayGetValueAtIndex(array, range.location + -1 + (1 << lg));
-    CFIndex idx = range.location + ((CFComparisonResult)(INVOKE_CALLBACK3(comparator, item, value, context)) < 0) ? range.length - (1 << lg) : -1;
+    // idx will be the current probe index into the range
+    CFIndex idx = (comparator(item, value, context) < 0) ? range.length - (1 << lg) : -1;
     while (lg--) {
 	item = CFArrayGetValueAtIndex(array, range.location + idx + (1 << lg));
-	if ((CFComparisonResult)(INVOKE_CALLBACK3(comparator, item, value, context)) < 0) {
+	if (comparator(item, value, context) < 0) {
 	    idx += (1 << lg);
 	}
     }

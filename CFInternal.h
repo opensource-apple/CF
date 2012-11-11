@@ -302,10 +302,6 @@ extern const char *__CFgetenv(const char *n);
 #endif
 
 
-CF_EXPORT CFTypeRef _CFTryRetain(CFTypeRef cf);
-CF_EXPORT Boolean _CFIsDeallocating(CFTypeRef cf);
-
-
 CF_EXPORT void * __CFConstantStringClassReferencePtr;
 
 #ifdef __CONSTANT_CFSTRINGS__

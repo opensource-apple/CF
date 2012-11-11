@@ -1054,8 +1054,15 @@ static CFStringRef  __CFURLCopyFormattingDescription(CFTypeRef  cf, CFDictionary
     CFURLRef  url = (CFURLRef)cf;
     __CFGenericValidateType(cf, CFURLGetTypeID());
     if (! url->_base) {
+#if DEPLOYMENT_TARGET_MACOSX
+        {
+            CFRetain(url->_string);
+            return url->_string;
+        }
+#else
         CFRetain(url->_string);
         return url->_string;
+#endif
     } else {
         // Do not dereference url->_base; it may be an ObjC object
         return CFStringCreateWithFormat(CFGetAllocator(url), NULL, CFSTR("%@ -- %@"), url->_string, url->_base);
@@ -1655,6 +1662,14 @@ static void _CFURLInit(struct __CFURL *url, CFStringRef URLString, UInt32 fsType
 	if ( url->_base )
         numURLsWithBaseURL ++;
 #endif
+   {
+        if (URL_PATH_TYPE(url) != FULL_URL_REPRESENTATION) {
+            _convertToURLRepresentation((struct __CFURL *)url);
+        }
+        if (!(url->_flags & IS_PARSED)) {
+            _parseComponentsOfURL(url);
+        }
+    }
 }
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX

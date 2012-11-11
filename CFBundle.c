@@ -37,7 +37,6 @@
 #include "CFInternal.h"
 #include <CoreFoundation/CFByteOrder.h>
 #include "CFBundle_BinaryTypes.h"
-#include <CoreFoundation/CFVersionCheck.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <stdlib.h>
@@ -4789,7 +4788,6 @@ __private_extern__ void *_CFBundleDLLGetSymbolByName(CFBundleRef bundle, CFStrin
 
 /* Workarounds to be applied in the presence of certain bundles can go here. This is called on every bundle creation.
 */
-CF_EXPORT void _CFStringSetCompatibility(CFOptionFlags);
 
 static void _CFBundleCheckWorkarounds(CFBundleRef bundle) {
 }

@@ -591,8 +591,6 @@ static void __CFTSDFinalize(void *arg);
 
 #if DEPLOYMENT_TARGET_WINDOWS
 
-#include "CFVersionCheck.h"
-
 static DWORD __CFTSDIndexKey = 0xFFFFFFFF;
 
 // Called from CFRuntime's startup code, on Windows only

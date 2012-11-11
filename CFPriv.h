@@ -419,6 +419,9 @@ CF_INLINE bool CFCharacterSetInlineBufferIsLongCharacterMember(CFCharacterSetInl
 CF_EXPORT CFMutableStringRef _CFCreateApplicationRepositoryPath(CFAllocatorRef alloc, int nFolder);
 #endif
 
+CF_EXPORT CFTypeRef _CFTryRetain(CFTypeRef cf);
+CF_EXPORT Boolean _CFIsDeallocating(CFTypeRef cf);
+
 /*
  CFLocaleGetLanguageRegionEncodingForLocaleIdentifier gets the appropriate language and region codes,
  and the default legacy script code and encoding, for the specified locale (or language) string.

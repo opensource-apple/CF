@@ -30,10 +30,7 @@ CFLAGS=-c -x c -fblocks -fpic -pipe -std=gnu99 -Wno-trigraphs -fexceptions -DCF_
 LFLAGS=-shared -fpic -init=___CFInitialize -Wl,--no-undefined,-soname,libCoreFoundation.so
 
 # Libs for open source version of ICU
-#LIBS=-lc -lpthread -lm -lrt  -licuuc -licudata -licui18n -lBlocksRuntime
-
-# Libs for Apple version of ICU
-LIBS=-lc -lpthread -lm -lrt  -licucore -lBlocksRuntime
+LIBS=-lc -lpthread -lm -lrt  -licuuc -licudata -licui18n -lBlocksRuntime
 
 .PHONY: all install clean
 .PRECIOUS: $(OBJBASE)/CoreFoundation/%.h
