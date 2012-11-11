@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Apple Inc. All rights reserved.
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -181,6 +181,12 @@ CF_EXPORT const CFStringRef _kCFURLLocalizedTypeDescriptionDictionaryKey CF_AVAI
 
 CF_EXPORT const CFStringRef _kCFURLApplicationCategoriesKey CF_AVAILABLE(10_7, NA);
     /* The array of category UTI strings associated with the url. (CFArray) */
+
+CF_EXPORT const CFStringRef _kCFURLApplicationHighResolutionModeIsMagnifiedKey CF_AVAILABLE(10_7, NA);
+    /* True if the app runs with magnified 1x graphics on a 2x display (Per-user, CFBoolean) */
+
+CF_EXPORT const CFStringRef _kCFURLCanSetApplicationHighResolutionModeIsMagnifiedKey CF_AVAILABLE(10_7, NA);
+    /* True if the app can run in either magnified or native resolution modes (Read only, CFBoolean) */
 
 /* Additional volume properties */
 

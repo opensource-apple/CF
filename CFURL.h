@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Apple Inc. All rights reserved.
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -877,12 +877,25 @@ enum {
     kCFURLBookmarkCreationMinimalBookmarkMask = ( 1UL << 9 ), // Creates a bookmark with "less" information, which may be smaller but still be able to resolve in certain ways
     kCFURLBookmarkCreationSuitableForBookmarkFile = ( 1UL << 10 ), // includes in the created bookmark those properties which are needed for a bookmark/alias file
 };
+
+#if MAC_OS_X_VERSION_10_7 <= MAC_OS_X_VERSION_MAX_ALLOWED
+enum {
+    kCFURLBookmarkCreationWithSecurityScope = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
+    kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess = ( 1UL << 12 ), // Mac OS X 10.7.3 and later, if used with kCFURLBookmarkCreationWithSecurityScope, at resolution time only read access to the resource will be granted
+};
+#endif
 typedef CFOptionFlags CFURLBookmarkCreationOptions;
 
 enum  {
     kCFBookmarkResolutionWithoutUIMask = ( 1UL << 8 ),		// don't perform any UI during bookmark resolution
     kCFBookmarkResolutionWithoutMountingMask = ( 1UL << 9 ),	// don't mount a volume during bookmark resolution
 };
+
+#if MAC_OS_X_VERSION_10_7 <= MAC_OS_X_VERSION_MAX_ALLOWED
+enum {
+    kCFURLBookmarkResolutionWithSecurityScope = ( 1UL << 10 ), // Mac OS X 10.7.3 and later, extract the security scope included at creation time to provide the ability to access the resource.
+};
+#endif
 typedef CFOptionFlags CFURLBookmarkResolutionOptions;
 
 typedef CFOptionFlags CFURLBookmarkFileCreationOptions;
@@ -894,7 +907,9 @@ typedef CFOptionFlags CFURLBookmarkFileCreationOptions;
 	@param	url	the CFURLRef to create a bookmark data from.
 	@param	options	a set of options which control creation of the bookmark data
 	@param resourcePropertiesToInclude	If non-NULL, an CFArrayRef of additional properties copied from the url to include in the created bookmark data.
-	@param relativeToURL If non-NULL, the created bookmark will be relative to the given url
+	@param relativeToURL If non-NULL, the created bookmark will be relative to the given url.  If kCFURLBookmarkCreationWithSecurityScope is given as
+                an option and relativeToURL is non-NULL, then a collection-scoped bookmark is created which enables future access to url provided the caller has
+                access to relativeURL.
 	@param error	If non-NULL, on exit will be filled in with a CFErrorRef representing any error which occured during creation of the bookmark data
 	@result	A CFDataRef containing an data, which can be later be passed to CFURLCreateByResolvingBookmarkData() or to CFURLCopyPropertiesForKeysFromBookmarkData() / CFURLCopyPropertyForKeyFromBookmarkData() */
 CF_EXPORT
@@ -905,11 +920,16 @@ CFDataRef CFURLCreateBookmarkData ( CFAllocatorRef allocator, CFURLRef url, CFUR
 		attempt to pre-cache those properties in propertiesToInclude in the resulting url.  If in the process of resolving the bookmark into the CFURLRef
 	 	it points to this determines that  some properties in the bookmark are out of date or not correct for the item it resolves to, set *isStale to YES,
 		which the client may want to use to decide to make a new bookmark from the returned item and replace the saved bookmark it has.  If the bookmarked
-		item cannot be found, return NULL.  If an error ( other than "original item can not be found" ) occurs during the process, return NULL and fill in error )
+		item cannot be found, return NULL.  A bookmark created with security scope may fail to resolve if the caller does not have the same code signing identity
+               as the caller which created the bookmark.
+                After resolving a security scoped bookmark, the caller must call CFURLStartAccessingSecurityScopedResource() in order to gain access to the resource.
+                If an error ( other than "original item can not be found" ) occurs during the process, return NULL and fill in error )
 	@param	allocator	 the CFAllocator to use to create this object
 	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
 	@param	options options which affect the resolution
-	@param relativeToURL If non-NULL, and if the bookmark was created relative to another url, then resolve it relative to this url
+	@param relativeToURL If non-NULL, and if the bookmark was created relative to another url, then resolve it relative to this url.  If
+                kCFURLBookmarkCreationWithSecurityScope was provided at creation, and kCFURLBookmarkResolutionWithSecurityScope is set, then relativeURL
+                should point to the same item which was passed as relavitiveURL at creation time.
 	@param resourcePropertiesToInclude If non-NULL, a CFArray containing those properties which the caller would like to already be cached on the given url
 	@param isStale If non-NULL, on exit will be set to true if during resolution any of the properties in the bookmark no longer seemed to match the
 		corresponding properties on the returned file.  Clients, upon seeing a stale representation, may want to replace whatever stored bookmark data they
@@ -976,6 +996,23 @@ Boolean CFURLWriteBookmarkDataToFile( CFDataRef bookmarkRef, CFURLRef fileURL, C
  */
 CF_EXPORT
 CFDataRef CFURLCreateBookmarkDataFromAliasRecord ( CFAllocatorRef allocatorRef, CFDataRef aliasRecordDataRef ) CF_AVAILABLE_MAC(10_6);
+
+/*!     @function	CFURLStartAccessingSecurityScopedResource
+        @discussion	Given a CFURLRef created by resolving a bookmark data created with security scope, make the resource referenced by the
+                        url accessible to the process.  When access to this resource is no longer needed the client should call
+                        CFURLStopAccessingSecurityScopedResource().  Each call to CFURLStartAccessingSecurityScopedResource() must be balanced
+                        with a call to CFURLStopAccessingSecurityScopedResource().
+        @param	url     the CFURLRef for the resource returned by CFURLCreateByResolvingBookmarkData() using kCFURLBookmarkResolutionWithSecurityScope.
+        @result        returns TRUE if access was granted and FALSE if the url does not reference a security scoped resource, or if some error occurred
+                        which didn't allow access to be granted
+ */
+Boolean CFURLStartAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA); // Available in MacOS X 10.7.3 and later
+
+/*!     @function	CFURLStopAccessingSecurityScopedResource
+        @discussion    Revokes the access granted to the url by a prior successful call to CFURLStartAccessingSecurityScopedResource().
+        @param	url     the CFURLRef for the resource to stop accessing.
+ */
+void CFURLStopAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA);
 
 #endif /* TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE */
 
