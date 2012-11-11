@@ -323,6 +323,12 @@ extern void _CFArraySortValues(CFMutableArrayRef array, CFComparatorFunction com
 static CFArrayRef _CFBundleCopySortedDirectoryContentsAtPath(CFStringRef path, _CFBundleDirectoryContentsType contentsType) {
     CFArrayRef result = NULL;
     
+    if (!path) {
+        // Return an empty result. It's mutable because the other arrays returned from this function are mutable, so may as well go for maximum compatibility.
+        result = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
+        return result;
+    }
+
     __CFSpinLock(&_cacheLock);
     if (contentsType == _CFBundleUnknownContents) {
         if (_unknownContentsCache) result = (CFMutableArrayRef)CFDictionaryGetValue(_unknownContentsCache, path);
@@ -2166,9 +2172,9 @@ __private_extern__ Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, uint
         else if (_CFBundleSortedArrayContains(contents, _CFBundleResourcesDirectoryName)) localVersion = 0;
         else if (_CFBundleSortedArrayContains(contents, _CFBundleSupportFilesDirectoryName1)) localVersion = 1;
     }
-    CFRelease(contents);
-    CFRelease(directoryPath);
-    CFRelease(absoluteURL);
+    if (contents) CFRelease(contents);
+    if (directoryPath) CFRelease(directoryPath);
+    if (absoluteURL) CFRelease(absoluteURL);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_WINDOWS
     if (localVersion == 3) {
         if (hasFrameworkSuffix) {
@@ -2474,9 +2480,9 @@ __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVer
             directoryPath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
             contents = _CFBundleCopySortedDirectoryContentsAtPath(directoryPath, _CFBundleAllContents);
             contentsRange = CFRangeMake(0, CFArrayGetCount(contents));
-            CFRelease(directoryPath);
-            CFRelease(absoluteURL);
-            CFRelease(directoryURL);
+            if (directoryPath) CFRelease(directoryPath);
+            if (absoluteURL) CFRelease(absoluteURL);
+            if (directoryURL) CFRelease(directoryURL);
         }
 
         len = CFStringGetLength(infoURLFromBaseNoExtension);
@@ -2850,9 +2856,9 @@ CF_EXPORT CFArrayRef CFBundleCopyBundleLocalizations(CFBundleRef bundle) {
                 CFRelease(localization);
             }
         }
-        CFRelease(contents);
-        CFRelease(directoryPath);
-        CFRelease(absoluteURL);
+        if (contents) CFRelease(contents);
+        if (directoryPath) CFRelease(directoryPath);
+        if (absoluteURL) CFRelease(absoluteURL);
     }
     
     if (!result) {

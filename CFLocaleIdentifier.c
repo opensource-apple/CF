@@ -280,7 +280,7 @@ static const char * const langCodeToLocaleString[] = {
     "bg",       //  44 langBulgarian -Cyrl;
     "uk",       //  45 langUkrainian -Cyrl;
     "be",       //  46 langBelorussian -Cyrl;
-    "uz-Cyrl",  //  47 langUzbek -Cyrl;             also -Latn, -Arab
+    "uz",       //  47 langUzbek -Cyrl;             also -Latn, -Arab
     "kk",       //  48 langKazakh -Cyrl;            no region codes; also -Latn, -Arab
     "az-Cyrl",  //  49 langAzerbaijani -Cyrl;       no region codes # "az"
     "az-Arab",  //  50 langAzerbaijanAr -Arab;      no region codes # "az"
@@ -288,10 +288,10 @@ static const char * const langCodeToLocaleString[] = {
     "ka",       //  52 langGeorgian -Geor;
     "mo",       //  53 langMoldavian -Cyrl;         no region codes
     "ky",       //  54 langKirghiz -Cyrl;           no region codes; also -Latn, -Arab
-    "tg-Cyrl",  //  55 langTajiki -Cyrl;            no region codes; also -Latn, -Arab
+    "tg",       //  55 langTajiki -Cyrl;            no region codes; also -Latn, -Arab
     "tk-Cyrl",  //  56 langTurkmen -Cyrl;           no region codes; also -Latn, -Arab
     "mn-Mong",  //  57 langMongolian -Mong;         no region codes # "mn"
-    "mn-Cyrl",  //  58 langMongolianCyr -Cyrl;      no region codes # "mn"
+    "mn",       //  58 langMongolianCyr -Cyrl;      no region codes # "mn"
     "ps",       //  59 langPashto -Arab;            no region codes
     "ku",       //  60 langKurdish -Arab;           no region codes
     "ks",       //  61 langKashmiri -Arab;          no region codes
@@ -315,7 +315,7 @@ static const char * const langCodeToLocaleString[] = {
     "lo",       //  79 langLao -Laoo;               no region codes
     "vi",       //  80 langVietnamese -Latn;
     "id",       //  81 langIndonesian -Latn;        no region codes
-    "tl",       //  82 langTagalog -Latn;           no region codes
+    "fil",      //  82 langTagalog -Latn;           no region codes
     "ms",       //  83 langMalayRoman -Latn;        no region codes # "ms"
     "ms-Arab",  //  84 langMalayArabic -Arab;       no region codes # "ms"
     "am",       //  85 langAmharic -Ethi;           no region codes
@@ -353,7 +353,7 @@ static const char * const langCodeToLocaleString[] = {
     "to",       // 147 langTongan -Latn;
     "grc",      // 148 langGreekAncient -Grek-poly;                 # "el"
     "kl",       // 149 langGreenlandic -Latn;
-    "az-Latn",  // 150 langAzerbaijanRoman -Latn;   no region codes # "az"
+    "az",       // 150 langAzerbaijanRoman -Latn;   no region codes # "az"
     "nn",       // 151 langNynorsk -Latn;                           # (no entry)
 };
 enum {
@@ -479,7 +479,7 @@ static const KeyStringToResultString oldAppleLocaleToCanonical[] = {
     { "Sundanese",              "su"        },  //                      # __CFBundleLanguageNamesArray
     { "Swahili",                "sw"        },  //                      # __CFBundleLanguageNamesArray
     { "Swedish",                "sv"        },  //                      # __CFBundleLanguageNamesArray
-    { "Tagalog",                "tl"        },  //                      # __CFBundleLanguageNamesArray
+    { "Tagalog",                "fil"       },  //                      # __CFBundleLanguageNamesArray
     { "Tajik",                  "tg"        },  //                      # handle other names
     { "Tajiki",                 "tg"        },  //                      # __CFBundleLanguageNamesArray
     { "Tamil",                  "ta"        },  //                      # __CFBundleLanguageNamesArray
@@ -502,7 +502,7 @@ static const KeyStringToResultString oldAppleLocaleToCanonical[] = {
     { "ar_??",                  "ar"        },  //                      # from old MapScriptInfoAndISOCodes
     { "az.Ar",                  "az-Arab"   },  //                      # from old LocaleRefGetPartString
     { "az.Cy",                  "az-Cyrl"   },  //                      # from old LocaleRefGetPartString
-    { "az.La",                  "az-Latn"   },  //                      # from old LocaleRefGetPartString
+    { "az.La",                  "az"        },  //                      # from old LocaleRefGetPartString
     { "be_??",                  "be_BY"     },  //                      # from old MapScriptInfoAndISOCodes
     { "bn_??",                  "bn"        },  //                      # from old LocaleRefGetPartString
     { "bo_??",                  "bo"        },  //                      # from old MapScriptInfoAndISOCodes
@@ -531,7 +531,7 @@ static const KeyStringToResultString oldAppleLocaleToCanonical[] = {
     { "kl.La_GL",               "kl_GL"     },  //                      # from old LocaleRefGetPartString                       // <1.9>
     { "lp_??",                  "se"        },  //                      # from old MapScriptInfoAndISOCodes
     { "mk_??",                  "mk_MK"     },  //                      # from old MapScriptInfoAndISOCodes
-    { "mn.Cy",                  "mn-Cyrl"   },  //                      # from old LocaleRefGetPartString
+    { "mn.Cy",                  "mn"        },  //                      # from old LocaleRefGetPartString
     { "mn.Mn",                  "mn-Mong"   },  //                      # from old LocaleRefGetPartString
     { "ms.Ar",                  "ms-Arab"   },  //                      # from old LocaleRefGetPartString
     { "ms.La",                  "ms"        },  //                      # from old LocaleRefGetPartString
@@ -568,68 +568,134 @@ static const KeyStringToResultString localeStringPrefixToCanonical[] = {
 //    prefix        prefix
 //    ------------- ---------
 
+    { "aar",        "aa"        },  // Afar
+ //   { "aa_SAAHO",   "ssy"       },  // Saho                       # deprecated/grandfathered, handled as a special case
+    { "abk",        "ab"        },  // Abkhazian
     { "afr",        "af"        },  // Afrikaans
+    { "aju",        "jrb"       },  // Moroccan Judeo-Arabic -> Judeo-Arabic (macrolang.)
+    { "aka",        "ak"        },  // Akan
     { "alb",        "sq"        },  // Albanian
+    { "als",        "sq"        },  // Tosk Albanian -> Albanian (macrolang.)
     { "amh",        "am"        },  // Amharic
     { "ara",        "ar"        },  // Arabic
+    { "arb",        "ar"        },  // Std Arabic -> Arabic (macrolang.)
+    { "arg",        "an"        },  // Aragonese
     { "arm",        "hy"        },  // Armenian
+    { "art-lojban", "jbo"       },  // Lojban                     # deprecated/grandfathered
     { "asm",        "as"        },  // Assamese
+    { "ava",        "av"        },  // Avaric
+    { "ave",        "ae"        },  // Avestan
     { "aym",        "ay"        },  // Aymara
+    { "ayr",        "ay"        },  // Central Aymara -> Aymara (macrolang.)
     { "aze",        "az"        },  // Azerbaijani
+    { "azj",        "az"        },  // N.Azerbaijani -> Azerbaijani (macrolang.)
+    { "bak",        "ba"        },  // Bashkir
+    { "bam",        "bm"        },  // Bambara
     { "baq",        "eu"        },  // Basque
+    { "bcc",        "bal"       },  // Balochi, Southern -> Baluchi (macrolang.)
+    { "bcl",        "bik"       },  // Bicolano, Central -> Bikol (macrolang.)
     { "bel",        "be"        },  // Belarusian
     { "ben",        "bn"        },  // Bengali
     { "bih",        "bh"        },  // Bihari
+    { "bis",        "bi"        },  // Bislama
     { "bod",        "bo"        },  // Tibetan
     { "bos",        "bs"        },  // Bosnian
     { "bre",        "br"        },  // Breton
     { "bul",        "bg"        },  // Bulgarian
     { "bur",        "my"        },  // Burmese
+    { "bxk",        "luy"       },  // Lubukusu -> Luyia (macrolang.)
+    { "bxr",        "bua"       },  // Buriat, Russia -> Buriat (macrolang.)
     { "cat",        "ca"        },  // Catalan
     { "ces",        "cs"        },  // Czech
+    { "cha",        "ch"        },  // Chamorro
     { "che",        "ce"        },  // Chechen
     { "chi",        "zh"        },  // Chinese
+    { "chu",        "cu"        },  // Church Slavic, Church Slavonic, Old Bulgarian, Old Church Slavonic, Old Slavonic
+    { "chv",        "cv"        },  // Chuvash
+    { "cld",        "syr"       },  // Chaldean Neo-Aramaic -> Syriac (macrolang.)
+    { "cmn",        "zh"        },  // Mandarin -> Chinese (macrolang.)
     { "cor",        "kw"        },  // Cornish
     { "cos",        "co"        },  // Corsican
+    { "cre",        "cr"        },  // Cree
+    { "cwd",        "cr"        },  // Cree, Woods -> Cree (macrolang.)
     { "cym",        "cy"        },  // Welsh
     { "cze",        "cs"        },  // Czech
     { "dan",        "da"        },  // Danish
     { "deu",        "de"        },  // German
+    { "dgo",        "doi"       },  // Dogri -> Dogri (macrolang.)
+    { "dhd",        "mwr"       },  // Dhundari -> Marwari (macrolang.)
+    { "dik",        "din"       },  // Southwestern Dinka -> Dinka (macrolang.)
+    { "diq",        "zza"       },  // Dimli -> Zaza (macrolang.)
+    { "div",        "dv"        },  // Dhivehi, Divehi, Maldivian
     { "dut",        "nl"        },  // Dutch
     { "dzo",        "dz"        },  // Dzongkha
+    { "ekk",        "et"        },  // Std Estonian -> Estonian (macrolang.)
     { "ell",        "el"        },  // Greek, Modern (1453-)
+    { "emk",        "man"       },  // Maninkakan, Eastern -> Mandingo (macrolang.)
     { "eng",        "en"        },  // English
     { "epo",        "eo"        },  // Esperanto
+    { "esk",        "ik"        },  // Northwest Alaska Inupiatun -> Inupiaq (macrolang.)
     { "est",        "et"        },  // Estonian
     { "eus",        "eu"        },  // Basque
+    { "ewe",        "ee"        },  // Ewe
     { "fao",        "fo"        },  // Faroese
     { "fas",        "fa"        },  // Persian
+    { "fat",        "ak"        },  // Fanti -> Akan (macrolang.)
+    { "fij",        "fj"        },  // Fijian
     { "fin",        "fi"        },  // Finnish
     { "fra",        "fr"        },  // French
     { "fre",        "fr"        },  // French
+    { "fry",        "fy"        },  // Western Frisian
+    { "fuc",        "ff"        },  // Pular -> Fulah (macrolang.)
+    { "ful",        "ff"        },  // Fulah
+    { "gaz",        "om"        },  // W.Central Oromo -> Oromo (macrolang.)
+    { "gbo",        "grb"       },  // Northern Grebo -> Grebo (macrolang.)
     { "geo",        "ka"        },  // Georgian
     { "ger",        "de"        },  // German
     { "gla",        "gd"        },  // Gaelic,Scottish
     { "gle",        "ga"        },  // Irish
     { "glg",        "gl"        },  // Gallegan
     { "glv",        "gv"        },  // Manx
+    { "gno",        "gon"       },  // Northern Gondi -> Gondi (macrolang.)
     { "gre",        "el"        },  // Greek, Modern (1453-)
     { "grn",        "gn"        },  // Guarani
+    { "gug",        "gn"        },  // Paraguayan Guarani -> Guarani (macrolang.)
     { "guj",        "gu"        },  // Gujarati
+    { "gya",        "gba"       },  // Northwest Gbaya -> Gbaya (Cent. Afr. Rep.) (macrolang.)
+    { "hat",        "ht"        },  // Haitian, Haitian Creole
+    { "hau",        "ha"        },  // Hausa
+    { "hbs",        "sr_Latn"   },  // Serbo-Croatian
+    { "hdn",        "hai"       },  // Northern Haida -> Haida (macrolang.)
+    { "hea",        "hmn"       },  // Northern Qiandong Miao -> Hmong (macrolang.)
     { "heb",        "he"        },  // Hebrew
+    { "her",        "hz"        },  // Herero
+    { "him",        "srx"       },  // Himachali -> Sirmauri (= Pahari, Himachali) (macrolang.)
     { "hin",        "hi"        },  // Hindi
+    { "hmo",        "ho"        },  // Hiri Motu
     { "hrv",        "hr"        },  // Croatian
     { "hun",        "hu"        },  // Hungarian
     { "hye",        "hy"        },  // Armenian
-    { "i-hak",      "zh-hakka"  },  // Hakka                    # deprecated RFC 3066
+    { "i-ami",      "ami"       },  // Amis                       # deprecated/grandfathered
+    { "i-bnn",      "bnn"       },  // Bunun                      # deprecated/grandfathered
+    { "i-hak",      "hak"       },  // Hakka                    # deprecated RFC 3066
+    { "i-klingon",  "tlh"       },  // Klingon                    # deprecated/grandfathered
     { "i-lux",      "lb"        },  // Luxembourgish            # deprecated RFC 3066
     { "i-navajo",   "nv"        },  // Navajo                   # deprecated RFC 3066
+    { "i-pwn",      "pwn"       },  // Paiwan                     # deprecated/grandfathered
+    { "i-tao",      "tao"       },  // Tao                        # deprecated/grandfathered
+    { "i-tay",      "tay"       },  // Tayal                      # deprecated/grandfathered
+    { "i-tsu",      "tsu"       },  // Tsou                       # deprecated/grandfathered
+    { "ibo",        "ig"        },  // Igbo
     { "ice",        "is"        },  // Icelandic
+    { "ido",        "io"        },  // Ido
+    { "iii",        "ii"        },  // Sichuan Yi, Nuosu
+    { "ike",        "iu"        },  // E.Canada Inuktitut -> Inuktitut (macrolang.)
     { "iku",        "iu"        },  // Inuktitut
     { "ile",        "ie"        },  // Interlingue
     { "in",         "id"        },  // Indonesian               # deprecated 639 code in -> id (1989)
     { "ina",        "ia"        },  // Interlingua
     { "ind",        "id"        },  // Indonesian
+    { "ipk",        "ik"        },  // Inupiaq
     { "isl",        "is"        },  // Icelandic
     { "ita",        "it"        },  // Italian
     { "iw",         "he"        },  // Hebrew                   # deprecated 639 code iw -> he (1989)
@@ -637,32 +703,57 @@ static const KeyStringToResultString localeStringPrefixToCanonical[] = {
     { "jaw",        "jv"        },  // Javanese                 # deprecated 639 code jaw -> jv (2001)
     { "ji",         "yi"        },  // Yiddish                  # deprecated 639 code ji -> yi (1989)
     { "jpn",        "ja"        },  // Japanese
+    { "jw",         "jv"        },  // Javanese                 # deprecated
     { "kal",        "kl"        },  // Kalaallisut
     { "kan",        "kn"        },  // Kannada
     { "kas",        "ks"        },  // Kashmiri
     { "kat",        "ka"        },  // Georgian
+    { "kau",        "kr"        },  // Kanuri
     { "kaz",        "kk"        },  // Kazakh
+    { "khk",        "mn"        },  // Halh Mongolian [mainly Cyrl] -> Mongolian (macrolang.)
     { "khm",        "km"        },  // Khmer
+    { "kik",        "ki"        },  // Kikuyu, Gikuyu
     { "kin",        "rw"        },  // Kinyarwanda
     { "kir",        "ky"        },  // Kirghiz
+    { "kmr",        "ku"        },  // Northern Kurdish -> Kurdish (macrolang.)
+    { "knc",        "kr"        },  // Central Kanuri -> Kanuri (macrolang.)
+    { "kng",        "kg"        },  // Koongo -> Kongo (macrolang.)
+    { "knn",        "kok"       },  // Konkani (individ.lang) -> Konkani (macrolang.)
+    { "kom",        "kv"        },  // Komi
+    { "kon",        "kg"        },  // Kongo
     { "kor",        "ko"        },  // Korean
+    { "kpv",        "kv"        },  // Komi-Zyrian -> Komi (macrolang.)
+    { "kua",        "kj"        },  // Kuanyama, Kwanyama
     { "kur",        "ku"        },  // Kurdish
     { "lao",        "lo"        },  // Lao
     { "lat",        "la"        },  // Latin
     { "lav",        "lv"        },  // Latvian
+    { "lbk",        "bnc"       },  // Central Bontok -> Bontok (macrolang.)
+    { "lim",        "li"        },  // Limburgan, Limburger, Limburgish
+    { "lin",        "ln"        },  // Lingala
     { "lit",        "lt"        },  // Lithuanian
     { "ltz",        "lb"        },  // Letzeburgesch
+    { "lub",        "lu"        },  // Luba-Katanga
+    { "lug",        "lg"        },  // Ganda
+    { "lvs",        "lv"        },  // Std Latvian -> Latvian (macrolang.)
     { "mac",        "mk"        },  // Macedonian
     { "mal",        "ml"        },  // Malayalam
     { "mar",        "mr"        },  // Marathi
     { "may",        "ms"        },  // Malay
+    { "mhr",        "chm"       },  // Mari, Eastern -> Mari (Russia) (macrolang.)
     { "mkd",        "mk"        },  // Macedonian
     { "mlg",        "mg"        },  // Malagasy
     { "mlt",        "mt"        },  // Maltese
     { "mol",        "mo"        },  // Moldavian
     { "mon",        "mn"        },  // Mongolian
     { "msa",        "ms"        },  // Malay
+    { "mup",        "raj"       },  // Malvi -> Rajasthani (macrolang.)
     { "mya",        "my"        },  // Burmese
+    { "nau",        "na"        },  // Nauru
+    { "nav",        "nv"        },  // Navajo, Navaho
+    { "nbl",        "nr"        },  // South Ndebele
+    { "nde",        "nd"        },  // North Ndebele
+    { "ndo",        "ng"        },  // Ndonga
     { "nep",        "ne"        },  // Nepali
     { "nld",        "nl"        },  // Dutch
     { "nno",        "nn"        },  // Norwegian Nynorsk
@@ -671,37 +762,62 @@ static const KeyStringToResultString localeStringPrefixToCanonical[] = {
     { "no-nyn",     "nn"        },  // Norwegian Nynorsk        # deprecated RFC 3066 tag - used in old LocaleRefGetPartString
     { "nob",        "nb"        },  // Norwegian Bokmal
     { "nor",        "nb"        },  // Norwegian generic        # ambiguous 639 code nor -> nb
+  //  { "no_BOKMAL",  "nb"        },  // Norwegian Bokmal           # deprecated/grandfathered, handled as a special case
+  //  { "no_NYNORSK", "nn"        },  // Norwegian Nynorsk          # deprecated/grandfathered, handled as a special case
     { "nya",        "ny"        },  // Nyanja/Chewa/Chichewa    # 3-letter code used in old LocaleRefGetPartString
     { "oci",        "oc"        },  // Occitan/Provencal
+    { "ojg",        "oj"        },  // Ojibwa, Eastern -> Ojibwa (macrolang.)
+    { "oji",        "oj"        },  // Ojibwa
     { "ori",        "or"        },  // Oriya
     { "orm",        "om"        },  // Oromo,Galla
+    { "oss",        "os"        },  // Ossetian, Ossetic
     { "pan",        "pa"        },  // Panjabi
+    { "pbu",        "ps"        },  // N.Pashto, -> Pushto (macrolang.)
     { "per",        "fa"        },  // Persian
+    { "pes",        "fa"        },  // W.Farsi -> Persian (macrolang.)
+    { "pli",        "pi"        },  // Pali
+    { "plt",        "mg"        },  // Plateau Malagasy -> Malagasy (macrolang.)
+    { "pnb",        "lah"       },  // W.Panjabi -> Lahnda (macrolang.)
     { "pol",        "pl"        },  // Polish
     { "por",        "pt"        },  // Portuguese
     { "pus",        "ps"        },  // Pushto
     { "que",        "qu"        },  // Quechua
+    { "qxp",        "qu"        },  // Puno Quechua -> Quechua (macrolang.)
+    { "rmy",        "rom"       },  // Vlax Romani -> Romany (macrolang.)
     { "roh",        "rm"        },  // Raeto-Romance
     { "ron",        "ro"        },  // Romanian
     { "rum",        "ro"        },  // Romanian
     { "run",        "rn"        },  // Rundi
     { "rus",        "ru"        },  // Russian
+    { "sag",        "sg"        },  // Sango
     { "san",        "sa"        },  // Sanskrit
     { "scc",        "sr"        },  // Serbian
     { "scr",        "hr"        },  // Croatian
+    { "sgn-be-fr",  "sfb"       },  // Belgian-French Sign Lang.  # deprecated/grandfathered
+    { "sgn-be-nl",  "vgt"       },  // Belgian-Flemish Sign Lang. # deprecated/grandfathered
+    { "sgn-ch-de",  "sgg"       },  // Swiss German Sign Lang.    # deprecated/grandfathered
     { "sin",        "si"        },  // Sinhalese
     { "slk",        "sk"        },  // Slovak
     { "slo",        "sk"        },  // Slovak
     { "slv",        "sl"        },  // Slovenian
     { "sme",        "se"        },  // Sami,Northern
+    { "smo",        "sm"        },  // Samoan
+    { "sna",        "sn"        },  // Shona
     { "snd",        "sd"        },  // Sindhi
     { "som",        "so"        },  // Somali
+    { "sot",        "st"        },  // Southern Sotho
     { "spa",        "es"        },  // Spanish
+    { "spy",        "kln"       },  // Sabaot -> Kalenjin (macrolang.)
     { "sqi",        "sq"        },  // Albanian
+    { "src",        "sc"        },  // Sardinian, Logudorese -> Sardinian (macrolang.)
+    { "srd",        "sc"        },  // Sardinian
     { "srp",        "sr"        },  // Serbian
+    { "ssw",        "ss"        },  // Swati
     { "sun",        "su"        },  // Sundanese
     { "swa",        "sw"        },  // Swahili
     { "swe",        "sv"        },  // Swedish
+    { "swh",        "sw"        },  // Swahili (individ.lang) -> Swahili (macrolang.)
+    { "tah",        "ty"        },  // Tahitian
     { "tam",        "ta"        },  // Tamil
     { "tat",        "tt"        },  // Tatar
     { "tel",        "te"        },  // Telugu
@@ -710,17 +826,56 @@ static const KeyStringToResultString localeStringPrefixToCanonical[] = {
     { "tha",        "th"        },  // Thai
     { "tib",        "bo"        },  // Tibetan
     { "tir",        "ti"        },  // Tigrinya
+    { "tl",         "fil"       },  // Tagalog                  # legacy
     { "ton",        "to"        },  // Tongan
+    { "tsn",        "tn"        },  // Tswana
+    { "tso",        "ts"        },  // Tsonga
+    { "ttq",        "tmh"       },  // Tamajaq, Tawallammat -> Tamashek (macrolang.)
     { "tuk",        "tk"        },  // Turkmen
     { "tur",        "tr"        },  // Turkish
+    { "tw",         "ak"        },  // Twi -> Akan (macrolang.)
+    { "twi",        "ak"        },  // Twi
     { "uig",        "ug"        },  // Uighur
     { "ukr",        "uk"        },  // Ukrainian
+    { "umu",        "del"       },  // Munsee -> Delaware (macrolang.)
     { "urd",        "ur"        },  // Urdu
     { "uzb",        "uz"        },  // Uzbek
+    { "uzn",        "uz"        },  // N. Uzbek -> Uzbek (macrolang.)
+    { "ven",        "ve"        },  // Venda
     { "vie",        "vi"        },  // Vietnamese
+    { "vol",        "vo"        },  // Volap√ºk
     { "wel",        "cy"        },  // Welsh
+    { "wln",        "wa"        },  // Walloon
+    { "wol",        "wo"        },  // Wolof
+    { "xho",        "xh"        },  // Xhosa
+    { "xpe",        "kpe"       },  // Kpelle, Liberia -> Kpelle (macrolang.)
+    { "xsl",        "den"       },  // Slavey, South -> Slave (Athapascan) (macrolang.)
+    { "ydd",        "yi"        },  // Yiddish,E. -> Yiddish (macrolang.)
     { "yid",        "yi"        },  // Yiddish
+    { "yor",        "yo"        },  // Yoruba
+    { "zai",        "zap"       },  // Zapotec, Isthmus -> Zapotec (macrolang.)
+    { "zh-cdo",     "cdo"       },  // Chinese, Min Dong        # extlang
+    { "zh-cjy",     "cjy"       },  // Chinese, Jinyu           # extlang
+    { "zh-cmn",     "zh"        },  // Chinese, Mandarin        # extlang
+    { "zh-cpx",     "cpx"       },  // Chinese, Pu-Xian         # extlang
+    { "zh-czh",     "czh"       },  // Chinese, Huizhou         # extlang
+    { "zh-czo",     "czo"       },  // Chinese, Min Zhong       # extlang
+    { "zh-gan",     "gan"       },  // Chinese, Gan             # extlang
+    { "zh-guoyu",   "zh"        },  // Mandarin/Std Chinese     # deprecated
+    { "zh-hak",     "hak"       },  // Chinese, Hakka           # extlang
+    { "zh-hakka",   "hak"       },  // Hakka                    # deprecated
+    { "zh-hsn",     "hsn"       },  // Chinese, Xiang           # extlang
+    { "zh-min-nan", "nan"       },  // Minnan,Hokkien,Taiwanese,So. Fujian # deprecated
+    { "zh-mnp",     "mnp"       },  // Chinese, Min Bei         # extlang
+    { "zh-nan",     "nan"       },  // Chinese, Min Nan         # extlang
+    { "zh-wuu",     "wuu"       },  // Chinese, Wu              # extlang
+    { "zh-xiang",   "hsn"       },  // Xiang/Hunanese           # deprecated
+    { "zh-yue",     "yue"       },  // Chinese, Yue             # extlang
+    { "zha",        "za"        },  // Zhuang, Chuang
     { "zho",        "zh"        },  // Chinese
+    { "zsm",        "ms"        },  // Std Malay -> Malay (macrolang.)
+    { "zul",        "zu"        },  // Zulu
+    { "zyb",        "za"        },  // Yongbei Zhuang -> Zhuang (macrolang.)
 };
 enum {
     kNumLocaleStringPrefixToCanonical = sizeof(localeStringPrefixToCanonical)/sizeof(KeyStringToResultString)
@@ -778,39 +933,62 @@ static const KeyStringToResultString localeStringPrefixToDefaults[] = {
 //  --------    -------------          ---------
     { "ab-",    "-Cyrl"         },  // Abkhazian
     { "af-",    "-Latn"         },  // Afrikaans
+    { "agq-",   "-Latn"         },  // Aghem
+    { "ak-",    "-Latn"         },  // Akan
     { "am-",    "-Ethi"         },  // Amharic
     { "ar-",    "-Arab"         },  // Arabic
     { "as-",    "-Beng"         },  // Assamese
+    { "asa-",   "-Latn"         },  // Asu
     { "ay-",    "-Latn"         },  // Aymara
+    { "az-",    "-Latn"         },  // Azerbaijani
+    { "bas-",   "-Latn"         },  // Basaa
     { "be-",    "-Cyrl"         },  // Belarusian
+    { "bem-",   "-Latn"         },  // Bemba
+    { "bez-",   "-Latn"         },  // Bena
     { "bg-",    "-Cyrl"         },  // Bulgarian
+    { "bm-",    "-Latn"         },  // Bambara
     { "bn-",    "-Beng"         },  // Bengali
     { "bo-",    "-Tibt"         },  // Tibetan (? not Suppress-Script)
     { "br-",    "-Latn"         },  // Breton (? not Suppress-Script)
+    { "brx-",   "-Deva"         },  // Bodo
     { "bs-",    "-Latn"         },  // Bosnian
     { "ca-",    "-Latn"         },  // Catalan
+    { "cgg-",   "-Latn"         },  // Chiga
+    { "chr-",   "-Cher"         },  // Cherokee
     { "cs-",    "-Latn"         },  // Czech
     { "cy-",    "-Latn"         },  // Welsh
     { "da-",    "-Latn"         },  // Danish
+    { "dav-",   "-Latn"         },  // Taita
     { "de-",    "-Latn -1901"   },  // German, traditional orthography
+    { "dje-",   "-Latn"         },  // Zarma
+    { "dua-",   "-Latn"         },  // Duala
     { "dv-",    "-Thaa"         },  // Divehi/Maldivian
+    { "dyo-",   "-Latn"         },  // Jola-Fonyi
     { "dz-",    "-Tibt"         },  // Dzongkha
+    { "ebu-",   "-Latn"         },  // Embu
+    { "ee-",    "-Latn"         },  // Ewe
     { "el-",    "-Grek"         },  // Greek (modern, monotonic)
     { "en-",    "-Latn"         },  // English
     { "eo-",    "-Latn"         },  // Esperanto
     { "es-",    "-Latn"         },  // Spanish
     { "et-",    "-Latn"         },  // Estonian
     { "eu-",    "-Latn"         },  // Basque
+    { "ewo-",   "-Latn"         },  // Ewondo
     { "fa-",    "-Arab"         },  // Farsi
+    { "ff-",    "-Latn"         },  // Fulah
     { "fi-",    "-Latn"         },  // Finnish
+    { "fil-",   "-Latn"         },  // Tagalog
     { "fo-",    "-Latn"         },  // Faroese
     { "fr-",    "-Latn"         },  // French
     { "ga-",    "-Latn"         },  // Irish
     { "gd-",    "-Latn"         },  // Scottish Gaelic (? not Suppress-Script)
     { "gl-",    "-Latn"         },  // Galician
     { "gn-",    "-Latn"         },  // Guarani
+    { "gsw-",   "-Latn"         },  // Swiss German
     { "gu-",    "-Gujr"         },  // Gujarati
+    { "guz-",   "-Latn"         },  // Gusii
     { "gv-",    "-Latn"         },  // Manx
+    { "ha-",    "-Latn"         },  // Hausa
     { "haw-",   "-Latn"         },  // Hawaiian (? not Suppress-Script)
     { "he-",    "-Hebr"         },  // Hebrew
     { "hi-",    "-Deva"         },  // Hindi
@@ -818,34 +996,64 @@ static const KeyStringToResultString localeStringPrefixToDefaults[] = {
     { "hu-",    "-Latn"         },  // Hungarian
     { "hy-",    "-Armn"         },  // Armenian
     { "id-",    "-Latn"         },  // Indonesian
+    { "ig-",    "-Latn"         },  // Igbo
+    { "ii-",    "-Yiii"         },  // Sichuan Yi
     { "is-",    "-Latn"         },  // Icelandic
     { "it-",    "-Latn"         },  // Italian
     { "ja-",    "-Jpan"         },  // Japanese
+    { "jmc-",   "-Latn"         },  // Machame
     { "ka-",    "-Geor"         },  // Georgian
+    { "kab-",   "-Latn"         },  // Kabyle
+    { "kam-",   "-Latn"         },  // Kamba
+    { "kde-",   "-Latn"         },  // Makonde
+    { "kea-",   "-Latn"         },  // Kabuverdianu
+    { "khq-",   "-Latn"         },  // Koyra Chiini
+    { "ki-",    "-Latn"         },  // Kikuyu
     { "kk-",    "-Cyrl"         },  // Kazakh
     { "kl-",    "-Latn"         },  // Kalaallisut/Greenlandic
     { "km-",    "-Khmr"         },  // Central Khmer
     { "kn-",    "-Knda"         },  // Kannada
     { "ko-",    "-Hang"         },  // Korean (? not Suppress-Script)
     { "kok-",   "-Deva"         },  // Konkani
+    { "ksb-",   "-Latn"         },  // Shambala
+    { "ksf-",   "-Latn"         },  // Bafia
+    { "kw-",    "-Latn"         },  // Cornish
+    { "ky-",    "-Cyrl"         },  // Kirghiz
     { "la-",    "-Latn"         },  // Latin
+    { "lag-",   "-Latn"         },  // Langi    
     { "lb-",    "-Latn"         },  // Luxembourgish
+    { "lg-",    "-Latn"         },  // Ganda
+    { "ln-",    "-Latn"         },  // Lingala
     { "lo-",    "-Laoo"         },  // Lao
     { "lt-",    "-Latn"         },  // Lithuanian
+    { "lu-",    "-Latn"         },  // Luba-Katanga
+    { "luo-",   "-Latn"         },  // Luo
+    { "luy-",   "-Latn"         },  // Luyia
     { "lv-",    "-Latn"         },  // Latvian
+    { "mas-",   "-Latn"         },  // Masai
+    { "mer-",   "-Latn"         },  // Meru
+    { "mfe-",   "-Latn"         },  // Morisyen
     { "mg-",    "-Latn"         },  // Malagasy
+    { "mgh-",   "-Latn"         },  // Makhuwa-Meetto
     { "mk-",    "-Cyrl"         },  // Macedonian
     { "ml-",    "-Mlym"         },  // Malayalam
+    { "mn-",    "-Cyrl"         },  // Mongolian
     { "mo-",    "-Latn"         },  // Moldavian
     { "mr-",    "-Deva"         },  // Marathi
     { "ms-",    "-Latn"         },  // Malay
     { "mt-",    "-Latn"         },  // Maltese
+    { "mua-",   "-Latn"         },  // Mundang
     { "my-",    "-Mymr"         },  // Burmese/Myanmar
+    { "naq-",   "-Latn"         },  // Nama
     { "nb-",    "-Latn"         },  // Norwegian Bokmal
+    { "nd-",    "-Latn"         },  // North Ndebele
     { "ne-",    "-Deva"         },  // Nepali
     { "nl-",    "-Latn"         },  // Dutch
+    { "nmg-",   "-Latn"         },  // Kwasio
     { "nn-",    "-Latn"         },  // Norwegian Nynorsk
+    { "nus-",   "-Latn"         },  // Nuer
     { "ny-",    "-Latn"         },  // Chichewa/Nyanja
+    { "nyn-",   "-Latn"         },  // Nyankole
     { "om-",    "-Latn"         },  // Oromo
     { "or-",    "-Orya"         },  // Oriya
     { "pa-",    "-Guru"         },  // Punjabi
@@ -853,33 +1061,55 @@ static const KeyStringToResultString localeStringPrefixToDefaults[] = {
     { "ps-",    "-Arab"         },  // Pushto
     { "pt-",    "-Latn"         },  // Portuguese
     { "qu-",    "-Latn"         },  // Quechua
+    { "rm-",    "-Latn"         },  // Romansh
     { "rn-",    "-Latn"         },  // Rundi
     { "ro-",    "-Latn"         },  // Romanian
+    { "rof-",   "-Latn"         },  // Rombo
     { "ru-",    "-Cyrl"         },  // Russian
     { "rw-",    "-Latn"         },  // Kinyarwanda
+    { "rwk-",   "-Latn"         },  // Rwa
     { "sa-",    "-Deva"         },  // Sanskrit (? not Suppress-Script)
+    { "saq-",   "-Latn"         },  // Samburu
+    { "sbp-",   "-Latn"         },  // Sangu
     { "se-",    "-Latn"         },  // Sami (? not Suppress-Script)
+    { "seh-",   "-Latn"         },  // Sena
+    { "ses-",   "-Latn"         },  // Koyraboro Senni
+    { "sg-",    "-Latn"         },  // Sango
+    { "shi-",   "-Latn"         },  // Tachelhit
     { "si-",    "-Sinh"         },  // Sinhala
     { "sk-",    "-Latn"         },  // Slovak
     { "sl-",    "-Latn"         },  // Slovenian
+    { "sn-",    "-Latn"         },  // Shona
     { "so-",    "-Latn"         },  // Somali
     { "sq-",    "-Latn"         },  // Albanian
+    { "sr-",    "-Cyrl"         },  // Serbian
     { "sv-",    "-Latn"         },  // Swedish
     { "sw-",    "-Latn"         },  // Swahili
+    { "swc-",   "-Latn"         },  // Congo Swahili
     { "ta-",    "-Taml"         },  // Tamil
     { "te-",    "-Telu"         },  // Telugu
+    { "teo-",   "-Latn"         },  // Teso
+    { "tg-",    "-Cyrl"         },  // Tajik
     { "th-",    "-Thai"         },  // Thai
     { "ti-",    "-Ethi"         },  // Tigrinya
-    { "tl-",    "-Latn"         },  // Tagalog
+    { "tk-",    "-Latn"         },  // Turkmen
     { "tn-",    "-Latn"         },  // Tswana
     { "to-",    "-Latn"         },  // Tonga of Tonga Islands
     { "tr-",    "-Latn"         },  // Turkish
+    { "twq-",   "-Latn"         },  // Tasawaq
+    { "tzm-",   "-Latn"         },  // Central Morocco Tamazight
     { "uk-",    "-Cyrl"         },  // Ukrainian
     { "ur-",    "-Arab"         },  // Urdu
+    { "uz-",    "-Cyrl"         },  // Uzbek
+    { "vai-",   "-Vaii"         },  // Vai
     { "vi-",    "-Latn"         },  // Vietnamese
+    { "vun-",   "-Latn"         },  // Vunjo
     { "wo-",    "-Latn"         },  // Wolof
     { "xh-",    "-Latn"         },  // Xhosa
+    { "xog-",   "-Latn"         },  // Soga
+    { "yav-",   "-Latn"         },  // Yangben
     { "yi-",    "-Hebr"         },  // Yiddish
+    { "yo-",    "-Latn"         },  // Yoruba
     { "zh-",    "-Hani"         },  // Chinese (? not Suppress-Script)
     { "zu-",    "-Latn"         },  // Zulu
 };
@@ -957,7 +1187,7 @@ static const LocaleToLegacyCodes localeToLegacyCodes[] = {
     {   "ar",            16/*verArabic*/,            12/*langArabic*/,               4/*Arabic*/             },  // Arab;
     {   "as",            -1,                         68/*langAssamese*/,            13/*Bengali*/            },  // Beng;
     {   "ay",            -1,                        134/*langAymara*/,               0/*Roman*/              },  // Latn;
-    {   "az",            -1,                         49/*langAzerbaijani*/,          7/*Cyrillic*/           },  // assume "az" defaults to -Cyrl
+    {   "az",            -1,                        150/*langAzerbaijanRoman*/,      0/*Roman*/              },  // "az" defaults to -Latn
     {   "az_Arab",       -1,                         50/*langAzerbaijanAr*/,         4/*Arabic*/             },  // Arab;
     {   "az_Cyrl",       -1,                         49/*langAzerbaijani*/,          7/*Cyrillic*/           },  // Cyrl;
     {   "az_Latn",       -1,                        150/*langAzerbaijanRoman*/,      0/*Roman*/              },  // Latn;
@@ -997,6 +1227,7 @@ static const LocaleToLegacyCodes localeToLegacyCodes[] = {
     {   "eu",            -1,                        129/*langBasque*/,               0/*Roman*/              },  // Latn;
     {   "fa"/*IR*/,      48/*verIran*/,              31/*langFarsi/Persian*/,       0x8C/*Farsi*/            },  // Arab;
     {   "fi"/*FI*/,      17/*verFinland*/,           13/*langFinnish*/,              0/*Roman*/              },
+    {   "fil",           -1,                         82/*langTagalog*/,              0/*Roman*/              },  // Latn;
     {   "fo"/*FO*/,      47/*verFaroeIsl*/,          30/*langFaroese*/,             37/*Icelandic*/          },
     {   "fr",             1/*verFrance*/,             1/*langFrench*/,               0/*Roman*/              },  // "fr" defaults to verFrance (per Chris Hansten)
     {   "fr_001",        91/*verFrenchUniversal*/,    1/*langFrench*/,               0/*Roman*/              },
@@ -1041,7 +1272,7 @@ static const LocaleToLegacyCodes localeToLegacyCodes[] = {
     {   "mg",            -1,                         93/*langMalagasy*/,             0/*Roman*/              },  // Latn;
     {   "mk"/*MK*/,      67/*verMacedonian*/,        43/*langMacedonian*/,           7/*Cyrillic*/           },  // Cyrl;
     {   "ml",            -1,                         72/*langMalayalam*/,           17/*Malayalam*/          },  // Mlym;
-    {   "mn",            -1,                         57/*langMongolian*/,           27/*Mongolian*/          },  // "mn" defaults to -Mong
+    {   "mn",            -1,                         58/*langMongolianCyr*/,         7/*Cyrillic*/           },  // "mn" defaults to -Cyrl
     {   "mn_Cyrl",       -1,                         58/*langMongolianCyr*/,         7/*Cyrillic*/           },  // Cyrl;
     {   "mn_Mong",       -1,                         57/*langMongolian*/,           27/*Mongolian*/          },  // Mong;
     {   "mo",            -1,                         53/*langMoldavian*/,            7/*Cyrillic*/           },  // Cyrl;
@@ -1539,11 +1770,24 @@ CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(CFAllocatorRef a
         _GetKeyValueString(inLocaleString, keyValueString);								// <1.10>
         testEntry.result = NULL;
         
-        // A. First check if input string matches an old-style string that has a replacement
-        // (do this before case normalization)
+        // A. Special case aa_SAAHO, no_BOKMAL, and no_NYNORSK since they are legacy identifiers that don't follow the normal rules (http://unicode.org/cldr/trac/browser/trunk/common/supplemental/supplementalMetadata.xml)
+        
         testEntry.key = inLocaleString;
-        foundEntry = (KeyStringToResultString *)bsearch( &testEntry, oldAppleLocaleToCanonical, kNumOldAppleLocaleToCanonical,
-                                                        sizeof(KeyStringToResultString), _CompareTestEntryToTableEntryKey );
+        KeyStringToResultString specialCase = testEntry;
+        foundEntry = &specialCase;
+        
+        if (strncmp("aa_SAAHO", testEntry.key, strlen("aa_SAAHO")) == 0) {
+            foundEntry->result = "ssy";
+        } else if (strncmp("no_BOKMAL", testEntry.key, strlen("no_BOKMAL")) == 0) {
+            foundEntry->result = "nb";
+        } else if (strncmp("no_NYNORSK", testEntry.key, strlen("no_NYNORSK")) == 0) {
+            foundEntry->result = "nn";
+        } else {
+            // B. First check if input string matches an old-style string that has a replacement
+            // (do this before case normalization)
+            foundEntry = (KeyStringToResultString *)bsearch( &testEntry, oldAppleLocaleToCanonical, kNumOldAppleLocaleToCanonical,
+                                                            sizeof(KeyStringToResultString), _CompareTestEntryToTableEntryKey );
+        }
         if (foundEntry) {
             // It does match, so replace old string with new
             strlcpy(inLocaleString, foundEntry->result, sizeof(inLocaleString));
@@ -1552,7 +1796,7 @@ CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(CFAllocatorRef a
             char *      langRegSubtag = NULL;
             char *      regionTag = NULL;
 
-            // B. No match with an old-style string, use input string but update codes, normalize case, etc.
+            // C. No match with an old-style string, use input string but update codes, normalize case, etc.
             _UpdateFullLocaleString(inLocaleString, sizeof(inLocaleString), &langRegSubtag, &regionTag, varKeyValueString);   // <1.10><1.17><1.19>
             
             // if the language part already includes a regional variant, then delete any region tag. <1.19>
@@ -1560,7 +1804,7 @@ CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(CFAllocatorRef a
             	*regionTag = 0;
         }
         
-        // C. Now we have an up-to-date locale string, but we need to strip defaults and turn it into a language string
+        // D. Now we have an up-to-date locale string, but we need to strip defaults and turn it into a language string
         
         // 1. Strip defaults in input string based on initial part of locale string
         // (mainly to strip default script tag for a language)
@@ -1606,7 +1850,7 @@ CFStringRef CFLocaleCreateCanonicalLanguageIdentifierFromString(CFAllocatorRef a
             *inLocalePtr = 0;
         }
         
-        // D. Re-append any key-value strings, now canonical										// <1.10><1.17>
+        // E. Re-append any key-value strings, now canonical										// <1.10><1.17>
 		_AppendKeyValueString( inLocaleString, sizeof(inLocaleString), varKeyValueString );
 		_AppendKeyValueString( inLocaleString, sizeof(inLocaleString), keyValueString );
         

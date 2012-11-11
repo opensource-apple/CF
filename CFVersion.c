@@ -25,5 +25,5 @@
     Copyright 2009-2011, Apple Inc. All rights reserved.
     Responsibility: CFLite Team
 */
-const unsigned char kCFCoreFoundationVersionString[] = "@(#)PROGRAM:CoreFoundation  PROJECT:CoreFoundation-744  SYSTEM:Darwin  DEVELOPER:unknown  BUILT:" __DATE__ " " __TIME__ "\n";
-double kCFCoreFoundationVersionNumber = (double)744;
+const unsigned char kCFCoreFoundationVersionString[] = "@(#)PROGRAM:CoreFoundation  PROJECT:CoreFoundation-744.12  SYSTEM:Darwin  DEVELOPER:unknown  BUILT:" __DATE__ " " __TIME__ "\n";
+double kCFCoreFoundationVersionNumber = (double)744.12;
