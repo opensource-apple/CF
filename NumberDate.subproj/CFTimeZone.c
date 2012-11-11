@@ -345,6 +345,9 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
     if (len < (int32_t)sizeof(struct tzhead)) {
 	return false;
     }
+    
+    if (!(p[0] == 'T' && p[1] == 'Z' && p[2] == 'i' && p[3] == 'f')) return false;  /* Don't parse without TZif at head of file */
+    
     p += 20 + 4 + 4 + 4;	/* skip reserved, ttisgmtcnt, ttisstdcnt, leapcnt */
     timecnt = __CFDetzcode(p);
     p += 4;
@@ -861,6 +864,13 @@ static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t s
     unsigned char dataBytes[52 + nameLen + 1];
 #endif
     memset(dataBytes, 0, sizeof(dataBytes));
+    
+    // Put in correct magic bytes for timezone structures
+    dataBytes[0] = 'T';
+    dataBytes[1] = 'Z';
+    dataBytes[2] = 'i';
+    dataBytes[3] = 'f';
+    
     __CFEntzcode(1, dataBytes + 20);
     __CFEntzcode(1, dataBytes + 24);
     __CFEntzcode(1, dataBytes + 36);
