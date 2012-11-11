@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -29,7 +27,7 @@
 
 #include <CoreFoundation/CFTree.h>
 #include "CFInternal.h"
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 
 struct __CFTreeCallBacks {
     CFTreeRetainCallBack		retain;
@@ -42,6 +40,7 @@ struct __CFTree {
     CFTreeRef _parent;	/* Not retained */
     CFTreeRef _sibling;	/* Not retained */
     CFTreeRef _child;	/* All children get a retain from the parent */
+    CFTreeRef _rightmostChild;	/* Not retained */
     /* This is the context, exploded.
      * Currently the only valid version is 0, so we do not store that.
      * _callbacks initialized if not a special form. */
@@ -86,6 +85,7 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
     CFTreeRef tree = (CFTreeRef)cf;
     CFMutableStringRef result;
     CFStringRef contextDesc = NULL;
+    Boolean safeToReleaseContextDesc = true;
     const struct __CFTreeCallBacks *cb;
     CFAllocatorRef allocator;
     allocator = CFGetAllocator(tree);
@@ -93,31 +93,38 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
     cb = __CFTreeGetCallBacks(tree);
     if (NULL != cb->copyDescription) {
 	contextDesc = (CFStringRef)INVOKE_CALLBACK1(cb->copyDescription, tree->_info);
+	safeToReleaseContextDesc = _CFExecutableLinkedOnOrAfter(CFSystemVersionTiger);    // Because it came from elsewhere, only free it compatibly (3593254)
     }
     if (NULL == contextDesc) {
 	contextDesc = CFStringCreateWithFormat(allocator, NULL, CFSTR("<CFTree context %p>"), tree->_info);
     }
     CFStringAppendFormat(result, NULL, CFSTR("<CFTree %p [%p]>{children = %u, context = %@}"), cf, allocator, CFTreeGetChildCount(tree), contextDesc);
+    if (contextDesc && safeToReleaseContextDesc) CFRelease(contextDesc);
     return result;
 }
 
 static void __CFTreeDeallocate(CFTypeRef cf) {
     CFTreeRef tree = (CFTreeRef)cf;
     const struct __CFTreeCallBacks *cb;
-    CFTreeRemoveAllChildren(tree);
+    CFAllocatorRef allocator = __CFGetAllocator(tree);
+    if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        // GC:  keep the tree intact during finalization.
+        CFTreeRemoveAllChildren(tree);
+    }
     cb = __CFTreeGetCallBacks(tree);
     if (NULL != cb->release) {
         INVOKE_CALLBACK1(cb->release, tree->_info);
     }
     if (__kCFTreeHasCustomCallBacks == __CFTreeGetCallBacksType(tree)) {
-        CFAllocatorDeallocate(CFGetAllocator(tree), tree->_callbacks);
+        _CFAllocatorDeallocateGC(CFGetAllocator(tree), tree->_callbacks);
     }
 }
+
 
 static CFTypeID __kCFTreeTypeID = _kCFRuntimeNotATypeID;
 
 static const CFRuntimeClass __CFTreeClass = {
-    0,
+    _kCFRuntimeScannedObject,
     "CFTree",
     NULL,	// init
     NULL,	// copy
@@ -150,6 +157,7 @@ CFTreeRef CFTreeCreate(CFAllocatorRef allocator, const CFTreeContext *context) {
     memory->_parent = NULL;
     memory->_sibling = NULL;
     memory->_child = NULL;
+    memory->_rightmostChild = NULL;
 
     /* Start the context off in a recognizable state */
     __CFBitfieldSetValue(memory->_base._info, 1, 0, __kCFTreeHasNullCallBacks);
@@ -214,34 +222,35 @@ void CFTreeSetContext(CFTreeRef tree, const CFTreeContext *context) {
     struct __CFTreeCallBacks *oldcb = (struct __CFTreeCallBacks *)__CFTreeGetCallBacks(tree);
     struct __CFTreeCallBacks *newcb;
     void *oldinfo = tree->_info;
-
+    CFAllocatorRef allocator = CFGetAllocator(tree);
+    
     if (__CFTreeCallBacksMatchNull(context)) {
-	newtype = __kCFTreeHasNullCallBacks;
+        newtype = __kCFTreeHasNullCallBacks;
     } else if (__CFTreeCallBacksMatchCFType(context)) {
-	newtype = __kCFTreeHasCFTypeCallBacks;
+        newtype = __kCFTreeHasCFTypeCallBacks;
     } else {
-	newtype = __kCFTreeHasCustomCallBacks;
-        tree->_callbacks = CFAllocatorAllocate(CFGetAllocator(tree), sizeof(struct __CFTreeCallBacks), 0);
-	if (__CFOASafe) __CFSetLastAllocationEventName(tree->_callbacks, "CFTree (callbacks)");
+        newtype = __kCFTreeHasCustomCallBacks;
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_callbacks, _CFAllocatorAllocateGC(allocator, sizeof(struct __CFTreeCallBacks), 0));
+        if (__CFOASafe) __CFSetLastAllocationEventName(tree->_callbacks, "CFTree (callbacks)");
         tree->_callbacks->retain = context->retain;
         tree->_callbacks->release = context->release;
         tree->_callbacks->copyDescription = context->copyDescription;
-	FAULT_CALLBACK((void **)&(tree->_callbacks->retain));
-	FAULT_CALLBACK((void **)&(tree->_callbacks->release));
-	FAULT_CALLBACK((void **)&(tree->_callbacks->copyDescription));
+        FAULT_CALLBACK((void **)&(tree->_callbacks->retain));
+        FAULT_CALLBACK((void **)&(tree->_callbacks->release));
+        FAULT_CALLBACK((void **)&(tree->_callbacks->copyDescription));
     }
     __CFBitfieldSetValue(tree->_base._info, 1, 0, newtype);
     newcb = (struct __CFTreeCallBacks *)__CFTreeGetCallBacks(tree);
     if (NULL != newcb->retain) {
         tree->_info = (void *)INVOKE_CALLBACK1(newcb->retain, context->info);
     } else {
-	tree->_info = context->info;
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_info, context->info);
     }
     if (NULL != oldcb->release) {
-	INVOKE_CALLBACK1(oldcb->release, oldinfo);
+        INVOKE_CALLBACK1(oldcb->release, oldinfo);
     }
     if (oldtype == __kCFTreeHasCustomCallBacks) {
-	CFAllocatorDeallocate(CFGetAllocator(tree), oldcb);
+        _CFAllocatorDeallocateGC(allocator, oldcb);
     }
 }
 
@@ -318,17 +327,22 @@ void CFTreeApplyFunctionToChildren(CFTreeRef tree, CFTreeApplierFunction applier
 }
 
 void CFTreePrependChild(CFTreeRef tree, CFTreeRef newChild) {
+    CFAllocatorRef allocator = CFGetAllocator(tree);
     __CFGenericValidateType(tree, __kCFTreeTypeID);
     __CFGenericValidateType(newChild, __kCFTreeTypeID);
     CFAssert1(NULL == newChild->_parent, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newChild->_sibling, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
-    CFRetain(newChild);
-    newChild->_parent = tree;
-    newChild->_sibling = tree->_child;
-    tree->_child = newChild;
+    _CFRetainGC(newChild);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, newChild, newChild->_parent, tree);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, newChild, newChild->_sibling, tree->_child);
+    if (!tree->_child) {
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_rightmostChild, newChild);
+    }
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_child, newChild);
 }
 
 void CFTreeAppendChild(CFTreeRef tree, CFTreeRef newChild) {
+    CFAllocatorRef allocator;
     __CFGenericValidateType(tree, __kCFTreeTypeID);
     __CFGenericValidateType(newChild, __kCFTreeTypeID);
     CFAssert1(NULL == newChild->_parent, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
@@ -336,48 +350,61 @@ void CFTreeAppendChild(CFTreeRef tree, CFTreeRef newChild) {
     if (newChild->_parent) {
         HALT;
     }
-    CFRetain(newChild);
-    newChild->_parent = tree;
+    _CFRetainGC(newChild);
+    allocator = CFGetAllocator(tree);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, newChild, newChild->_parent, tree);
     newChild->_sibling = NULL;
     if (!tree->_child) {
-        tree->_child = newChild;
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_child, newChild);
     } else {
-        CFTreeRef child;
-        for (child = tree->_child; child->_sibling; child = child->_sibling)
-            ;
-        child->_sibling = newChild;
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree->_rightmostChild, tree->_rightmostChild->_sibling, newChild);
     }
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_rightmostChild, newChild);
 }
 
 void CFTreeInsertSibling(CFTreeRef tree, CFTreeRef newSibling) {
+    CFAllocatorRef allocator;
     __CFGenericValidateType(tree, __kCFTreeTypeID);
     __CFGenericValidateType(newSibling, __kCFTreeTypeID);
     CFAssert1(NULL != tree->_parent, __kCFLogAssertion, "%s(): tree must have a parent", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_parent, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_sibling, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
-    CFRetain(newSibling);
-    newSibling->_parent = tree->_parent;
-    newSibling->_sibling = tree->_sibling;
-    tree->_sibling = newSibling;
+    _CFRetainGC(newSibling);
+    allocator = CFGetAllocator(tree);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, newSibling, newSibling->_parent, tree->_parent);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, newSibling, newSibling->_sibling, tree->_sibling);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_sibling, newSibling);
+    if (tree->_parent) {
+        if (tree->_parent->_rightmostChild == tree) {
+            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree->_parent, tree->_parent->_rightmostChild, newSibling);
+        }
+    }
 }
 
 void CFTreeRemove(CFTreeRef tree) {
     __CFGenericValidateType(tree, __kCFTreeTypeID);
     if (NULL != tree->_parent) {
+        CFAllocatorRef allocator = CFGetAllocator(tree);
 	if (tree == tree->_parent->_child) {
-	    tree->_parent->_child = tree->_sibling;
+            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree->_parent, tree->_parent->_child, tree->_sibling);
+            if (tree->_sibling == NULL) {
+                tree->_parent->_rightmostChild = NULL;
+            }
 	} else {
 	    CFTreeRef prevSibling = NULL;
 	    for (prevSibling = tree->_parent->_child; prevSibling; prevSibling = prevSibling->_sibling) {
 		if (prevSibling->_sibling == tree) {
-		    prevSibling->_sibling = tree->_sibling;
+                    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, prevSibling, prevSibling->_sibling, tree->_sibling);
+                    if (tree->_parent->_rightmostChild == tree) {
+                        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree->_parent, tree->_parent->_rightmostChild, prevSibling);
+                    }
 		    break;
 		}
 	    }
 	}
 	tree->_parent = NULL;
 	tree->_sibling = NULL;
-	CFRelease(tree);
+        _CFReleaseGC(tree);
     }
 }
 
@@ -386,11 +413,12 @@ void CFTreeRemoveAllChildren(CFTreeRef tree) {
     __CFGenericValidateType(tree, __kCFTreeTypeID);
     nextChild = tree->_child;
     tree->_child = NULL;
+    tree->_rightmostChild = NULL;
     while (NULL != nextChild) {
 	CFTreeRef nextSibling = nextChild->_sibling;
 	nextChild->_parent = NULL;
 	nextChild->_sibling = NULL;
-	CFRelease(nextChild);
+	_CFReleaseGC(nextChild);
 	nextChild = nextSibling;
     }
 }
@@ -416,8 +444,9 @@ void CFTreeSortChildren(CFTreeRef tree, CFComparatorFunction comparator, void *c
         CFTreeRef nextChild;
         struct _tcompareContext ctx;
         CFTreeRef *list, buffer[128];
+        CFAllocatorRef allocator = __CFGetAllocator(tree);
 
-        list = (children < 128) ? buffer : CFAllocatorAllocate(kCFAllocatorDefault, children * sizeof(CFTreeRef), 0);
+        list = (children < 128) ? buffer : CFAllocatorAllocate(kCFAllocatorDefault, children * sizeof(CFTreeRef), 0); // XXX_PCB GC OK
 	if (__CFOASafe && list != buffer) __CFSetLastAllocationEventName(tree->_callbacks, "CFTree (temp)");
         nextChild = tree->_child;
         for (idx = 0; NULL != nextChild; idx++) {
@@ -429,12 +458,13 @@ void CFTreeSortChildren(CFTreeRef tree, CFComparatorFunction comparator, void *c
         ctx.context = context;
         CFQSortArray(list, children, sizeof(CFTreeRef), (CFComparatorFunction)__CFTreeCompareValues, &ctx);
 
-        tree->_child = list[0];
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, tree, tree->_child, list[0]);
         for (idx = 1; idx < children; idx++) {
-            list[idx - 1]->_sibling = list[idx];
+            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, list[idx - 1], list[idx - 1]->_sibling, list[idx]);
         }
         list[idx - 1]->_sibling = NULL;
-        if (list != buffer) CFAllocatorDeallocate(kCFAllocatorDefault, list);
+        tree->_rightmostChild = list[children - 1];
+        if (list != buffer) CFAllocatorDeallocate(kCFAllocatorDefault, list); // XXX_PCB GC OK
     }
 }
 

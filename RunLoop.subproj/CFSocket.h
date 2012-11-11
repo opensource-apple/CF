@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,11 +21,20 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFSocket.h
-	Copyright (c) 1999-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSOCKET__)
 #define __COREFOUNDATION_CFSOCKET__ 1
+
+#if defined(__WIN32__)
+// This needs to be early in the file, before sys/types gets included, or winsock.h complains
+// about "fd_set and associated macros have been defined".
+#include <winsock2.h>
+typedef SOCKET CFSocketNativeHandle;
+#else
+typedef int CFSocketNativeHandle;
+#endif
 
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFData.h>
@@ -38,12 +45,6 @@
 extern "C" {
 #endif /* __cplusplus */
 
-#if defined(__WIN32__)
-#include <winsock.h>
-typedef SOCKET CFSocketNativeHandle;
-#else
-typedef int CFSocketNativeHandle;
-#endif
 typedef struct __CFSocket * CFSocketRef;
 
 /* A CFSocket contains a native socket within a structure that can 

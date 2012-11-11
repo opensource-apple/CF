@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,7 +26,7 @@
 */
 
 #include <CoreFoundation/CFBinaryHeap.h>
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFInternal.h"
 
 const CFBinaryHeapCallBacks kCFStringBinaryHeapCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, (CFComparisonResult (*)(const void *, const void *, void *))CFStringCompare};
@@ -87,11 +85,22 @@ CF_INLINE void __CFBinaryHeapSetNumBuckets(CFBinaryHeapRef heap, CFIndex v) {
     heap->_capacity = v;
 }
 
-enum {
-    kCFBinaryHeapImmutable = 0x0,		/* unchangable and fixed capacity; default */
+enum {      /* bits 1-0 */
+    kCFBinaryHeapImmutable = 0x0,       /* unchangable and fixed capacity; default */
     kCFBinaryHeapMutable = 0x1,		/* changeable and variable capacity */
     kCFBinaryHeapFixedMutable = 0x3	/* changeable and fixed capacity */
 };
+
+/* Bits 4-5 are used by GC */
+
+CF_INLINE bool isStrongMemory(CFTypeRef collection) {
+    return  ! __CFBitfieldGetValue(((const CFRuntimeBase *)collection)->_info, 4, 4);
+}
+
+CF_INLINE bool needsRestore(CFTypeRef collection) {
+    return __CFBitfieldGetValue(((const CFRuntimeBase *)collection)->_info, 5, 5);
+}
+
 
 CF_INLINE UInt32 __CFBinaryHeapMutableVariety(const void *cf) {
     return __CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 3, 2);
@@ -117,7 +126,7 @@ static bool __CFBinaryHeapEqual(CFTypeRef cf1, CFTypeRef cf2) {
     compare = heap1->_callbacks.compare;
     if (compare != heap2->_callbacks.compare) return false;
     if (0 == cnt) return true;	/* after function comparison */
-    list1 = (cnt <= 128) ? buffer : CFAllocatorAllocate(kCFAllocatorSystemDefault, 2 * cnt * sizeof(void *), 0);
+    list1 = (cnt <= 128) ? buffer : CFAllocatorAllocate(kCFAllocatorSystemDefault, 2 * cnt * sizeof(void *), 0); // GC OK
     if (__CFOASafe && list1 != buffer) __CFSetLastAllocationEventName(list1, "CFBinaryHeap (temp)");
     list2 = (cnt <= 128) ? buffer + 128 : list1 + cnt;
     CFBinaryHeapGetValues(heap1, list1);
@@ -129,7 +138,7 @@ static bool __CFBinaryHeapEqual(CFTypeRef cf1, CFTypeRef cf2) {
 // CF: if the context infos are not equal, should the heaps not be equal?
 	if (val1 != val2 && compare && !compare(val1, val2, heap1->_context.info)) return false;
     }
-    if (list1 != buffer) CFAllocatorDeallocate(CFGetAllocator(heap1), list1);
+    if (list1 != buffer) CFAllocatorDeallocate(CFGetAllocator(heap1), list1); // GC OK
     return true;
 }
 
@@ -147,7 +156,7 @@ static CFStringRef __CFBinaryHeapCopyDescription(CFTypeRef cf) {
     cnt = __CFBinaryHeapCount(heap);
     result = CFStringCreateMutable(CFGetAllocator(heap), 0);
     CFStringAppendFormat(result, NULL, CFSTR("<CFBinaryHeap %p [%p]>{count = %u, capacity = %u, objects = (\n"), cf, CFGetAllocator(heap), cnt, __CFBinaryHeapCapacity(heap));
-    list = (cnt <= 128) ? buffer : CFAllocatorAllocate(kCFAllocatorSystemDefault, cnt * sizeof(void *), 0);
+    list = (cnt <= 128) ? buffer : CFAllocatorAllocate(kCFAllocatorSystemDefault, cnt * sizeof(void *), 0); // GC OK
     if (__CFOASafe && list != buffer) __CFSetLastAllocationEventName(list, "CFBinaryHeap (temp)");
     CFBinaryHeapGetValues(heap, list);
     for (idx = 0; idx < cnt; idx++) {
@@ -164,25 +173,29 @@ static CFStringRef __CFBinaryHeapCopyDescription(CFTypeRef cf) {
 	}
     }
     CFStringAppend(result, CFSTR(")}"));
-    if (list != buffer) CFAllocatorDeallocate(CFGetAllocator(heap), list);
+    if (list != buffer) CFAllocatorDeallocate(CFGetAllocator(heap), list); // GC OK
     return result;
 }
 
 static void __CFBinaryHeapDeallocate(CFTypeRef cf) {
     CFBinaryHeapRef heap = (CFBinaryHeapRef)cf;
     CFAllocatorRef allocator = CFGetAllocator(heap);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	if (heap->_callbacks.retain == NULL && heap->_callbacks.release == NULL)
+	    return; // GC: keep heap intact during finalization.
+    }
 // CF: should make the heap mutable here first, a la CFArrayDeallocate
     CFBinaryHeapRemoveAllValues(heap);
 // CF: does not release the context info
     if (__CFBinaryHeapMutableVariety(heap) == kCFBinaryHeapMutable) {
-	CFAllocatorDeallocate(allocator, heap->_buckets);
+	_CFAllocatorDeallocateGC(allocator, heap->_buckets);
     }
 }
 
 static CFTypeID __kCFBinaryHeapTypeID = _kCFRuntimeNotATypeID;
 
 static const CFRuntimeClass __CFBinaryHeapClass = {
-    0,
+    _kCFRuntimeScannedObject,
     "CFBinaryHeap",
     NULL,	// init
     NULL,	// copy
@@ -213,6 +226,22 @@ static CFBinaryHeapRef __CFBinaryHeapInit(CFAllocatorRef allocator, UInt32 flags
     size = sizeof(struct __CFBinaryHeap) - sizeof(CFRuntimeBase);
     if (__CFBinaryHeapMutableVarietyFromFlags(flags) != kCFBinaryHeapMutable)
 	size += sizeof(struct __CFBinaryHeapBucket) * __CFBinaryHeapNumBucketsForCapacity(capacity);
+    CFBinaryHeapCallBacks nonRetainingCallbacks;
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	if (!callBacks || (callBacks->retain == NULL && callBacks->release == NULL)) {
+	    __CFBitfieldSetValue(flags, 4, 4, 1); // setWeak
+	}
+	else {
+	    if (callBacks->retain == __CFTypeCollectionRetain && callBacks->release == __CFTypeCollectionRelease) {
+		nonRetainingCallbacks = *callBacks;
+		nonRetainingCallbacks.retain = NULL;
+		nonRetainingCallbacks.release = NULL;
+		callBacks = &nonRetainingCallbacks;
+		__CFBitfieldSetValue(flags, 5, 5, 1); // setNeedsRestore
+	    }
+	}
+    }
+
     memory = (CFBinaryHeapRef)_CFRuntimeCreateInstance(allocator, __kCFBinaryHeapTypeID, size, NULL);
     if (NULL == memory) {
 	return NULL;
@@ -221,7 +250,8 @@ static CFBinaryHeapRef __CFBinaryHeapInit(CFAllocatorRef allocator, UInt32 flags
     case kCFBinaryHeapMutable:
 	__CFBinaryHeapSetCapacity(memory, __CFBinaryHeapRoundUpCapacity(1));
 	__CFBinaryHeapSetNumBuckets(memory, __CFBinaryHeapNumBucketsForCapacity(__CFBinaryHeapRoundUpCapacity(1)));
-	memory->_buckets = CFAllocatorAllocate(allocator, __CFBinaryHeapNumBuckets(memory) * sizeof(struct __CFBinaryHeapBucket), 0);
+	void *buckets = _CFAllocatorAllocateGC(allocator, __CFBinaryHeapNumBuckets(memory) * sizeof(struct __CFBinaryHeapBucket), isStrongMemory(memory) ? AUTO_MEMORY_SCANNED : AUTO_MEMORY_UNSCANNED);
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, memory, memory->_buckets, buckets);
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory->_buckets, "CFBinaryHeap (store)");
 	if (NULL == memory->_buckets) {
 	    CFRelease(memory);
@@ -230,6 +260,9 @@ static CFBinaryHeapRef __CFBinaryHeapInit(CFAllocatorRef allocator, UInt32 flags
 	break;
     case kCFBinaryHeapFixedMutable:
     case kCFBinaryHeapImmutable:
+        if (!isStrongMemory(memory)) {  // if weak, don't scan
+            auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_OBJECT_UNSCANNED);
+        }
 	/* Don't round up capacity */
 	__CFBinaryHeapSetCapacity(memory, capacity);
 	__CFBinaryHeapSetNumBuckets(memory, __CFBinaryHeapNumBucketsForCapacity(capacity));
@@ -316,7 +349,7 @@ const void *CFBinaryHeapGetMinimum(CFBinaryHeapRef heap) {
 Boolean CFBinaryHeapGetMinimumIfPresent(CFBinaryHeapRef heap, const void **value) {
     __CFGenericValidateType(heap, __kCFBinaryHeapTypeID);
     if (0 == __CFBinaryHeapCount(heap)) return false;
-    if (NULL != value) *value = heap->_buckets[0]._item;
+    if (NULL != value) __CFObjCStrongAssign(heap->_buckets[0]._item, value);
     return true;
 }
 
@@ -328,6 +361,10 @@ void CFBinaryHeapGetValues(CFBinaryHeapRef heap, const void **values) {
     CFAssert1(NULL != values, __kCFLogAssertion, "%s(): pointer to values may not be NULL", __PRETTY_FUNCTION__);
     cnt = __CFBinaryHeapCount(heap);
     if (0 == cnt) return;
+    if (CF_USING_COLLECTABLE_MEMORY) {
+	// GC: speculatively issue a write-barrier on the copied to buffers (3743553).
+	__CFObjCWriteBarrierRange(values, cnt * sizeof(void *));
+    }
     heapCopy = CFBinaryHeapCreateCopy(CFGetAllocator(heap), cnt, heap);
     idx = 0;
     while (0 < __CFBinaryHeapCount(heapCopy)) {
@@ -357,9 +394,11 @@ void CFBinaryHeapApplyFunction(CFBinaryHeapRef heap, CFBinaryHeapApplierFunction
 static void __CFBinaryHeapGrow(CFBinaryHeapRef heap, CFIndex numNewValues) {
     CFIndex oldCount = __CFBinaryHeapCount(heap);
     CFIndex capacity = __CFBinaryHeapRoundUpCapacity(oldCount + numNewValues);
+    CFAllocatorRef allocator = CFGetAllocator(heap);
     __CFBinaryHeapSetCapacity(heap, capacity);
     __CFBinaryHeapSetNumBuckets(heap, __CFBinaryHeapNumBucketsForCapacity(capacity));
-    heap->_buckets = CFAllocatorReallocate(CFGetAllocator(heap), heap->_buckets, __CFBinaryHeapNumBuckets(heap) * sizeof(struct __CFBinaryHeapBucket), 0);
+    void *buckets = _CFAllocatorReallocateGC(allocator, heap->_buckets, __CFBinaryHeapNumBuckets(heap) * sizeof(struct __CFBinaryHeapBucket), isStrongMemory(heap) ? AUTO_MEMORY_SCANNED : AUTO_MEMORY_UNSCANNED);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap, heap->_buckets, buckets);
     if (__CFOASafe) __CFSetLastAllocationEventName(heap->_buckets, "CFBinaryHeap (store)");
     if (NULL == heap->_buckets) HALT;
 }
@@ -367,6 +406,7 @@ static void __CFBinaryHeapGrow(CFBinaryHeapRef heap, CFIndex numNewValues) {
 void CFBinaryHeapAddValue(CFBinaryHeapRef heap, const void *value) {
     CFIndex idx, pidx;
     CFIndex cnt;
+    CFAllocatorRef allocator = CFGetAllocator(heap);
     __CFGenericValidateType(heap, __kCFBinaryHeapTypeID);
     CFAssert1(__CFBinaryHeapMutableVariety(heap) == kCFBinaryHeapMutable || __CFBinaryHeapMutableVariety(heap) == kCFBinaryHeapFixedMutable, __kCFLogAssertion, "%s(): binary heap is immutable", __PRETTY_FUNCTION__);
     switch (__CFBinaryHeapMutableVariety(heap)) {
@@ -386,14 +426,14 @@ void CFBinaryHeapAddValue(CFBinaryHeapRef heap, const void *value) {
     while (0 < idx) {
 	void *item = heap->_buckets[pidx]._item;
 	if (kCFCompareGreaterThan != heap->_callbacks.compare(item, value, heap->_context.info)) break;
-	heap->_buckets[idx]._item = item;
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap->_buckets, heap->_buckets[idx]._item, item);
 	idx = pidx;
 	pidx = (idx - 1) >> 1;
     }
     if (heap->_callbacks.retain) {
-	heap->_buckets[idx]._item = (void *)heap->_callbacks.retain(CFGetAllocator(heap), (void *)value);
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap->_buckets, heap->_buckets[idx]._item, (void *)heap->_callbacks.retain(allocator, (void *)value));
     } else {
-	heap->_buckets[idx]._item = (void *)value;
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap->_buckets, heap->_buckets[idx]._item, (void *)value);
     }
 }
 
@@ -401,6 +441,7 @@ void CFBinaryHeapRemoveMinimumValue(CFBinaryHeapRef heap) {
     void *val;
     CFIndex idx, cidx;
     CFIndex cnt;
+    CFAllocatorRef allocator;
     __CFGenericValidateType(heap, __kCFBinaryHeapTypeID);
     CFAssert1(__CFBinaryHeapMutableVariety(heap) == kCFBinaryHeapMutable || __CFBinaryHeapMutableVariety(heap) == kCFBinaryHeapFixedMutable, __kCFLogAssertion, "%s(): binary heap is immutable", __PRETTY_FUNCTION__);
     cnt = __CFBinaryHeapCount(heap);
@@ -408,8 +449,9 @@ void CFBinaryHeapRemoveMinimumValue(CFBinaryHeapRef heap) {
     idx = 0;
     __CFBinaryHeapSetNumBucketsUsed(heap, cnt - 1);
     __CFBinaryHeapSetCount(heap, cnt - 1);
+    allocator = CFGetAllocator(heap);
     if (heap->_callbacks.release)
-	heap->_callbacks.release(CFGetAllocator(heap), heap->_buckets[idx]._item);
+	heap->_callbacks.release(allocator, heap->_buckets[idx]._item);
     val = heap->_buckets[cnt - 1]._item;
     cidx = (idx << 1) + 1;
     while (cidx < __CFBinaryHeapCount(heap)) {
@@ -422,11 +464,11 @@ void CFBinaryHeapRemoveMinimumValue(CFBinaryHeapRef heap) {
 	    }
 	}
 	if (kCFCompareGreaterThan == heap->_callbacks.compare(item, val, heap->_context.info)) break;
-	heap->_buckets[idx]._item = item;
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap->_buckets, heap->_buckets[idx]._item, item);
 	idx = cidx;
 	cidx = (idx << 1) + 1;
     }
-    heap->_buckets[idx]._item = val;
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, heap->_buckets, heap->_buckets[idx]._item, val);
 }
 
 void CFBinaryHeapRemoveAllValues(CFBinaryHeapRef heap) {

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFRuntime.h
-	Copyright (c) 1999-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFRUNTIME__)
@@ -36,8 +34,58 @@
 extern "C" {
 #endif
 
+// GC: until we link against ObjC must use indirect functions.  Overridden in CFSetupFoundationBridging
+extern bool kCFUseCollectableAllocator;
+extern bool (*__CFObjCIsCollectable)(void *);
+extern const void* (*__CFObjCAssignIvar)(const void *value, const void *base, const void **slot);
+extern const void* (*__CFObjCStrongAssign)(const void *value, const void **slot);
+extern void* (*__CFObjCMemmoveCollectable)(void *dest, const void *src, unsigned);
+extern void (*__CFObjCWriteBarrierRange)(void *, unsigned);
+
+// GC: primitives.
+// is GC on?
+#define CF_USING_COLLECTABLE_MEMORY (kCFUseCollectableAllocator)
+// is GC on and is this the GC allocator?
+#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) (CF_USING_COLLECTABLE_MEMORY && (NULL == (allocator) || kCFAllocatorSystemDefault == (allocator)))
+// is this allocated by the collector?
+#define CF_IS_COLLECTABLE(obj) (__CFObjCIsCollectable ? __CFObjCIsCollectable((void*)obj) : false)
+
+// XXX_PCB for generational GC support.
+
+CF_INLINE const void* __CFAssignIvar(CFAllocatorRef allocator, const void *rvalue, const void *base, const void **lvalue) {
+    if (rvalue && CF_IS_COLLECTABLE_ALLOCATOR(allocator))
+        return __CFObjCAssignIvar(rvalue, base, lvalue);
+    else
+        return (*lvalue = rvalue);
+}
+
+CF_INLINE const void* __CFStrongAssign(CFAllocatorRef allocator, const void *rvalue, const void **lvalue) {
+    if (rvalue && CF_IS_COLLECTABLE_ALLOCATOR(allocator))
+        return __CFObjCStrongAssign(rvalue, lvalue);
+    else
+        return (*lvalue = rvalue);
+}
+
+// Use this form when the base pointer to the object is known.
+#define CF_WRITE_BARRIER_BASE_ASSIGN(allocator, base, lvalue, rvalue) __CFAssignIvar(allocator, (const void*)rvalue, (const void*)base, (const void**)&(lvalue))
+
+// Use this form when the base pointer to the object isn't known.
+#define CF_WRITE_BARRIER_ASSIGN(allocator, lvalue, rvalue) __CFStrongAssign(allocator, (const void*)rvalue, (const void**)&(lvalue))
+
+// Write-barrier memory move.
+#define CF_WRITE_BARRIER_MEMMOVE(dst, src, size) __CFObjCMemmoveCollectable(dst, src, size)
+
+// Used by frameworks to assert they "KNOW WHAT THEY'RE DOING under GC."
+CF_EXPORT CFAllocatorRef _CFAllocatorCreateGC(CFAllocatorRef allocator, CFAllocatorContext *context);
+
+// Zero-retain count CFAllocator functions, i.e. memory that will be collected, no dealloc necessary
+CF_EXPORT void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint);
+CF_EXPORT void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void *ptr, CFIndex newsize, CFOptionFlags hint);
+CF_EXPORT void _CFAllocatorDeallocateGC(CFAllocatorRef allocator, void *ptr);
+
 enum {
-    _kCFRuntimeNotATypeID = 0
+    _kCFRuntimeNotATypeID = 0,
+    _kCFRuntimeScannedObject = (1 << 0)
 };
 
 typedef struct __CFRuntimeClass {	// Version 0 struct
@@ -157,7 +205,7 @@ CF_EXPORT void _CFRuntimeUnregisterClassWithTypeID(CFTypeID typeID);
  */
 typedef struct __CFRuntimeBase {
     void *_isa;
-#if defined(__ppc__)
+#if defined(__ppc__) || defined(__ppc64__)
     uint16_t _rc;
     uint16_t _info;
 #elif defined(__i386__)
@@ -168,11 +216,11 @@ typedef struct __CFRuntimeBase {
 #endif
 } CFRuntimeBase;
 
-#if defined(__ppc__)
+#if defined(__ppc__) || defined(__ppc64__)
 #define INIT_CFRUNTIME_BASE(isa, info, rc)	{ isa, info, rc }
 #elif defined(__i386__)
 #define INIT_CFRUNTIME_BASE(isa, info, rc)	{ isa, rc, info }
-#elif
+#else
 #error unknown architecture
 #endif
 
@@ -294,7 +342,7 @@ CFTypeID EXRangeGetTypeID(void) {
 EXRangeRef EXRangeCreate(CFAllocatorRef allocator, uint32_t location, uint32_t length) {
     struct __EXRange *newrange;
     uint32_t extra = sizeof(struct __EXRange) - sizeof(CFRuntimeBase);
-    newrange = (struct __EXRange *)_CFRuntimeCreateInstance(allocator, _kEXRangeID, extra);
+    newrange = (struct __EXRange *)_CFRuntimeCreateInstance(allocator, _kEXRangeID, extra, NULL);
     if (NULL == newrange) {
 	return NULL;
     }

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFBundle_Internal.h
-	Copyright (c) 1999-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_INTERNAL__)
@@ -121,7 +119,6 @@ extern CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint);
 #if defined(__MACOS8__)
 #include <CodeFragments.h>
 #else
-#include <CarbonCore/CodeFragments.h>
 #endif
 extern Boolean _CFBundleCFMLoad(CFBundleRef bundle);
 extern void _CFBundleCFMConnect(CFBundleRef bundle);
@@ -139,6 +136,7 @@ extern void *_CFBundleDLLGetSymbolByName(CFBundleRef bundle, CFStringRef symbolN
 
 /* Private PlugIn-related CFBundle API */
 
+extern Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle);
 extern void _CFBundleInitPlugIn(CFBundleRef bundle);
 extern void _CFBundleDeallocatePlugIn(CFBundleRef bundle);
 
@@ -196,6 +194,7 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactory *factory);
 #define _CFBundleAlternateBuiltInPlugInsURLFromBase2 CFSTR("Contents/Plug-ins/")
 
 #define _CFBundleLprojExtension CFSTR("lproj")
+#define _CFBundleLprojExtensionWithDot CFSTR(".lproj")
 
 #define _CFBundleMacOSXPlatformName CFSTR("macos")
 #define _CFBundleAlternateMacOSXPlatformName CFSTR("macosx")

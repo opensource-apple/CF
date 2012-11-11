@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -31,21 +29,19 @@
 #include <CoreFoundation/CFDate.h>
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFSet.h>
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFStringEncodingConverter.h"
 #include "CFInternal.h"
+#include <CoreFoundation/CFStream.h>
+#if defined(__MACH__)
+#include <CoreFoundation/CFPreferences.h>
+#endif // __MACH__
 #include <limits.h>
 #include <float.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#if defined(__MACH__) || defined(__WIN32__)
 #include <ctype.h>
-#elif !defined(__WIN32__)
-#define isspace(x) ((x)==' ' || (x)=='\n' || (x)=='\f' || (x)=='\r' || (x)=='\t' || (x)=='\v')
-#define isdigit(x) ((x) <= '9' && (x) >= '0')
-#define isxdigit(x) (((x) <= '9' && (x) >= '0') || ((x) >= 'a' && (x) <= 'f') || ((x) >= 'A' && (x) <= 'F'))
-#endif
 
 __private_extern__ bool allowMissingSemi = false;
 
@@ -423,20 +419,30 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
         _plistAppendCharacters(xmlString, CFXMLPlistTags[STRING_IX], STRING_TAG_LENGTH);
         _plistAppendUTF8CString(xmlString, ">\n");
     } else if (typeID == _CFKeyedArchiverUIDGetTypeID()) {
-	uint64_t v = _CFKeyedArchiverUIDGetValue(object);
-	CFNumberRef num = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt64Type, &v);
         _plistAppendUTF8CString(xmlString, "<");
         _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
         _plistAppendUTF8CString(xmlString, ">\n");
-            _appendIndents(indentation+1, xmlString);
-            _plistAppendUTF8CString(xmlString, "<");
-            _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
-            _plistAppendUTF8CString(xmlString, ">");
+	    _appendIndents(indentation+1, xmlString);
+	    _plistAppendUTF8CString(xmlString, "<");
+	    _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
+	    _plistAppendUTF8CString(xmlString, ">");
 	    _appendEscapedString(CFSTR("CF$UID"), xmlString);
+	    _plistAppendUTF8CString(xmlString, "</");
+	    _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
+	    _plistAppendUTF8CString(xmlString, ">\n");
+	    _appendIndents(indentation + 1, xmlString);
+            _plistAppendUTF8CString(xmlString, "<");
+            _plistAppendCharacters(xmlString, CFXMLPlistTags[INTEGER_IX], INTEGER_TAG_LENGTH);
+            _plistAppendUTF8CString(xmlString, ">");
+
+	    uint64_t v = _CFKeyedArchiverUIDGetValue(object);
+	    CFNumberRef num = CFNumberCreate(kCFAllocatorSystemDefault, kCFNumberSInt64Type, &v);
+            _plistAppendFormat(xmlString, CFSTR("%@"), num);
+	    CFRelease(num);
+
             _plistAppendUTF8CString(xmlString, "</");
-            _plistAppendCharacters(xmlString, CFXMLPlistTags[KEY_IX], KEY_TAG_LENGTH);
+            _plistAppendCharacters(xmlString, CFXMLPlistTags[INTEGER_IX], INTEGER_TAG_LENGTH);
             _plistAppendUTF8CString(xmlString, ">\n");
-            _CFAppendXML0(num, indentation+1, xmlString);
         _appendIndents(indentation, xmlString);
         _plistAppendUTF8CString(xmlString, "</");
         _plistAppendCharacters(xmlString, CFXMLPlistTags[DICT_IX], DICT_TAG_LENGTH);
@@ -833,7 +839,8 @@ static CFDataRef __CFPLDataDecode(_CFXMLPlistParseInfo *pInfo, Boolean mutable) 
     int acc = 0;
     int cntr = 0;
 
-    tmpbuf = CFAllocatorAllocate(pInfo->allocator, tmpbuflen, 0);
+    // GrP GC: collector shouldn't scan this raw data
+    tmpbuf = CFAllocatorAllocate(pInfo->allocator, tmpbuflen, AUTO_MEMORY_UNSCANNED);
     for (; pInfo->curr < pInfo->end; pInfo->curr++) {
         UniChar c = *(pInfo->curr);
         if (c == '<') {
@@ -852,7 +859,7 @@ static CFDataRef __CFPLDataDecode(_CFXMLPlistParseInfo *pInfo, Boolean mutable) 
         if (0 == (cntr & 0x3)) {
             if (tmpbuflen <= tmpbufpos + 2) {
                 tmpbuflen <<= 2;
-                tmpbuf = CFAllocatorReallocate(pInfo->allocator, tmpbuf, tmpbuflen, 0);
+                tmpbuf = CFAllocatorReallocate(pInfo->allocator, tmpbuf, tmpbuflen, AUTO_MEMORY_UNSCANNED);
             }
             tmpbuf[tmpbufpos++] = (acc >> 16) & 0xff;
             if (numeq < 2)
@@ -1110,6 +1117,7 @@ static CFStringRef getString(_CFXMLPlistParseInfo *pInfo) {
     while (!pInfo->errorString && pInfo->curr < pInfo->end) {
         UniChar ch = *(pInfo->curr);
         if (ch == '<') {
+	    if (pInfo->curr + 1 >= pInfo->end) break;
             // Could be a CDSect; could be the end of the string
             if (*(pInfo->curr+1) != '!') break; // End of the string
             _catFromMarkToBuf(mark, pInfo->curr, &string, pInfo->allocator);
@@ -1834,14 +1842,15 @@ void __CFSetNastyFile(CFTypeRef cf) {
 }
 
 extern bool __CFTryParseBinaryPlist(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFPropertyListRef *plist, CFStringRef *errorString);
-int _CFPropertyListAllowNonUTF8 = 1;
+int32_t _CFPropertyListAllowNonUTF8 = 0;
 
-static CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xmlData, CFOptionFlags option, CFStringRef *errorString, Boolean allowNewTypes, CFPropertyListFormat *format) {
+CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xmlData, CFOptionFlags option, CFStringRef *errorString, Boolean allowNewTypes, CFPropertyListFormat *format) {
     CFStringEncoding encoding;
     CFStringRef xmlString;
     UInt32 length;
     CFPropertyListRef plist;
 
+    if (errorString) *errorString = NULL;
     if (!xmlData || CFDataGetLength(xmlData) == 0) {
         if (errorString) {
             *errorString = CFSTR("Cannot parse a NULL or zero-length data");
@@ -1858,7 +1867,6 @@ static CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDa
     allocator = allocator ? allocator : __CFGetDefaultAllocator();
     CFRetain(allocator);
     
-    if (errorString) *errorString = NULL;
     encoding = encodingForXMLData(xmlData, errorString); // 0 is an error return, NOT MacRoman.
 
     if (encoding == 0) {
@@ -1869,10 +1877,7 @@ static CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDa
     }
 
     xmlString = CFStringCreateWithBytes(allocator, CFDataGetBytePtr(xmlData), CFDataGetLength(xmlData), encoding, true);
-    if (NULL == xmlString && !_CFExecutableLinkedOnOrAfter(CFSystemVersionMerlot) && _CFPropertyListAllowNonUTF8) {	// conversion failed, probably because not in proper encoding
-	static int yanmode = -1;
-	if (-1 == yanmode) yanmode = (getenv("YanMode") != NULL);
-	if (1 != yanmode && _CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) {
+    if (NULL == xmlString && (!_CFExecutableLinkedOnOrAfter(CFSystemVersionChablis) || _CFPropertyListAllowNonUTF8)) {	// conversion failed, probably because not in proper encoding
 	    CFTypeRef f = (__CFNastyFile__) ? (__CFNastyFile__) : CFSTR("(UNKNOWN)");
             if (encoding == kCFStringEncodingUTF8) {
                 CFLog(0, CFSTR("\n\tCFPropertyListCreateFromXMLData(): plist parse failed; the data is not proper UTF-8. The file name for this data could be:\n\t%@\n\tThe parser will retry as in 10.2, but the problem should be corrected in the plist."), f);
@@ -1881,7 +1886,6 @@ static CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDa
                 CFLog(0, CFSTR("\n\tCFPropertyListCreateFromXMLData(): conversion of data failed.\n\tThe file is not in the encoding specified in XML header if XML.\n\tThe file name for this data could be:\n\t\t%@\n."), f);
 #endif
             }
-	}
         // Call __CFStringCreateImmutableFunnel3() the same way CFStringCreateWithBytes() does, except with the addt'l flag
         if (encoding == kCFStringEncodingUTF8) xmlString = __CFStringCreateImmutableFunnel3(allocator, CFDataGetBytePtr(xmlData), CFDataGetLength(xmlData), kCFStringEncodingUTF8, true, true, false, false, false, (void *)-1  /* ALLOCATORSFREEFUNC */, kCFStringEncodingLenientUTF8Conversion);
     }
@@ -1949,6 +1953,84 @@ CFTypeRef CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xm
     return _CFPropertyListCreateFromXMLData(allocator, xmlData, option, errorString, true, NULL);
 }
 
+CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStreamRef stream, CFPropertyListFormat format, CFStringRef *errorString) {
+    CFAssert1(stream != NULL, __kCFLogAssertion, "%s(): NULL stream not allowed", __PRETTY_FUNCTION__);
+    CFAssert2(format == kCFPropertyListOpenStepFormat || format == kCFPropertyListXMLFormat_v1_0 || format == kCFPropertyListBinaryFormat_v1_0, __kCFLogAssertion, "%s(): Unrecognized option %d", __PRETTY_FUNCTION__, format);
+    CFAssert1(propertyList != NULL, __kCFLogAssertion, "%s(): Cannot be called with a NULL property list", __PRETTY_FUNCTION__);
+    __CFAssertIsPList(propertyList);
+    CFAssert1(CFWriteStreamGetTypeID() == CFGetTypeID(stream), __kCFLogAssertion, "%s(): stream argument is not a write stream", __PRETTY_FUNCTION__);
+    CFAssert1(kCFStreamStatusOpen == CFWriteStreamGetStatus(stream) || kCFStreamStatusWriting == CFWriteStreamGetStatus(stream), __kCFLogAssertion, "%s():  stream is not open", __PRETTY_FUNCTION__);
+
+    if (errorString) *errorString = NULL;
+    if (!CFPropertyListIsValid(propertyList, format)) {
+        if (errorString) *errorString = CFRetain(CFSTR("Property list invalid for format"));
+        return 0;
+    }
+    if (format == kCFPropertyListOpenStepFormat) {
+        if (errorString) *errorString = CFRetain(CFSTR("Property list format kCFPropertyListOpenStepFormat not supported for writing"));
+        return 0;
+    }
+    if (format == kCFPropertyListXMLFormat_v1_0) {
+        CFDataRef data = CFPropertyListCreateXMLData(kCFAllocatorSystemDefault,  propertyList);
+        CFIndex len = data ? CFDataGetLength(data) : 0;
+	CFIndex ret = CFWriteStreamWrite(stream, CFDataGetBytePtr(data), len);
+	CFRelease(data);
+        if (len != ret) {
+        }
+        return len;
+    }
+    if (format == kCFPropertyListBinaryFormat_v1_0) {
+	CFIndex len = __CFBinaryPlistWriteToStream(propertyList, stream);
+        return len;
+    }
+    if (errorString) *errorString = CFRetain(CFSTR("Unknown format option"));
+    return 0;
+}
+
+static void __CFConvertReadStreamToBytes(CFReadStreamRef stream, CFIndex max, uint8_t **buffer, CFIndex *length) {
+    int32_t buflen = 0, bufsize = 0, retlen;
+    uint8_t *buf = NULL, sbuf[8192];
+    for (;;) {
+	retlen = CFReadStreamRead(stream, sbuf, __CFMin(8192, max));
+        max -= retlen;
+	if (retlen <= 0 || max <= 0) {
+	    *buffer = buf;
+	    *length = buflen;
+	    return;
+	}
+        if (bufsize < buflen + retlen) {
+            bufsize = 2 * bufsize;
+            if (bufsize < buflen + retlen) bufsize = buflen + retlen;
+	    buf = CFAllocatorReallocate(kCFAllocatorSystemDefault, buf, bufsize, 0);
+        }
+	memmove(buf + buflen, sbuf, retlen);
+	buflen += retlen;
+    }
+}
+
+CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex length, CFOptionFlags mutabilityOption, CFPropertyListFormat *format, CFStringRef *errorString) {
+    CFPropertyListRef pl;
+    CFDataRef data;
+    CFIndex buflen = 0;
+    uint8_t *buffer = NULL;
+    CFAssert1(stream != NULL, __kCFLogAssertion, "%s(): NULL stream not allowed", __PRETTY_FUNCTION__);
+    CFAssert1(CFReadStreamGetTypeID() == CFGetTypeID(stream), __kCFLogAssertion, "%s(): stream argument is not a read stream", __PRETTY_FUNCTION__);
+    CFAssert1(kCFStreamStatusOpen == CFReadStreamGetStatus(stream) || kCFStreamStatusReading == CFReadStreamGetStatus(stream), __kCFLogAssertion, "%s():  stream is not open", __PRETTY_FUNCTION__);
+    CFAssert2(mutabilityOption == kCFPropertyListImmutable || mutabilityOption == kCFPropertyListMutableContainers || mutabilityOption == kCFPropertyListMutableContainersAndLeaves, __kCFLogAssertion, "%s(): Unrecognized option %d", __PRETTY_FUNCTION__, mutabilityOption);
+
+    if (errorString) *errorString = NULL;
+    if (0 == length) length = INT_MAX;
+    __CFConvertReadStreamToBytes(stream, length, &buffer, &buflen);
+    if (!buffer || buflen < 6) {
+        if (buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, buffer);
+        if (errorString) *errorString = CFRetain(CFSTR("stream had too few bytes"));
+        return NULL;
+    }
+    data = CFDataCreateWithBytesNoCopy(kCFAllocatorSystemDefault, buffer, buflen, kCFAllocatorSystemDefault);
+    pl = _CFPropertyListCreateFromXMLData(allocator, data, mutabilityOption, errorString, true, format);
+    CFRelease(data);
+    return pl;
+}
 
 // ========================================================================
 
@@ -2259,51 +2341,62 @@ static CFTypeRef parsePlistDict(_CFXMLPlistParseInfo *pInfo) {
     return dict;
 }
 
-static unsigned char fromHexDigit(unsigned char ch) {
+CF_INLINE unsigned char fromHexDigit(unsigned char ch) {
     if (isdigit(ch)) return ch - '0';
     if ((ch >= 'a') && (ch <= 'f')) return ch - 'a' + 10;
     if ((ch >= 'A') && (ch <= 'F')) return ch - 'A' + 10;
     return 0xff; // Just choose a large number for the error code
 }
 
+/* Gets up to bytesSize bytes from a plist data. Returns number of bytes actually read. Leaves cursor at first non-space, non-hex character.
+   -1 is returned for unexpected char, -2 for uneven number of hex digits
+*/
+static int getDataBytes(_CFXMLPlistParseInfo *pInfo, unsigned char *bytes, int bytesSize) {
+    int numBytesRead = 0;
+    while ((pInfo->curr < pInfo->end) && (numBytesRead < bytesSize)) {
+	int first, second;
+	UniChar ch1 = *pInfo->curr;
+	if (ch1 == '>') return numBytesRead;  // Meaning we're done
+	first = fromHexDigit(ch1);
+	if (first != 0xff) {	// If the first char is a hex, then try to read a second hex
+	    pInfo->curr++;
+	    if (pInfo->curr >= pInfo->end) return -2;   // Error: uneven number of hex digits
+	    UniChar ch2 = *pInfo->curr;
+	    second = fromHexDigit(ch2);
+	    if (second == 0xff) return -2;  // Error: uneven number of hex digits
+	    bytes[numBytesRead++] = (first << 4) + second;
+	    pInfo->curr++;
+	} else if (ch1 == ' ' || ch1 == '\n' || ch1 == '\t' || ch1 == '\r' || ch1 == 0x2028 || ch1 == 0x2029) {
+	    pInfo->curr++;
+	} else {
+	    return -1;  // Error: unexpected character
+	}
+    }
+    return numBytesRead;    // This does likely mean we didn't encounter a '>', but we'll let the caller deal with that
+}
+
 static CFTypeRef parsePlistData(_CFXMLPlistParseInfo *pInfo) {
-    CFStringRef token;
-    unsigned length = 0;
     CFMutableDataRef result = CFDataCreateMutable(pInfo->allocator, 0);
 
-    advanceToNonSpace(pInfo);
-    while ( (token = parseUnquotedPlistString(pInfo)) ) {
-        unsigned tlength = CFStringGetLength(token);
-        unsigned char *bytes;
-        unsigned idx;
-        if (tlength & 1) { // Token must have an even number of characters
-            CFRelease(token);
-            CFRelease(result);
-	    if (_CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) {
-		pInfo->errorString = CFStringCreateWithFormat(pInfo->allocator, NULL, CFSTR("Malformed data byte group at line %d; uneven length"), lineNumber(pInfo));
-	    }
-            return NULL;
-        }
-        CFDataSetLength(result, length + tlength/2);
-        bytes = (unsigned char *) CFDataGetMutableBytePtr(result) + length;
-        length += tlength / 2;
-        for (idx = 0; idx < tlength; idx += 2) {
-            unsigned char hi = fromHexDigit(CFStringGetCharacterAtIndex(token, idx)), lo = fromHexDigit(CFStringGetCharacterAtIndex(token, idx+1));
-            if (hi == 0xff || lo == 0xff) {
-                CFRelease(token);
-                CFRelease(result);
-		if (_CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) {
-		    pInfo->errorString = CFStringCreateWithFormat(pInfo->allocator, NULL, CFSTR("Malformed data byte group at line %d; invalid hex"), lineNumber(pInfo));
+    // Read hex bytes and append them to result
+    while (1) {
+	#define numBytes 400
+	unsigned char bytes[numBytes];
+	int numBytesRead = getDataBytes(pInfo, bytes, numBytes);
+	if (numBytesRead < 0) {
+	    CFRelease(result);
+    	    if (_CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) {
+		switch (numBytesRead) {
+		    case -2: pInfo->errorString = CFStringCreateWithFormat(pInfo->allocator, NULL, CFSTR("Malformed data byte group at line %d; uneven length"), lineNumber(pInfo)); break;
+		    default: pInfo->errorString = CFStringCreateWithFormat(pInfo->allocator, NULL, CFSTR("Malformed data byte group at line %d; invalid hex"), lineNumber(pInfo)); break;
 		}
-                return NULL;
-            }
-            *bytes = (hi << 4) + lo;
-            bytes++;
-        }
-        CFRelease(token);
-        token = NULL;
-        advanceToNonSpace(pInfo);
+	    }
+	    return NULL;
+	}
+	if (numBytesRead == 0) break;
+	CFDataAppendBytes(result, bytes, numBytesRead);
     }
+
     if (pInfo->errorString) {
 	CFRelease(pInfo->errorString);
 	pInfo->errorString = NULL;

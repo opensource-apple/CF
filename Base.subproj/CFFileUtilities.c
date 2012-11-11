@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -104,8 +102,6 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
 
     *bytes = NULL;
 
-__CFSetNastyFile(url);
-
 #if defined(__WIN32__)
     fd = open(path, O_RDONLY|CF_OPENFLGS, 0666|_S_IREAD);
 #else
@@ -138,6 +134,7 @@ __CFSetNastyFile(url);
         }
         *bytes = CFAllocatorAllocate(alloc, desiredLength, 0);
 	if (__CFOASafe) __CFSetLastAllocationEventName(*bytes, "CFUtilities (file-bytes)");
+//	fcntl(fd, F_NOCACHE, 1);
         if (read(fd, *bytes, desiredLength) < 0) {
             CFAllocatorDeallocate(alloc, *bytes);
             close(fd);
@@ -204,43 +201,27 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     CFStringRef extension = (matchingAbstractType ? _CFCopyExtensionForAbstractType(matchingAbstractType) : NULL);
     CFIndex extLen = (extension ? CFStringGetLength(extension) : 0);
     uint8_t extBuff[CFMaxPathSize];
-
-#if defined(__WIN32__)
-    /* Windows Variables */
-    /* The Win32 code has not been updated for:
-        path has been renamed dirPath
-        base has been renamed dirURL
-        dirPath may be NULL (in which case dirURL is not)
-        if dirPath is NULL, pathLength is 0
-    */
-    WIN32_FIND_DATA file;
-    HANDLE handle;
-#elif defined(__svr4__) || defined(__hpux__) || defined(__LINUX__) || defined(__FREEBSD__)
-    /* Solaris and HPUX Variables */
-    /* The Solaris and HPUX code has not been updated for:
-        base has been renamed dirURL
-        dirPath may be NULL (in which case dirURL is not)
-        if dirPath is NULL, pathLength is 0
-    */
-    DIR *dirp;
-    struct dirent *dp;
-    int err;
-#elif defined(__MACH__)
-    /* Mac OS X Variables */
-    int fd, numread;
-    long basep;
-    char dirge[8192];
-    uint8_t pathBuf[CFMaxPathSize];
-#endif
-
     
     if (extLen > 0) {
         CFStringGetBytes(extension, CFRangeMake(0, extLen), CFStringFileSystemEncoding(), 0, false, extBuff, CFMaxPathSize, &extLen);
         extBuff[extLen] = '\0';
     }
+
+    uint8_t pathBuf[CFMaxPathSize];
+
+    if (!dirPath) {
+        if (!CFURLGetFileSystemRepresentation(dirURL, true, pathBuf, CFMaxPathLength)) {
+            if (extension) CFRelease(extension);
+            return NULL;
+        } else {
+            dirPath = pathBuf;
+            pathLength = strlen(dirPath);
+        }
+    }
     
 #if defined(__WIN32__)
-    /* Windows Implementation */
+    WIN32_FIND_DATA file;
+    HANDLE handle;
     
     if (pathLength + 2 >= CFMaxPathLength) {
         if (extension) {
@@ -248,21 +229,19 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
         }
         return NULL;
     }
-    if (NULL != dirPath) {
-	dirPath[pathLength] = '\'';
-	dirPath[pathLength + 1] = '*';
-	dirPath[pathLength + 2] = '\0';
-	handle = FindFirstFileA(dirPath, &file);
-	if (INVALID_HANDLE_VALUE == handle) {
-	    dirPath[pathLength] = '\0';
-	    if (extension) {
-		CFRelease(extension);
-	    }
-	    return NULL;
-	}
-    } else {
-	pathLength = 0;
+
+    dirPath[pathLength] = '\\';
+    dirPath[pathLength + 1] = '*';
+    dirPath[pathLength + 2] = '\0';
+    handle = FindFirstFileA(dirPath, &file);
+    if (INVALID_HANDLE_VALUE == handle) {
+        dirPath[pathLength] = '\0';
+        if (extension) {
+            CFRelease(extension);
+        }
+        return NULL;
     }
+
     files = CFArrayCreateMutable(alloc, 0, &kCFTypeArrayCallBacks);
 
     do {
@@ -291,7 +270,15 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
 
 #elif defined(__svr4__) || defined(__hpux__) || defined(__LINUX__) || defined(__FREEBSD__)
     /* Solaris and HPUX Implementation */
-
+    /* The Solaris and HPUX code has not been updated for:
+        base has been renamed dirURL
+        dirPath may be NULL (in which case dirURL is not)
+        if dirPath is NULL, pathLength is 0
+    */
+    DIR *dirp;
+    struct dirent *dp;
+    int err;
+    
     dirp = opendir(dirPath);
     if (!dirp) {
         if (extension) {
@@ -340,22 +327,10 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     }
     
 #elif defined(__MACH__)
-    /* Mac OS X Variables - repeated for convenience */
-    // int fd, numread;
-    // long basep;
-    // char dirge[8192];
-    // UInt8 pathBuf[CFMaxPathSize];
-    /* Mac OS X Implementation */
+    int fd, numread;
+    long basep;
+    char dirge[8192];
 
-    if (!dirPath) {
-        if (!CFURLGetFileSystemRepresentation(dirURL, true, pathBuf, CFMaxPathLength)) {
-            if (extension) CFRelease(extension);
-            return NULL;
-        } else {
-            dirPath = pathBuf;
-            pathLength = strlen(dirPath);
-        }
-    }
     fd = open(dirPath, O_RDONLY, 0777);
     if (fd < 0) {
         if (extension) {

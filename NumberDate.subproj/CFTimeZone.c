@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -29,7 +27,7 @@
 
 #include <CoreFoundation/CFTimeZone.h>
 #include <CoreFoundation/CFPropertyList.h>
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFInternal.h"
 #include <math.h>
 #include <limits.h>
@@ -64,8 +62,8 @@ static CFTimeZoneRef __CFTimeZoneSystem = NULL;
 static CFTimeZoneRef __CFTimeZoneDefault = NULL;
 static CFDictionaryRef __CFTimeZoneAbbreviationDict = NULL;
 static CFSpinLock_t __CFTimeZoneAbbreviationLock = 0;
-static CFDictionaryRef __CFTimeZoneCompatibilityMappingDict = NULL;
-static CFDictionaryRef __CFTimeZoneCompatibilityMappingDict2 = NULL;
+static CFMutableDictionaryRef __CFTimeZoneCompatibilityMappingDict = NULL;
+static CFMutableDictionaryRef __CFTimeZoneCompatibilityMappingDict2 = NULL;
 static CFSpinLock_t __CFTimeZoneCompatibilityMappingLock = 0;
 static CFArrayRef __CFKnownTimeZoneList = NULL;
 static CFMutableDictionaryRef __CFTimeZoneCache = NULL;
@@ -136,13 +134,13 @@ static CFMutableArrayRef __CFCopyWindowsTimeZoneList() {
 }
 #endif
 
+#if !defined(__WIN32__)
 static CFMutableArrayRef __CFCopyRecursiveDirectoryList(const char *topDir) {
     CFMutableArrayRef result = NULL, temp;
     long fd, numread, plen, basep = 0;
     CFIndex idx, cnt, usedLen;
     char *dirge, path[CFMaxPathSize];
 
-#if !defined(__WIN32__)
 // No d_namlen in dirent struct on Linux
 #if defined(__LINUX__)
 	#define dentDNameLen strlen(dent->d_name)
@@ -204,9 +202,9 @@ static CFMutableArrayRef __CFCopyRecursiveDirectoryList(const char *topDir) {
         CFRelease(result);
         return NULL;
     }
-#endif
     return result;
 }
+#endif
 
 typedef struct _CFTZPeriod {
     int32_t startSec;
@@ -265,7 +263,7 @@ static CFComparisonResult __CFCompareTZPeriods(const void *val1, const void *val
     return kCFCompareGreaterThan;
 }
 
-CF_INLINE CFIndex __CFBSearchTZPeriods(CFTimeZoneRef tz, CFAbsoluteTime at) {
+static CFIndex __CFBSearchTZPeriods(CFTimeZoneRef tz, CFAbsoluteTime at) {
     CFTZPeriod elem;
     CFIndex idx;
     __CFTZPeriodInit(&elem, (int32_t)(float)floor(at), NULL, 0, false);
@@ -369,7 +367,7 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
     if (__CFOASafe) __CFSetLastAllocationEventName(*tzpp, "CFTimeZone (store)");
     memset(*tzpp, 0, cnt * sizeof(CFTZPeriod));
     abbrs = CFAllocatorAllocate(allocator, (charcnt + 1) * sizeof(CFStringRef), 0);
-    if (__CFOASafe) __CFSetLastAllocationEventName(*tzpp, "CFTimeZone (temp)");
+    if (__CFOASafe) __CFSetLastAllocationEventName(abbrs, "CFTimeZone (temp)");
     for (idx = 0; idx < charcnt + 1; idx++) {
 	abbrs[idx] = NULL;
     }
@@ -415,6 +413,7 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
 	// dump all but the last INT_MIN and the first INT_MAX
 	for (idx = 0; idx < cnt; idx++) {
 	    if (((*tzpp + idx)->startSec == INT_MIN) && (idx + 1 < cnt) && (((*tzpp + idx + 1)->startSec == INT_MIN))) {
+		if (NULL != (*tzpp + idx)->abbrev) CFRelease((*tzpp + idx)->abbrev);
 		cnt--;
 		memmove((*tzpp + idx), (*tzpp + idx + 1), sizeof(CFTZPeriod) * (cnt - idx));
 		idx--;
@@ -423,6 +422,7 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
 	// Don't combine these loops!  Watch the idx decrementing...
 	for (idx = 0; idx < cnt; idx++) {
 	    if (((*tzpp + idx)->startSec == INT_MAX) && (0 < idx) && (((*tzpp + idx - 1)->startSec == INT_MAX))) {
+		if (NULL != (*tzpp + idx)->abbrev) CFRelease((*tzpp + idx)->abbrev);
 		cnt--;
 		memmove((*tzpp + idx), (*tzpp + idx + 1), sizeof(CFTZPeriod) * (cnt - idx));
 		idx--;
@@ -834,18 +834,21 @@ CFTimeZoneRef CFTimeZoneCreate(CFAllocatorRef allocator, CFStringRef name, CFDat
 	if (NULL != tzp) CFAllocatorDeallocate(allocator, tzp);
         return NULL;
     }
-    ((struct __CFTimeZone *)memory)->_name = CFRetain(name);
-    ((struct __CFTimeZone *)memory)->_data = CFRetain(data);
+    ((struct __CFTimeZone *)memory)->_name = CFStringCreateCopy(allocator, name);
+    ((struct __CFTimeZone *)memory)->_data = CFDataCreateCopy(allocator, data);
     ((struct __CFTimeZone *)memory)->_periods = tzp;
     ((struct __CFTimeZone *)memory)->_periodCnt = cnt;
     if (NULL == __CFTimeZoneCache) {
-	__CFTimeZoneCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFDictionaryKeyCallBacks kcb = kCFTypeDictionaryKeyCallBacks;
+	kcb.retain = kcb.release = NULL;
+	__CFTimeZoneCache = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kcb, &kCFTypeDictionaryValueCallBacks);
     }
-    CFDictionaryAddValue(__CFTimeZoneCache, name, memory);
+    CFDictionaryAddValue(__CFTimeZoneCache, ((struct __CFTimeZone *)memory)->_name, memory);
     __CFTimeZoneUnlockGlobal();
     return memory;
 }
 
+#if !defined(__WIN32__)
 static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t seconds, CFStringRef name, int isDST) {
     CFTimeZoneRef result;
     CFDataRef data;
@@ -853,7 +856,7 @@ static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t s
 #if defined(__WIN32__)
     unsigned char *dataBytes = CFAllocatorAllocate(allocator, 52 + nameLen + 1, 0);
     if (!dataBytes) return NULL;
-    if (__CFOASafe) __CFSetLastAllocationEventName(*tzpp, "CFTimeZone (temp)");
+    if (__CFOASafe) __CFSetLastAllocationEventName(dataBytes, "CFTimeZone (temp)");
 #else
     unsigned char dataBytes[52 + nameLen + 1];
 #endif
@@ -873,6 +876,7 @@ static CFTimeZoneRef __CFTimeZoneCreateFixed(CFAllocatorRef allocator, int32_t s
 #endif
     return result;
 }
+#endif
 
 // rounds offset to nearest minute
 CFTimeZoneRef CFTimeZoneCreateWithTimeIntervalFromGMT(CFAllocatorRef allocator, CFTimeInterval ti) {
@@ -920,9 +924,6 @@ CFTimeZoneRef CFTimeZoneCreateWithName(CFAllocatorRef allocator, CFStringRef nam
     CFTimeZoneRef result = NULL;
     CFStringRef tzName = NULL;
     CFDataRef data = NULL;
-    CFURLRef baseURL, tempURL;
-    void *bytes;
-    CFIndex length;
 
     if (allocator == NULL) allocator = __CFGetDefaultAllocator();
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
@@ -939,6 +940,10 @@ CFTimeZoneRef CFTimeZoneCreateWithName(CFAllocatorRef allocator, CFStringRef nam
     }
     __CFTimeZoneUnlockGlobal();
 #if !defined(__WIN32__)
+    CFURLRef baseURL, tempURL;
+    void *bytes;
+    CFIndex length;
+
     baseURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, CFSTR(TZZONEINFO), kCFURLPOSIXPathStyle, true);
     if (tryAbbrev) {
 	CFDictionaryRef abbrevs = CFTimeZoneCopyAbbreviationDictionary();
@@ -1105,13 +1110,40 @@ BOOL __CFTimeZoneGetWin32SystemTime(SYSTEMTIME * sys_time, CFAbsoluteTime time)
      *  seconds between 1970 and 2001 : 978307200,
      *  FILETIME - number of 100-nanosecond intervals since January 1, 1601
      */
-    l=(time+11644473600+978307200)*10000000;
+    l=(time+11644473600LL+978307200)*10000000;
     if (FileTimeToSystemTime(ftime,sys_time))
         return TRUE;
     else
         return FALSE;
 }
 #endif
+
+CFTimeInterval _CFTimeZoneGetDSTOffset(CFTimeZoneRef tz, CFAbsoluteTime at) {
+#if !defined(__WIN32__)
+// #warning this does not work for non-CFTimeZoneRefs
+    CFIndex idx;
+    idx = __CFBSearchTZPeriods(tz, at);
+    // idx 0 is never returned if it is in DST
+    if (__CFTZPeriodIsDST(&(tz->_periods[idx]))) {
+	return __CFTZPeriodGMTOffset(&(tz->_periods[idx])) - __CFTZPeriodGMTOffset(&(tz->_periods[idx - 1]));
+    }
+#endif
+    return 0.0;
+}
+
+// returns 0.0 if there is no data for the next switch after 'at'
+CFAbsoluteTime _CFTimeZoneGetNextDSTSwitch(CFTimeZoneRef tz, CFAbsoluteTime at) {
+#if !defined(__WIN32__)
+// #warning this does not work for non-CFTimeZoneRefs
+    CFIndex idx;
+    idx = __CFBSearchTZPeriods(tz, at);
+    if (tz->_periodCnt <= idx + 1) {
+	return 0.0;
+    }
+    return (CFAbsoluteTime)__CFTZPeriodStartSeconds(&(tz->_periods[idx + 1]));
+#endif
+    return 0.0;
+}
 
 CFTimeInterval CFTimeZoneGetSecondsFromGMT(CFTimeZoneRef tz, CFAbsoluteTime at) {
 #if !defined(__WIN32__)
@@ -1281,189 +1313,149 @@ CFTimeInterval _CFTimeZoneGetDSTDelta(CFTimeZoneRef tz, CFAbsoluteTime at) {
     return 0.0;
 }
 
-static const unsigned char *__CFTimeZoneCompatibilityMapping =
-"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-" <!DOCTYPE plist SYSTEM \"file://localhost/System/Library/DTDs/PropertyList.dtd\">"
-" <plist version=\"1.0\">"
-" <dict>"
-
-// Empty string means delete/ignore these 
-"        <key>Factory</key>		<string></string>"
-"        <key>US/Pacific-New</key>	<string></string>"
-"        <key>Mideast/Riyadh87</key>	<string></string>"
-"        <key>Mideast/Riyadh88</key>	<string></string>"
-"        <key>Mideast/Riyadh89</key>	<string></string>"
-"        <key>SystemV/AST4</key>	<string></string>"
-"        <key>SystemV/AST4ADT</key>	<string></string>"
-"        <key>SystemV/CST6</key>	<string></string>"
-"        <key>SystemV/CST6CDT</key>	<string></string>"
-"        <key>SystemV/EST5</key>	<string></string>"
-"        <key>SystemV/EST5EDT</key>	<string></string>"
-"        <key>SystemV/HST10</key>	<string></string>"
-"        <key>SystemV/MST7</key>	<string></string>"
-"        <key>SystemV/MST7MDT</key>	<string></string>"
-"        <key>SystemV/PST8</key>	<string></string>"
-"        <key>SystemV/PST8PDT</key>	<string></string>"
-"        <key>SystemV/YST9</key>	<string></string>"
-"        <key>SystemV/YST9YDT</key>	<string></string>"
-
-"        <key>America/Atka</key>		<string>America/Adak</string>"
-"        <key>America/Ensenada</key>		<string>America/Tijuana</string>"
-"        <key>America/Fort_Wayne</key>		<string>America/Indianapolis</string>"
-"        <key>America/Indiana/Indianapolis</key> <string>America/Indianapolis</string>"
-"        <key>America/Kentucky/Louisville</key>	<string>America/Louisville</string>"
-"        <key>America/Knox_IN</key>		<string>America/Indiana/Knox</string>"
-"        <key>America/Porto_Acre</key>		<string>America/Rio_Branco</string>"
-"        <key>America/Rosario</key>		<string>America/Cordoba</string>"
-"        <key>America/Shiprock</key>		<string>America/Denver</string>"
-"        <key>America/Virgin</key>		<string>America/St_Thomas</string>"
-"        <key>Antarctica/South_Pole</key>	<string>Antarctica/McMurdo</string>"
-"        <key>Asia/Ashkhabad</key>		<string>Asia/Ashgabat</string>"
-"        <key>Asia/Chungking</key>		<string>Asia/Chongqing</string>"
-//"        <key>Asia/Dacca</key>			<string>Asia/Dhaka</string>"
-//"        <key>Asia/Istanbul</key>		<string>Europe/Istanbul</string>"
-"        <key>Asia/Macao</key>			<string>Asia/Macau</string>"
-"        <key>Asia/Tel_Aviv</key>		<string>Asia/Jerusalem</string>"
-"        <key>Asia/Thimbu</key>			<string>Asia/Thimphu</string>"
-"        <key>Asia/Ujung_Pandang</key>		<string>Asia/Makassar</string>"
-"        <key>Asia/Ulan_Bator</key>		<string>Asia/Ulaanbaatar</string>"
-"        <key>Australia/ACT</key>		<string>Australia/Sydney</string>"
-//"        <key>Australia/Canberra</key>		<string>Australia/Sydney</string>"
-"        <key>Australia/LHI</key>		<string>Australia/Lord_Howe</string>"
-"        <key>Australia/NSW</key>		<string>Australia/Sydney</string>"
-"        <key>Australia/North</key>		<string>Australia/Darwin</string>"
-"        <key>Australia/Queensland</key>	<string>Australia/Brisbane</string>"
-"        <key>Australia/South</key>		<string>Australia/Adelaide</string>"
-"        <key>Australia/Tasmania</key>		<string>Australia/Hobart</string>"
-"        <key>Australia/Victoria</key>		<string>Australia/Melbourne</string>"
-"        <key>Australia/West</key>		<string>Australia/Perth</string>"
-"        <key>Australia/Yancowinna</key>	<string>Australia/Broken_Hill</string>"
-"        <key>Brazil/Acre</key>			<string>America/Porto_Acre</string>"
-"        <key>Brazil/DeNoronha</key>		<string>America/Noronha</string>"
-//"        <key>Brazil/East</key>			<string>America/Sao_Paulo</string>"
-"        <key>Brazil/West</key>			<string>America/Manaus</string>"
-"        <key>CST6CDT</key>			<string>America/Chicago</string>"
-//"        <key>Canada/Atlantic</key>		<string>America/Halifax</string>"
-"        <key>Canada/Central</key>		<string>America/Winnipeg</string>"
-"        <key>Canada/East-Saskatchewan</key>	<string>America/Regina</string>"
-//"        <key>Canada/Eastern</key>		<string>America/Montreal</string>"
-//"        <key>Canada/Mountain</key>		<string>America/Edmonton</string>"
-//"        <key>Canada/Newfoundland</key>		<string>America/St_Johns</string>"
-"        <key>Canada/Pacific</key>		<string>America/Vancouver</string>"
-//"        <key>Canada/Saskatchewan</key>		<string>America/Regina</string>"
-"        <key>Canada/Yukon</key>		<string>America/Whitehorse</string>"
-"        <key>Chile/Continental</key>		<string>America/Santiago</string>"
-"        <key>Chile/EasterIsland</key>		<string>Pacific/Easter</string>"
-"        <key>Cuba</key>			<string>America/Havana</string>"
-"        <key>EST5EDT</key>			<string>America/New_York</string>"
-"        <key>Egypt</key>			<string>Africa/Cairo</string>"
-"        <key>Eire</key>			<string>Europe/Dublin</string>"
-"        <key>Etc/GMT+0</key>			<string>GMT</string>"
-"        <key>Etc/GMT-0</key>			<string>GMT</string>"
-"        <key>Etc/GMT0</key>			<string>GMT</string>"
-"        <key>Etc/Greenwich</key>		<string>GMT</string>"
-"        <key>Etc/Universal</key>		<string>UTC</string>"
-"        <key>Etc/Zulu</key>			<string>UTC</string>"
-"        <key>Europe/Nicosia</key>		<string>Asia/Nicosia</string>"
-"        <key>Europe/Tiraspol</key>		<string>Europe/Chisinau</string>"
-"        <key>GB-Eire</key>			<string>Europe/London</string>"
-"        <key>GB</key>				<string>Europe/London</string>"
-"        <key>GMT+0</key>			<string>GMT</string>"
-"        <key>GMT-0</key>			<string>GMT</string>"
-"        <key>GMT0</key>			<string>GMT</string>"
-"        <key>Greenwich</key>			<string>GMT</string>"
-"        <key>Hongkong</key>			<string>Asia/Hong_Kong</string>"
-"        <key>Iceland</key>			<string>Atlantic/Reykjavik</string>"
-"        <key>Iran</key>			<string>Asia/Tehran</string>"
-"        <key>Israel</key>			<string>Asia/Jerusalem</string>"
-"        <key>Jamaica</key>			<string>America/Jamaica</string>"
-//"        <key>Japan</key>			<string>Asia/Tokyo</string>"
-"        <key>Kwajalein</key>			<string>Pacific/Kwajalein</string>"
-"        <key>Libya</key>			<string>Africa/Tripoli</string>"
-"        <key>MST7MDT</key>			<string>America/Denver</string>"
-"        <key>Mexico/BajaNorte</key>		<string>America/Tijuana</string>"
-"        <key>Mexico/BajaSur</key>		<string>America/Mazatlan</string>"
-"        <key>Mexico/General</key>		<string>America/Mexico_City</string>"
-"        <key>NZ-CHAT</key>			<string>Pacific/Chatham</string>"
-"        <key>NZ</key>				<string>Pacific/Auckland</string>"
-"        <key>Navajo</key>			<string>America/Denver</string>"
-"        <key>PRC</key>				<string>Asia/Shanghai</string>"
-"        <key>PST8PDT</key>			<string>America/Los_Angeles</string>"
-"        <key>Pacific/Samoa</key>		<string>Pacific/Pago_Pago</string>"
-"        <key>Poland</key>			<string>Europe/Warsaw</string>"
-"        <key>Portugal</key>			<string>Europe/Lisbon</string>"
-"        <key>ROC</key>				<string>Asia/Taipei</string>"
-"        <key>ROK</key>				<string>Asia/Seoul</string>"
-"        <key>Singapore</key>			<string>Asia/Singapore</string>"
-"        <key>Turkey</key>			<string>Europe/Istanbul</string>"
-"        <key>UCT</key>				<string>UTC</string>"
-"        <key>US/Alaska</key>			<string>America/Anchorage</string>"
-"        <key>US/Aleutian</key>			<string>America/Adak</string>"
-"        <key>US/Arizona</key>			<string>America/Phoenix</string>"
-//"        <key>US/Central</key>			<string>America/Chicago</string>"
-"        <key>US/East-Indiana</key>		<string>America/Indianapolis</string>"
-//"        <key>US/Eastern</key>			<string>America/New_York</string>"
-"        <key>US/Hawaii</key>			<string>Pacific/Honolulu</string>"
-"        <key>US/Indiana-Starke</key>		<string>America/Indiana/Knox</string>"
-"        <key>US/Michigan</key>			<string>America/Detroit</string>"
-//"        <key>US/Mountain</key>			<string>America/Denver</string>"
-//"        <key>US/Pacific</key>			<string>America/Los_Angeles</string>"
-"        <key>US/Samoa</key>			<string>Pacific/Pago_Pago</string>"
-"        <key>Universal</key>			<string>UTC</string>"
-"        <key>W-SU</key>			<string>Europe/Moscow</string>"
-"        <key>Zulu</key>			<string>UTC</string>"
-" </dict>"
-" </plist>";
-
 static CFDictionaryRef __CFTimeZoneCopyCompatibilityDictionary(void) {
     CFDictionaryRef dict;
     __CFTimeZoneLockCompatibilityMapping();
     if (NULL == __CFTimeZoneCompatibilityMappingDict) {
-	CFDataRef data = CFDataCreate(kCFAllocatorDefault, __CFTimeZoneCompatibilityMapping, strlen(__CFTimeZoneCompatibilityMapping));
-	__CFTimeZoneCompatibilityMappingDict = CFPropertyListCreateFromXMLData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL);
-	CFRelease(data);
-    }
-    if (NULL == __CFTimeZoneCompatibilityMappingDict) {
-	__CFTimeZoneCompatibilityMappingDict = CFDictionaryCreate(kCFAllocatorDefault, NULL, NULL, 0, NULL, NULL);
+	__CFTimeZoneCompatibilityMappingDict = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 112, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	
+	// Empty string means delete/ignore these 
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Factory"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Pacific-New"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mideast/Riyadh87"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mideast/Riyadh88"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mideast/Riyadh89"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/AST4"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/AST4ADT"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/CST6"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/CST6CDT"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/EST5"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/EST5EDT"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/HST10"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/MST7"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/MST7MDT"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/PST8"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/PST8PDT"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/YST9"), CFSTR(""));
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("SystemV/YST9YDT"), CFSTR(""));
+
+	CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Atka"), CFSTR("America/Adak"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Ensenada"), CFSTR("America/Tijuana"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Fort_Wayne"), CFSTR("America/Indianapolis"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Indiana/Indianapolis"), CFSTR("America/Indianapolis"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Kentucky/Louisville"), CFSTR("America/Louisville"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Knox_IN"), CFSTR("America/Indiana/Knox"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Porto_Acre"), CFSTR("America/Rio_Branco"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Rosario"), CFSTR("America/Cordoba"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Shiprock"), CFSTR("America/Denver"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("America/Virgin"), CFSTR("America/St_Thomas"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Antarctica/South_Pole"), CFSTR("Antarctica/McMurdo"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Ashkhabad"), CFSTR("Asia/Ashgabat"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Chungking"), CFSTR("Asia/Chongqing"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Macao"), CFSTR("Asia/Macau"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Tel_Aviv"), CFSTR("Asia/Jerusalem"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Thimbu"), CFSTR("Asia/Thimphu"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Ujung_Pandang"), CFSTR("Asia/Makassar"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Asia/Ulan_Bator"), CFSTR("Asia/Ulaanbaatar"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/ACT"), CFSTR("Australia/Sydney"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/LHI"), CFSTR("Australia/Lord_Howe"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/NSW"), CFSTR("Australia/Sydney"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/North"), CFSTR("Australia/Darwin"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/Queensland"), CFSTR("Australia/Brisbane"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/South"), CFSTR("Australia/Adelaide"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/Tasmania"), CFSTR("Australia/Hobart"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/Victoria"), CFSTR("Australia/Melbourne"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/West"), CFSTR("Australia/Perth"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Australia/Yancowinna"), CFSTR("Australia/Broken_Hill"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Brazil/Acre"), CFSTR("America/Porto_Acre"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Brazil/DeNoronha"), CFSTR("America/Noronha"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Brazil/West"), CFSTR("America/Manaus"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("CST6CDT"), CFSTR("America/Chicago"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Canada/Central"), CFSTR("America/Winnipeg"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Canada/East-Saskatchewan"), CFSTR("America/Regina"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Canada/Pacific"), CFSTR("America/Vancouver"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Canada/Yukon"), CFSTR("America/Whitehorse"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Chile/Continental"), CFSTR("America/Santiago"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Chile/EasterIsland"), CFSTR("Pacific/Easter"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Cuba"), CFSTR("America/Havana"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("EST5EDT"), CFSTR("America/New_York"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Egypt"), CFSTR("Africa/Cairo"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Eire"), CFSTR("Europe/Dublin"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/GMT+0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/GMT-0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/GMT0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/Greenwich"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/Universal"), CFSTR("UTC"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Etc/Zulu"), CFSTR("UTC"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Europe/Nicosia"), CFSTR("Asia/Nicosia"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Europe/Tiraspol"), CFSTR("Europe/Chisinau"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("GB-Eire"), CFSTR("Europe/London"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("GB"), CFSTR("Europe/London"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("GMT+0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("GMT-0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("GMT0"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Greenwich"), CFSTR("GMT"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Hongkong"), CFSTR("Asia/Hong_Kong"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Iceland"), CFSTR("Atlantic/Reykjavik"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Iran"), CFSTR("Asia/Tehran"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Israel"), CFSTR("Asia/Jerusalem"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Jamaica"), CFSTR("America/Jamaica"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Kwajalein"), CFSTR("Pacific/Kwajalein"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Libya"), CFSTR("Africa/Tripoli"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("MST7MDT"), CFSTR("America/Denver"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mexico/BajaNorte"), CFSTR("America/Tijuana"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mexico/BajaSur"), CFSTR("America/Mazatlan"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Mexico/General"), CFSTR("America/Mexico_City"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("NZ-CHAT"), CFSTR("Pacific/Chatham"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("NZ"), CFSTR("Pacific/Auckland"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Navajo"), CFSTR("America/Denver"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("PRC"), CFSTR("Asia/Shanghai"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("PST8PDT"), CFSTR("America/Los_Angeles"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Pacific/Samoa"), CFSTR("Pacific/Pago_Pago"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Poland"), CFSTR("Europe/Warsaw"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Portugal"), CFSTR("Europe/Lisbon"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("ROC"), CFSTR("Asia/Taipei"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("ROK"), CFSTR("Asia/Seoul"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Singapore"), CFSTR("Asia/Singapore"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Turkey"), CFSTR("Europe/Istanbul"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("UCT"), CFSTR("UTC"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Alaska"), CFSTR("America/Anchorage"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Aleutian"), CFSTR("America/Adak"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Arizona"), CFSTR("America/Phoenix"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/East-Indiana"), CFSTR("America/Indianapolis"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Hawaii"), CFSTR("Pacific/Honolulu"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Indiana-Starke"), CFSTR("America/Indiana/Knox"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Michigan"), CFSTR("America/Detroit"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("US/Samoa"), CFSTR("Pacific/Pago_Pago"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Universal"), CFSTR("UTC"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("W-SU"), CFSTR("Europe/Moscow"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict, CFSTR("Zulu"), CFSTR("UTC"));
     }
     dict = __CFTimeZoneCompatibilityMappingDict ? CFRetain(__CFTimeZoneCompatibilityMappingDict) : NULL;
     __CFTimeZoneUnlockCompatibilityMapping();
     return dict;
 }
 
-static const unsigned char *__CFTimeZoneCompatibilityMapping2 =
-"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-" <!DOCTYPE plist SYSTEM \"file://localhost/System/Library/DTDs/PropertyList.dtd\">"
-" <plist version=\"1.0\">"
-" <dict>"
-"        <key>Asia/Dacca</key>			<string>Asia/Dhaka</string>"
-"        <key>Asia/Istanbul</key>		<string>Europe/Istanbul</string>"
-"        <key>Australia/Canberra</key>		<string>Australia/Sydney</string>"
-"        <key>Brazil/East</key>			<string>America/Sao_Paulo</string>"
-"        <key>Canada/Atlantic</key>		<string>America/Halifax</string>"
-"        <key>Canada/Eastern</key>		<string>America/Montreal</string>"
-"        <key>Canada/Mountain</key>		<string>America/Edmonton</string>"
-"        <key>Canada/Newfoundland</key>		<string>America/St_Johns</string>"
-"        <key>Canada/Saskatchewan</key>		<string>America/Regina</string>"
-"        <key>Japan</key>			<string>Asia/Tokyo</string>"
-"        <key>US/Central</key>			<string>America/Chicago</string>"
-"        <key>US/Eastern</key>			<string>America/New_York</string>"
-"        <key>US/Mountain</key>			<string>America/Denver</string>"
-"        <key>US/Pacific</key>			<string>America/Los_Angeles</string>"
-" </dict>"
-" </plist>";
-
 __private_extern__ CFDictionaryRef __CFTimeZoneCopyCompatibilityDictionary2(void) {
     CFDictionaryRef dict;
     __CFTimeZoneLockCompatibilityMapping();
     if (NULL == __CFTimeZoneCompatibilityMappingDict2) {
-	CFDataRef data = CFDataCreate(kCFAllocatorDefault, __CFTimeZoneCompatibilityMapping2, strlen(__CFTimeZoneCompatibilityMapping2));
-	__CFTimeZoneCompatibilityMappingDict2 = CFPropertyListCreateFromXMLData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL);
-	CFRelease(data);
-    }
-    if (NULL == __CFTimeZoneCompatibilityMappingDict2) {
-	__CFTimeZoneCompatibilityMappingDict2 = CFDictionaryCreate(kCFAllocatorDefault, NULL, NULL, 0, NULL, NULL);
-    }
+	__CFTimeZoneCompatibilityMappingDict2 = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 16, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Asia/Dacca"), CFSTR("Asia/Dhaka"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Asia/Istanbul"), CFSTR("Europe/Istanbul"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Australia/Canberra"), CFSTR("Australia/Sydney"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Brazil/East"), CFSTR("America/Sao_Paulo"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Canada/Atlantic"), CFSTR("America/Halifax"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Canada/Eastern"), CFSTR("America/Montreal"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Canada/Mountain"), CFSTR("America/Edmonton"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Canada/Newfoundland"), CFSTR("America/St_Johns"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Canada/Saskatchewan"), CFSTR("America/Regina"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("Japan"), CFSTR("Asia/Tokyo"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("US/Central"), CFSTR("America/Chicago"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("US/Eastern"), CFSTR("America/New_York"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("US/Mountain"), CFSTR("America/Denver"));
+        CFDictionaryAddValue(__CFTimeZoneCompatibilityMappingDict2, CFSTR("US/Pacific"), CFSTR("America/Los_Angeles"));
+   }
     dict = __CFTimeZoneCompatibilityMappingDict2 ? CFRetain(__CFTimeZoneCompatibilityMappingDict2) : NULL;
     __CFTimeZoneUnlockCompatibilityMapping();
     return dict;

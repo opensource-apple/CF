@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,6 +26,7 @@
 */
 
 #include <CoreFoundation/CFCharacterSet.h>
+#include <CoreFoundation/CFURLAccess.h>
 #include <string.h>
 #include "CFStringEncodingConverter.h"
 #include "CFUniChar.h"
@@ -139,6 +138,12 @@ CF_INLINE void _fillStringWithCharacters(CFMutableStringRef string, UniChar *cha
 }
 
 __private_extern__ Boolean _openInputStream(_CFXMLInputStream *stream) {
+    if (NULL == stream->data && NULL != stream->url) {
+	CFDataRef data = NULL;
+	if (CFURLCreateDataAndPropertiesFromResource(stream->allocator, stream->url, &data, NULL, NULL, NULL)) {
+	    stream->data = data;
+	}
+    }
     if (NULL == stream->data) {
         return false;
     } else {

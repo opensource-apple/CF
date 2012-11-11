@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFCharacterSetPriv.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFCHARACTERSET_PRIV__)
@@ -86,7 +84,6 @@ CF_EXPORT CFCharacterSetKeyedCodingType _CFCharacterSetGetKeyedCodingType(CFChar
 CF_EXPORT CFCharacterSetPredefinedSet _CFCharacterSetGetKeyedCodingBuiltinType(CFCharacterSetRef cset);
 CF_EXPORT CFRange _CFCharacterSetGetKeyedCodingRange(CFCharacterSetRef cset);
 CF_EXPORT CFStringRef _CFCharacterSetCreateKeyedCodingString(CFCharacterSetRef cset);
-CF_EXPORT bool _CFCharacterSetIsMutable(CFCharacterSetRef cset);
 CF_EXPORT bool _CFCharacterSetIsInverted(CFCharacterSetRef cset);
 CF_EXPORT void _CFCharacterSetSetIsInverted(CFCharacterSetRef cset, bool flag);
 

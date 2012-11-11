@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -37,6 +35,7 @@
 #include "CFPriv.h"
 #include <CoreFoundation/CFByteOrder.h>
 #include "CFBundle_BinaryTypes.h"
+#include <ctype.h>
 
 #if defined(BINARY_SUPPORT_DYLD)
 // Import the mach-o headers that define the macho magic numbers
@@ -49,7 +48,6 @@
 
 #include <unistd.h>
 #include <fcntl.h>
-#include <ctype.h>
 #include <sys/mman.h>
 
 #endif /* BINARY_SUPPORT_DYLD */
@@ -68,9 +66,16 @@
 #endif
 
 #if defined(__WIN32__)
+#if !defined(__MINGW32__) && !defined(__CYGWIN__)
+// With the MS headers, turning off Standard-C gets you macros for stat vs_stat.
+// Strictly speaking, this is supposed to control traditional vs ANSI C features.
 #undef __STDC__
+#endif
 #include <fcntl.h>
 #include <io.h>
+#if !defined(__MINGW32__) && !defined(__CYGWIN__)
+#define __STDC__
+#endif
 #endif
 
 // Public CFBundle Info plist keys
@@ -154,8 +159,8 @@ struct __CFBundle {
     void *_connectionCookie;
 
     /* DYLD goop */
-    void *_imageCookie;
-    void *_moduleCookie;
+    const void *_imageCookie;
+    const void *_moduleCookie;
 
     /* CFM<->DYLD glue */
     CFMutableDictionaryRef _glueDict;
@@ -191,12 +196,12 @@ static CFStringRef _defaultLocalization = NULL;
 static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL, Boolean alreadyLocked, Boolean doFinalProcessing);
 static CFStringRef _CFBundleCopyExecutableName(CFAllocatorRef alloc, CFBundleRef bundle, CFURLRef url, CFDictionaryRef infoDict);
 static CFURLRef _CFBundleCopyExecutableURLIgnoringCache(CFBundleRef bundle);
-static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath);
-static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths);
 static void _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(CFStringRef hint);
 static void _CFBundleEnsureAllBundlesUpToDateAlreadyLocked(void);
 static void _CFBundleCheckWorkarounds(CFBundleRef bundle);
 #if defined(BINARY_SUPPORT_DYLD)
+static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath);
+static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths);
 static CFDictionaryRef _CFBundleGrokInfoDictFromMainExecutable(void);
 static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p);
 static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFStringRef symbolName, Boolean globalSearch);
@@ -477,6 +482,27 @@ CFBundleRef _CFBundleCreateWithExecutableURLIfLooksLikeBundle(CFAllocatorRef all
     return bundle;
 }
 
+CFURLRef _CFBundleCopyMainBundleExecutableURL(Boolean *looksLikeBundle) {
+    // This function is for internal use only; _mainBundle is deliberately accessed outside of the lock to get around a reentrancy issue
+    const char *processPath;
+    CFStringRef str = NULL;
+    CFURLRef executableURL = NULL;
+    processPath = _CFProcessPath();
+    if (processPath) {
+        str = CFStringCreateWithCString(NULL, processPath, CFStringFileSystemEncoding());
+        if (str) {
+            executableURL = CFURLCreateWithFileSystemPath(NULL, str, PLATFORM_PATH_STYLE, false);
+            CFRelease(str);
+        }
+    }
+    if (looksLikeBundle) {
+        CFBundleRef mainBundle = _mainBundle;
+        if (mainBundle && (3 == mainBundle->_version || 4 == mainBundle->_version)) mainBundle = NULL;
+        *looksLikeBundle = (mainBundle ? YES : NO);
+    }
+    return executableURL;
+}
+
 static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
     if (!_initedMainBundle) {
         const char *processPath;
@@ -549,6 +575,18 @@ static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
                     if (_mainBundle->_binaryType == __CFBundleCFMBinary || _mainBundle->_binaryType == __CFBundleUnreadableBinary) {
                         // if type 0 bundle and CFM binary and no Info.plist, treat as unbundled, since this also gives too many false positives
                         if (_mainBundle->_version == 0) _mainBundle->_version = 4;
+                        if (_mainBundle->_version != 4) {
+                            // if CFM binary and no Info.plist and not main executable for bundle, treat as unbundled, since this also gives too many false positives
+                            // except for Macromedia Director MX, which is unbundled but wants to be treated as bundled
+                            CFStringRef executableName = _CFBundleCopyExecutableName(NULL, _mainBundle, NULL, NULL);
+                            Boolean treatAsBundled = false;
+                            if (str) {
+                                CFIndex strLength = CFStringGetLength(str);
+                                if (strLength > 10) treatAsBundled = CFStringFindWithOptions(str, CFSTR(" MX"), CFRangeMake(strLength - 10, 10), 0, NULL);
+                            }
+                            if (!treatAsBundled && (!executableName || !CFStringHasSuffix(str, executableName))) _mainBundle->_version = 4;
+                            if (executableName) CFRelease(executableName);
+                        }
                         if (_mainBundle->_infoDict != NULL) CFRelease(_mainBundle->_infoDict);
                         _mainBundle->_infoDict = _CFBundleCopyInfoDictionaryInResourceForkWithAllocator(CFGetAllocator(_mainBundle), executableURL);
                         if (_mainBundle->_binaryType == __CFBundleUnreadableBinary && _mainBundle->_infoDict != NULL && CFDictionaryGetValue(_mainBundle->_infoDict, kCFBundleDevelopmentRegionKey) != NULL) versRegionOverrides = true;
@@ -579,8 +617,12 @@ static CFBundleRef _CFBundleGetMainBundleAlreadyLocked(void) {
 #endif /* BINARY_SUPPORT_CFM */
                 // Perform delayed final processing steps.
                 // This must be done after _isLoaded has been set, for security reasons (3624341).
-               _CFBundleCheckWorkarounds(_mainBundle);
-               _CFBundleInitPlugIn(_mainBundle);
+                _CFBundleCheckWorkarounds(_mainBundle);
+                if (_CFBundleNeedsInitPlugIn(_mainBundle)) {
+                    __CFSpinUnlock(&CFBundleGlobalDataLock);
+                    _CFBundleInitPlugIn(_mainBundle);
+                    __CFSpinLock(&CFBundleGlobalDataLock);
+                }
             }
         }
         if (bundleURL) CFRelease(bundleURL);
@@ -724,6 +766,7 @@ static void __CFBundleDeallocate(CFTypeRef cf) {
     _CFBundleRemoveFromTables(bundle);
 
     if (bundle->_url != NULL) {
+        _CFBundleFlushCachesForURL(bundle->_url);
         CFRelease(bundle->_url);
     }
     if (bundle->_infoDict != NULL) {
@@ -836,6 +879,7 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
     bundle->_sharesStringsFiles = false;
     
     /* ??? For testing purposes? Or for good? */
+#warning Ali or Doug: Decide how to finalize strings sharing
     if (!getenv("CFBundleDisableStringsSharing") && 
         (strncmp(buff, "/System/Library/Frameworks", 26) == 0) && 
         (strncmp(buff + strlen(buff) - 10, ".framework", 10) == 0)) bundle->_sharesStringsFiles = true;
@@ -866,9 +910,13 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
 
     if (doFinalProcessing) {
         _CFBundleCheckWorkarounds(bundle);
-        _CFBundleInitPlugIn(bundle);
+        if (_CFBundleNeedsInitPlugIn(bundle)) {
+            if (alreadyLocked) __CFSpinUnlock(&CFBundleGlobalDataLock);
+            _CFBundleInitPlugIn(bundle);
+            if (alreadyLocked) __CFSpinLock(&CFBundleGlobalDataLock);
+        }
     }
-
+    
     return bundle;
 }
 
@@ -908,7 +956,7 @@ void _CFBundleSetDefaultLocalization(CFStringRef localizationName) {
     _defaultLocalization = newLocalization;
 }
 
-__private_extern__ CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle) {
+CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle) {
     if (bundle->_searchLanguages == NULL) {
         CFMutableArrayRef langs = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
         CFStringRef devLang = CFBundleGetDevelopmentRegion(bundle);
@@ -985,6 +1033,10 @@ CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
                 bundle->_localInfoDict = CFPropertyListCreateFromXMLData(CFGetAllocator(bundle), data, kCFPropertyListImmutable, &errStr);
                 if (errStr) {
                     CFRelease(errStr);
+                }
+                if (bundle->_localInfoDict && CFDictionaryGetTypeID() != CFGetTypeID(bundle->_localInfoDict)) {
+                    CFRelease(bundle->_localInfoDict);
+                    bundle->_localInfoDict = NULL;
                 }
                 CFRelease(data);
             }
@@ -1463,7 +1515,6 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectoryWithAllocator(CFAllocatorRe
     CFDictionaryRef infoDict = NULL;
     CFStringRef executablePath = NULL;
     CFURLRef executableURL = NULL;
-    Boolean isDir = false;
     Boolean foundIt = false;
     Boolean lookupMainExe = ((executableName == NULL) ? true : false);
     
@@ -1584,12 +1635,42 @@ CFURLRef CFBundleCopyAuxiliaryExecutableURL(CFBundleRef bundle, CFStringRef exec
 
 Boolean CFBundleIsExecutableLoaded(CFBundleRef bundle) {return bundle->_isLoaded;}
 
+CFBundleExecutableType CFBundleGetExecutableType(CFBundleRef bundle) {
+    CFBundleExecutableType result = kCFBundleOtherExecutableType;
+    CFURLRef executableURL = CFBundleCopyExecutableURL(bundle);
+
+    if (!executableURL) bundle->_binaryType = __CFBundleNoBinary;
+#if defined(BINARY_SUPPORT_DYLD)
+    if (bundle->_binaryType == __CFBundleUnknownBinary) {
+        bundle->_binaryType = _CFBundleGrokBinaryType(executableURL);
+#if defined(BINARY_SUPPORT_CFM)
+        if (bundle->_binaryType != __CFBundleCFMBinary && bundle->_binaryType != __CFBundleUnreadableBinary) {
+            bundle->_resourceData._executableLacksResourceFork = true;
+        }
+#endif /* BINARY_SUPPORT_CFM */
+    }
+#endif /* BINARY_SUPPORT_DYLD */
+    if (executableURL) CFRelease(executableURL);
+
+    if (bundle->_binaryType == __CFBundleCFMBinary) {
+        result = kCFBundlePEFExecutableType;
+    } else if (bundle->_binaryType == __CFBundleDYLDExecutableBinary || bundle->_binaryType == __CFBundleDYLDBundleBinary || bundle->_binaryType == __CFBundleDYLDFrameworkBinary) {
+        result = kCFBundleMachOExecutableType;
+    } else if (bundle->_binaryType == __CFBundleDLLBinary) {
+        result = kCFBundleDLLExecutableType;
+    } else if (bundle->_binaryType == __CFBundleELFBinary) {
+        result = kCFBundleELFExecutableType;    
+    }
+    return result;
+}
+
 #define UNKNOWN_FILETYPE 0x0
 #define PEF_FILETYPE 0x1000
 #define XLS_FILETYPE 0x10001
 #define DOC_FILETYPE 0x10002
 #define PPT_FILETYPE 0x10003
 #define XLS_NAME "Workbook"
+#define XLS_NAME2 "Book"
 #define DOC_NAME "WordDocument"
 #define PPT_NAME "PowerPoint Document"
 #define PEF_MAGIC 0x4a6f7921
@@ -1599,30 +1680,35 @@ Boolean CFBundleIsExecutableLoaded(CFBundleRef bundle) {return bundle->_isLoaded
 #define LIB_X11 "/usr/X11R6/lib/libX"
 
 static const uint32_t __CFBundleMagicNumbersArray[] = {
-    0xcafebabe, 0xbebafeca, 0xfeedface, 0xcefaedfe, 0x4a6f7921, 0x21796f4a, 0xffd8ffe0, 0x4d4d002a, 
-    0x49492a00, 0x47494638, 0x89504e47, 0x69636e73, 0x00000100, 0x7b5c7274, 0x25504446, 0x2e7261fd, 
-    0x2e736e64, 0x2e736400, 0x464f524d, 0x52494646, 0x38425053, 0x000001b3, 0x000001ba, 0x4d546864, 
-    0x504b0304, 0x53495421, 0x53495432, 0x53495435, 0x53495444, 0x53747566, 0x3c212d2d, 0x25215053, 
-    0xd0cf11e0, 0x62656769, 0x6b6f6c79, 0x3026b275, 0x0000000c
+    0xcafebabe, 0xbebafeca, 0xfeedface, 0xcefaedfe, 0x4a6f7921, 0x21796f4a, 0x7f454c46, 0xffd8ffe0,
+    0x4d4d002a, 0x49492a00, 0x47494638, 0x89504e47, 0x69636e73, 0x00000100, 0x7b5c7274, 0x25504446,
+    0x2e7261fd, 0x2e524d46, 0x2e736e64, 0x2e736400, 0x464f524d, 0x52494646, 0x38425053, 0x000001b3,
+    0x000001ba, 0x4d546864, 0x504b0304, 0x53495421, 0x53495432, 0x53495435, 0x53495444, 0x53747566,
+    0x30373037, 0x3c212d2d, 0x25215053, 0xd0cf11e0, 0x62656769, 0x6b6f6c79, 0x3026b275, 0x0000000c,
+    0xfe370023, 0x09020600, 0x09040600, 0x4f676753, 0x664c6143, 0x00010000, 0x74727565, 0x4f54544f,
+    0x41433130, 0xc809fe02, 0x0809fe02, 0x2356524d, 0x67696d70, 0x3c435058, 0x28445746, 0x424f4d53
 };
 
 // string, with groups of 5 characters being 1 element in the array
 static const char * __CFBundleExtensionsArray =
-    "mach\0"  "mach\0"  "mach\0"  "mach\0"  "pef\0\0" "pef\0\0" "jpeg\0"  "tiff\0"
-    "tiff\0"  "gif\0\0" "png\0\0" "icns\0"  "ico\0\0" "rtf\0\0" "pdf\0\0" "ra\0\0\0"
-    "au\0\0\0""au\0\0\0""iff\0\0" "riff\0"  "psd\0\0" "mpeg\0"  "mpeg\0"  "mid\0\0"
-    "zip\0\0" "sit\0\0" "sit\0\0" "sit\0\0" "sit\0\0" "sit\0\0" "html\0"  "ps\0\0\0"
-    "ole\0\0" "uu\0\0\0""dmg\0\0" "wmv\0\0" "jp2\0\0";
+    "mach\0"  "mach\0"  "mach\0"  "mach\0"  "pef\0\0" "pef\0\0" "elf\0\0" "jpeg\0"
+    "tiff\0"  "tiff\0"  "gif\0\0" "png\0\0" "icns\0"  "ico\0\0" "rtf\0\0" "pdf\0\0"
+    "ra\0\0\0""rm\0\0\0""au\0\0\0""au\0\0\0""iff\0\0" "riff\0"  "psd\0\0" "mpeg\0"
+    "mpeg\0"  "mid\0\0" "zip\0\0" "sit\0\0" "sit\0\0" "sit\0\0" "sit\0\0" "sit\0\0"
+    "cpio\0"  "html\0"  "ps\0\0\0""ole\0\0" "uu\0\0\0""dmg\0\0" "wmv\0\0" "jp2\0\0"
+    "doc\0\0" "xls\0\0" "xls\0\0" "ogg\0\0" "flac\0"  "ttf\0\0" "ttf\0\0" "otf\0\0"
+    "dwg\0\0" "dgn\0\0" "dgn\0\0" "wrl\0\0" "xcf\0\0" "cpx\0\0" "dwf\0\0" "bom\0\0";
 
-#define NUM_EXTENSIONS		37
+#define NUM_EXTENSIONS		56
 #define EXTENSION_LENGTH	5
 #define MAGIC_BYTES_TO_READ	512
 
 #if defined(BINARY_SUPPORT_DYLD)
 
 CF_INLINE uint32_t _CFBundleSwapInt32Conditional(uint32_t arg, Boolean swap) {return swap ? CFSwapInt32(arg) : arg;}
+CF_INLINE uint32_t _CFBundleSwapInt64Conditional(uint64_t arg, Boolean swap) {return swap ? CFSwapInt64(arg) : arg;}
 
-static CFDictionaryRef _CFBundleGrokInfoDictFromData(char *bytes, unsigned long length) {
+static CFDictionaryRef _CFBundleGrokInfoDictFromData(const char *bytes, uint32_t length) {
     CFMutableDictionaryRef result = NULL;
     CFDataRef infoData = NULL;
     if (NULL != bytes && 0 < length) {
@@ -1651,70 +1737,132 @@ static CFDictionaryRef _CFBundleGrokInfoDictFromMainExecutable() {
     return _CFBundleGrokInfoDictFromData(bytes, length);
 }
 
-static CFDictionaryRef _CFBundleGrokInfoDictFromFile(int fd, unsigned long offset, Boolean swapped) {
+static CFDictionaryRef _CFBundleGrokInfoDictFromFile(int fd, const void *bytes, CFIndex length, uint32_t offset, Boolean swapped, Boolean sixtyFour) {
     struct stat statBuf;
-    char *maploc;
+    off_t fileLength = 0;
+    char *maploc = NULL;
+    const char *loc;
     unsigned i, j;
     CFDictionaryRef result = NULL;
     Boolean foundit = false;
-    if (fstat(fd, &statBuf) == 0 && (maploc = mmap(0, statBuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) != (void *)-1) {
-        unsigned long ncmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(maploc + offset))->ncmds, swapped);
-        unsigned long sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(maploc + offset))->sizeofcmds, swapped);
-        char *startofcmds = maploc + offset + sizeof(struct mach_header);
-        char *endofcmds = startofcmds + sizeofcmds;
-        struct segment_command *sgp = (struct segment_command *)startofcmds;
-        if (endofcmds > maploc + statBuf.st_size) endofcmds = maploc + statBuf.st_size;
-        for (i = 0; !foundit && i < ncmds && startofcmds <= (char *)sgp && (char *)sgp < endofcmds; i++) {
-            if (LC_SEGMENT == _CFBundleSwapInt32Conditional(sgp->cmd, swapped)) {
-                struct section *sp = (struct section *)((char *)sgp + sizeof(struct segment_command));
-                unsigned long nsects = _CFBundleSwapInt32Conditional(sgp->nsects, swapped);
-                for (j = 0; !foundit && j < nsects && startofcmds <= (char *)sp && (char *)sp < endofcmds; j++) {
-                    if (0 == strncmp(sp->sectname, PLIST_SECTION, sizeof(sp->sectname)) && 0 == strncmp(sp->segname, PLIST_SEGMENT, sizeof(sp->segname))) {
-                        unsigned long length = _CFBundleSwapInt32Conditional(sp->size, swapped);
-                        unsigned long sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
-                        char *bytes = maploc + offset + sectoffset;
-                        if (maploc <= bytes && bytes + length <= maploc + statBuf.st_size) result = _CFBundleGrokInfoDictFromData(bytes, length);
-                        foundit = true;
-                    }
-                    sp = (struct section *)((char *)sp + sizeof(struct section));
-                }
-            }
-            sgp = (struct segment_command *)((char *)sgp + _CFBundleSwapInt32Conditional(sgp->cmdsize, swapped));
-        }
-        munmap(maploc, statBuf.st_size);
+    if (fd >= 0 && fstat(fd, &statBuf) == 0 && (maploc = mmap(0, statBuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) != (void *)-1) {
+        loc = maploc;
+        fileLength = statBuf.st_size;
+    } else {
+        loc = bytes;
+        fileLength = length;
     }
+    if (fileLength > offset + sizeof(struct mach_header_64)) {
+        if (sixtyFour) {
+            uint32_t ncmds = _CFBundleSwapInt32Conditional(((struct mach_header_64 *)(loc + offset))->ncmds, swapped);
+            uint32_t sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header_64 *)(loc + offset))->sizeofcmds, swapped);
+            const char *startofcmds = loc + offset + sizeof(struct mach_header_64);
+            const char *endofcmds = startofcmds + sizeofcmds;
+            struct segment_command_64 *sgp = (struct segment_command_64 *)startofcmds;
+            if (endofcmds > loc + fileLength) endofcmds = loc + fileLength;
+            for (i = 0; !foundit && i < ncmds && startofcmds <= (char *)sgp && (char *)sgp < endofcmds; i++) {
+                if (LC_SEGMENT == _CFBundleSwapInt32Conditional(sgp->cmd, swapped)) {
+                    struct section_64 *sp = (struct section_64 *)((char *)sgp + sizeof(struct segment_command_64));
+                    uint32_t nsects = _CFBundleSwapInt32Conditional(sgp->nsects, swapped);
+                    for (j = 0; !foundit && j < nsects && startofcmds <= (char *)sp && (char *)sp < endofcmds; j++) {
+                        if (0 == strncmp(sp->sectname, PLIST_SECTION, sizeof(sp->sectname)) && 0 == strncmp(sp->segname, PLIST_SEGMENT, sizeof(sp->segname))) {
+                            uint64_t sectlength64 = _CFBundleSwapInt64Conditional(sp->size, swapped);
+                            uint32_t sectlength = (uint32_t)(sectlength64 & 0xffffffff);
+                            uint32_t sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
+                            const char *sectbytes = loc + offset + sectoffset;
+                            // we don't support huge-sized plists
+                            if (sectlength64 <= 0xffffffff && loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = _CFBundleGrokInfoDictFromData(sectbytes, sectlength);
+                            foundit = true;
+                        }
+                        sp = (struct section_64 *)((char *)sp + sizeof(struct section_64));
+                    }
+                }
+                sgp = (struct segment_command_64 *)((char *)sgp + _CFBundleSwapInt32Conditional(sgp->cmdsize, swapped));
+            }
+        } else {
+            uint32_t ncmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(loc + offset))->ncmds, swapped);
+            uint32_t sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(loc + offset))->sizeofcmds, swapped);
+            const char *startofcmds = loc + offset + sizeof(struct mach_header);
+            const char *endofcmds = startofcmds + sizeofcmds;
+            struct segment_command *sgp = (struct segment_command *)startofcmds;
+            if (endofcmds > loc + fileLength) endofcmds = loc + fileLength;
+            for (i = 0; !foundit && i < ncmds && startofcmds <= (char *)sgp && (char *)sgp < endofcmds; i++) {
+                if (LC_SEGMENT == _CFBundleSwapInt32Conditional(sgp->cmd, swapped)) {
+                    struct section *sp = (struct section *)((char *)sgp + sizeof(struct segment_command));
+                    uint32_t nsects = _CFBundleSwapInt32Conditional(sgp->nsects, swapped);
+                    for (j = 0; !foundit && j < nsects && startofcmds <= (char *)sp && (char *)sp < endofcmds; j++) {
+                        if (0 == strncmp(sp->sectname, PLIST_SECTION, sizeof(sp->sectname)) && 0 == strncmp(sp->segname, PLIST_SEGMENT, sizeof(sp->segname))) {
+                            uint32_t sectlength = _CFBundleSwapInt32Conditional(sp->size, swapped);
+                            uint32_t sectoffset = _CFBundleSwapInt32Conditional(sp->offset, swapped);
+                            const char *sectbytes = loc + offset + sectoffset;
+                            if (loc <= sectbytes && sectbytes + sectlength <= loc + fileLength) result = _CFBundleGrokInfoDictFromData(sectbytes, sectlength);
+                            foundit = true;
+                        }
+                        sp = (struct section *)((char *)sp + sizeof(struct section));
+                    }
+                }
+                sgp = (struct segment_command *)((char *)sgp + _CFBundleSwapInt32Conditional(sgp->cmdsize, swapped));
+            }
+        }
+    }
+    if (maploc) munmap(maploc, statBuf.st_size);
     return result;
 }
 
-static Boolean _CFBundleGrokX11(int fd, unsigned long offset, Boolean swapped) {
+static Boolean _CFBundleGrokX11(int fd, const void *bytes, CFIndex length, uint32_t offset, Boolean swapped, Boolean sixtyFour) {
     static const char libX11name[] = LIB_X11;
     struct stat statBuf;
-    char *maploc;
+    off_t fileLength = 0;
+    char *maploc = NULL;
+    const char *loc;
     unsigned i;
     Boolean result = false;
-    if (fstat(fd, &statBuf) == 0 && (maploc = mmap(0, statBuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) != (void *)-1) {
-        unsigned long ncmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(maploc + offset))->ncmds, swapped);
-        unsigned long sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(maploc + offset))->sizeofcmds, swapped);
-        char *startofcmds = maploc + offset + sizeof(struct mach_header);
-        char *endofcmds = startofcmds + sizeofcmds;
-        struct dylib_command *dlp = (struct dylib_command *)startofcmds;
-        if (endofcmds > maploc + statBuf.st_size) endofcmds = maploc + statBuf.st_size;
-        for (i = 0; !result && i < ncmds && startofcmds <= (char *)dlp && (char *)dlp < endofcmds; i++) {
-            if (LC_LOAD_DYLIB == _CFBundleSwapInt32Conditional(dlp->cmd, swapped)) {
-                unsigned long nameoffset = _CFBundleSwapInt32Conditional(dlp->dylib.name.offset, swapped);
-                if (0 == strncmp((char *)dlp + nameoffset, libX11name, sizeof(libX11name) - 1)) result = true;
-            }
-            dlp = (struct dylib_command *)((char *)dlp + _CFBundleSwapInt32Conditional(dlp->cmdsize, swapped));
-        }
-        munmap(maploc, statBuf.st_size);
+    if (fd >= 0 && fstat(fd, &statBuf) == 0 && (maploc = mmap(0, statBuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) != (void *)-1) {
+        loc = maploc;
+        fileLength = statBuf.st_size;
+    } else {
+        loc = bytes;
+        fileLength = length;
     }
+    if (fileLength > offset + sizeof(struct mach_header_64)) {
+        if (sixtyFour) {
+            uint32_t ncmds = _CFBundleSwapInt32Conditional(((struct mach_header_64 *)(loc + offset))->ncmds, swapped);
+            uint32_t sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header_64 *)(loc + offset))->sizeofcmds, swapped);
+            const char *startofcmds = loc + offset + sizeof(struct mach_header_64);
+            const char *endofcmds = startofcmds + sizeofcmds;
+            struct dylib_command *dlp = (struct dylib_command *)startofcmds;
+            if (endofcmds > loc + fileLength) endofcmds = loc + fileLength;
+            for (i = 0; !result && i < ncmds && startofcmds <= (char *)dlp && (char *)dlp < endofcmds; i++) {
+                if (LC_LOAD_DYLIB == _CFBundleSwapInt32Conditional(dlp->cmd, swapped)) {
+                    uint32_t nameoffset = _CFBundleSwapInt32Conditional(dlp->dylib.name.offset, swapped);
+                    if (0 == strncmp((char *)dlp + nameoffset, libX11name, sizeof(libX11name) - 1)) result = true;
+                }
+                dlp = (struct dylib_command *)((char *)dlp + _CFBundleSwapInt32Conditional(dlp->cmdsize, swapped));
+            }
+        } else {
+            uint32_t ncmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(loc + offset))->ncmds, swapped);
+            uint32_t sizeofcmds = _CFBundleSwapInt32Conditional(((struct mach_header *)(loc + offset))->sizeofcmds, swapped);
+            const char *startofcmds = loc + offset + sizeof(struct mach_header);
+            const char *endofcmds = startofcmds + sizeofcmds;
+            struct dylib_command *dlp = (struct dylib_command *)startofcmds;
+            if (endofcmds > loc + fileLength) endofcmds = loc + fileLength;
+            for (i = 0; !result && i < ncmds && startofcmds <= (char *)dlp && (char *)dlp < endofcmds; i++) {
+                if (LC_LOAD_DYLIB == _CFBundleSwapInt32Conditional(dlp->cmd, swapped)) {
+                    uint32_t nameoffset = _CFBundleSwapInt32Conditional(dlp->dylib.name.offset, swapped);
+                    if (0 == strncmp((char *)dlp + nameoffset, libX11name, sizeof(libX11name) - 1)) result = true;
+                }
+                dlp = (struct dylib_command *)((char *)dlp + _CFBundleSwapInt32Conditional(dlp->cmdsize, swapped));
+            }
+        }
+    }
+    if (maploc) munmap(maploc, statBuf.st_size);
     return result;
 }
     
-    
-static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, void *bytes, CFIndex length, Boolean *isX11, CFDictionaryRef *infodict) {
+static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, const void *bytes, CFIndex length, Boolean *isX11, CFDictionaryRef *infodict) {
     UInt32 machtype = UNKNOWN_FILETYPE, magic, numFatHeaders = ((struct fat_header *)bytes)->nfat_arch, maxFatHeaders = (length - sizeof(struct fat_header)) / sizeof(struct fat_arch);
-    unsigned char moreBytes[sizeof(struct mach_header)];
+    unsigned char buffer[sizeof(struct mach_header_64)];
+    const unsigned char *moreBytes = NULL;
     const NXArchInfo *archInfo = NXGetLocalArchInfo();
     struct fat_arch *fat = NULL;
 
@@ -1726,23 +1874,36 @@ static UInt32 _CFBundleGrokMachTypeForFatFile(int fd, void *bytes, CFIndex lengt
         if (!fat) fat = (struct fat_arch *)(bytes + sizeof(struct fat_header));
     } 
     if (fat) {
-        if (lseek(fd, fat->offset, SEEK_SET) == (off_t)fat->offset && read(fd, moreBytes, sizeof(struct mach_header)) >= (int)sizeof(struct mach_header)) {
+        if (fd >= 0 && lseek(fd, fat->offset, SEEK_SET) == (off_t)fat->offset && read(fd, buffer, sizeof(buffer)) >= (int)sizeof(buffer)) {
+            moreBytes = buffer;
+        } else if (bytes && (uint32_t)length >= fat->offset + 512) {
+            moreBytes = bytes + fat->offset;
+        }
+        if (moreBytes) {
             magic = *((UInt32 *)moreBytes);
             if (MH_MAGIC == magic) {
                 machtype = ((struct mach_header *)moreBytes)->filetype;
-                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, fat->offset, false);
-                if (isX11) *isX11 = _CFBundleGrokX11(fd, fat->offset, false);
+                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, fat->offset, false, false);
+                if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, fat->offset, false, false);
             } else if (MH_CIGAM == magic) {
                 machtype = CFSwapInt32(((struct mach_header *)moreBytes)->filetype);
-                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, fat->offset, true);
-                if (isX11) *isX11 = _CFBundleGrokX11(fd, fat->offset, true);
+                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, fat->offset, true, false);
+                if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, fat->offset, true, false);
+            } else if (MH_MAGIC_64 == magic) {
+                machtype = ((struct mach_header_64 *)moreBytes)->filetype;
+                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, fat->offset, false, true);
+                if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, fat->offset, false, true);
+            } else if (MH_CIGAM_64 == magic) {
+                machtype = CFSwapInt32(((struct mach_header_64 *)moreBytes)->filetype);
+                if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, fat->offset, true, true);
+                if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, fat->offset, true, true);
             }
         }
     }
     return machtype;
 }
 
-static UInt32 _CFBundleGrokMachType(int fd, void *bytes, CFIndex length, Boolean *isX11, CFDictionaryRef *infodict) {
+static UInt32 _CFBundleGrokMachType(int fd, const void *bytes, CFIndex length, Boolean *isX11, CFDictionaryRef *infodict) {
     unsigned int magic = *((UInt32 *)bytes), machtype = UNKNOWN_FILETYPE;
     CFIndex i;
 
@@ -1750,13 +1911,22 @@ static UInt32 _CFBundleGrokMachType(int fd, void *bytes, CFIndex length, Boolean
     if (infodict) *infodict = NULL;
     if (MH_MAGIC == magic) {
         machtype = ((struct mach_header *)bytes)->filetype;
-        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, 0, false);
-        if (isX11) *isX11 = _CFBundleGrokX11(fd, 0, false);
+        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, false, false);
+        if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, 0, false, false);
     } else if (MH_CIGAM == magic) {
         for (i = 0; i < length; i += 4) *(UInt32 *)(bytes + i) = CFSwapInt32(*(UInt32 *)(bytes + i));
         machtype = ((struct mach_header *)bytes)->filetype;
-        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, 0, true);
-        if (isX11) *isX11 = _CFBundleGrokX11(fd, 0, true);
+        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, true, false);
+        if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, 0, true, false);
+    } else if (MH_MAGIC_64 == magic) {
+        machtype = ((struct mach_header_64 *)bytes)->filetype;
+        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, false, true);
+        if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, 0, false, true);
+    } else if (MH_CIGAM_64 == magic) {
+        for (i = 0; i < length; i += 4) *(UInt32 *)(bytes + i) = CFSwapInt32(*(UInt32 *)(bytes + i));
+        machtype = ((struct mach_header_64 *)bytes)->filetype;
+        if (infodict) *infodict = _CFBundleGrokInfoDictFromFile(fd, bytes, length, 0, true, true);
+        if (isX11) *isX11 = _CFBundleGrokX11(fd, bytes, length, 0, true, true);
     } else if (FAT_MAGIC == magic) {
         machtype = _CFBundleGrokMachTypeForFatFile(fd, bytes, length, isX11, infodict);
     } else if (FAT_CIGAM == magic) {
@@ -1770,18 +1940,27 @@ static UInt32 _CFBundleGrokMachType(int fd, void *bytes, CFIndex length, Boolean
 
 #endif /* BINARY_SUPPORT_DYLD */
 
-static UInt32 _CFBundleGrokFileTypeForOLEFile(int fd, unsigned long offset) {
+static UInt32 _CFBundleGrokFileTypeForOLEFile(int fd, const void *bytes, CFIndex length, off_t offset) {
     UInt32 filetype = UNKNOWN_FILETYPE;
-    static const unsigned char xlsname[] = XLS_NAME, docname[] = DOC_NAME, pptname[] = PPT_NAME;
-    unsigned char moreBytes[512];
+    static const unsigned char xlsname[] = XLS_NAME, xlsname2[] = XLS_NAME2, docname[] = DOC_NAME, pptname[] = PPT_NAME;
+    const unsigned char *moreBytes = NULL;
+    unsigned char buffer[512];
     
-    if (lseek(fd, offset, SEEK_SET) == (off_t)offset && read(fd, moreBytes, sizeof(moreBytes)) >= (int)sizeof(moreBytes)) {
+    if (fd >= 0 && lseek(fd, offset, SEEK_SET) == (off_t)offset && read(fd, buffer, sizeof(buffer)) >= (int)sizeof(buffer)) {
+        moreBytes = buffer;
+    } else if (bytes && length >= offset + 512) {
+        moreBytes = bytes + offset;
+    }
+    if (moreBytes) {
         CFIndex i, j;
         Boolean foundit = false;
         for (i = 0; !foundit && i < 4; i++) {
             char namelength = moreBytes[128 * i + 64] / 2;
             if (sizeof(xlsname) == namelength) {
                 for (j = 0, foundit = true; j + 1 < namelength; j++) if (moreBytes[128 * i + 2 * j] != xlsname[j]) foundit = false;
+                if (foundit) filetype = XLS_FILETYPE;
+            } else if (sizeof(xlsname2) == namelength) {
+                for (j = 0, foundit = true; j + 1 < namelength; j++) if (moreBytes[128 * i + 2 * j] != xlsname2[j]) foundit = false;
                 if (foundit) filetype = XLS_FILETYPE;
             } else if (sizeof(docname) == namelength) {
                 for (j = 0, foundit = true; j + 1 < namelength; j++) if (moreBytes[128 * i + 2 * j] != docname[j]) foundit = false;
@@ -1795,94 +1974,97 @@ static UInt32 _CFBundleGrokFileTypeForOLEFile(int fd, unsigned long offset) {
     return filetype;
 }
 
-static Boolean _CFBundleGrokFileType(CFURLRef url, CFStringRef *extension, UInt32 *machtype, CFDictionaryRef *infodict) {
+static Boolean _CFBundleGrokFileType(CFURLRef url, CFDataRef data, CFStringRef *extension, UInt32 *machtype, CFDictionaryRef *infodict) {
     struct stat statBuf;
     int fd = -1;
     char path[CFMaxPathSize];
-    unsigned char bytes[MAGIC_BYTES_TO_READ];
+    const unsigned char *bytes = NULL;
+    unsigned char buffer[MAGIC_BYTES_TO_READ];
     CFIndex i, length = 0;
+    off_t fileLength = 0;
     const char *ext = NULL;
     UInt32 mt = UNKNOWN_FILETYPE;
-    Boolean isX11 = false, isPlain = true, isZero = true;
-    // extensions returned:  o, tool, x11app, pef, core, dylib, bundle, jpeg, jp2, tiff, gif, png, pict, icns, ico, rtf, pdf, ra, au, aiff, aifc, wav, avi, wmv, psd, mpeg, mid, zip, jar, sit, html, ps, mov, qtif, bmp, hqx, bin, class, tar, txt, gz, Z, uu, sh, pl, py, rb, dvi, sgi, mp3, xml, plist, xls, doc, ppt, mp4, m4a, m4b, m4p, dmg
-    if (url && CFURLGetFileSystemRepresentation(url, true, path, CFMaxPathSize) && (fd = open(path, O_RDONLY, 0777)) >= 0 && fstat(fd, &statBuf) == 0 && (statBuf.st_mode & S_IFMT) == S_IFREG) {
-        if ((length = read(fd, bytes, MAGIC_BYTES_TO_READ)) >= 4) {
+#if defined(BINARY_SUPPORT_DYLD)
+    Boolean isX11 = false;
+#endif /* BINARY_SUPPORT_DYLD */
+    Boolean isFile = false, isPlain = true, isZero = true, isHTML = false;
+    // extensions returned:  o, tool, x11app, pef, core, dylib, bundle, elf, jpeg, jp2, tiff, gif, png, pict, icns, ico, rtf, pdf, ra, rm, au, aiff, aifc, wav, avi, wmv, ogg, flac, psd, mpeg, mid, zip, jar, sit, cpio, html, ps, mov, qtif, ttf, otf, sfont, bmp, hqx, bin, class, tar, txt, gz, Z, uu, bz, bz2, sh, pl, py, rb, dvi, sgi, tga, mp3, xml, plist, xls, doc, ppt, mp4, m4a, m4b, m4p, dmg, cwk, webarchive, dwg, dgn, pfa, pfb, afm, tfm, xcf, cpx, dwf, swf, swc, abw, bom
+    // ??? we do not distinguish between different wm types, returning wmv for any of wmv, wma, or asf
+    if (url && CFURLGetFileSystemRepresentation(url, true, path, CFMaxPathSize) && stat(path, &statBuf) == 0 && (statBuf.st_mode & S_IFMT) == S_IFREG && (fd = open(path, O_RDONLY, 0777)) >= 0) {
+	// cjk: It is not at clear that not caching would be a win here, since
+	// in most cases the sniffing of the executable is only done lazily,
+	// the executable is likely to be immediately used again; say, the
+	// bundle executable loaded.  CFBundle does not need the data again,
+	// but for the system as a whole not caching could be a net win or lose.
+	// So, this is where the cache disablement would go, but I am not going
+	// to turn it on at this point.
+	// fcntl(fd, F_NOCACHE, 1);
+        length = read(fd, buffer, MAGIC_BYTES_TO_READ);
+        fileLength = statBuf.st_size;
+        bytes = buffer;
+        isFile = true;
+    } else if (data) {
+        length = CFDataGetLength(data);
+        fileLength = (off_t)length;
+        bytes = CFDataGetBytePtr(data);
+        if (length == 0) ext = "txt";
+    }
+    if (bytes) {
+        if (length >= 4) {
             UInt32 magic = CFSwapInt32HostToBig(*((UInt32 *)bytes));
             for (i = 0; !ext && i < NUM_EXTENSIONS; i++) {
                 if (__CFBundleMagicNumbersArray[i] == magic) ext = __CFBundleExtensionsArray + i * EXTENSION_LENGTH;
             }
             if (ext) {
-                if (0xcafebabe == magic && 8 <= length && 0 != *((UInt16 *)(bytes + 4))) {
-                    ext = "class";
+                if (0xcafebabe == magic && 8 <= length && 0 != *((UInt16 *)(bytes + 4))) ext = "class";
 #if defined(BINARY_SUPPORT_DYLD)
-                } else if ((int)sizeof(struct mach_header) <= length) {
-                    mt = _CFBundleGrokMachType(fd, bytes, length, extension ? &isX11 : NULL, infodict);
+                else if ((int)sizeof(struct mach_header_64) <= length) mt = _CFBundleGrokMachType(fd, bytes, length, extension ? &isX11 : NULL, infodict);
+                
+                if (MH_OBJECT == mt) ext = "o";
+                else if (MH_EXECUTE == mt) ext = isX11 ? "x11app" : "tool";
+                else if (PEF_FILETYPE == mt) ext = "pef";
+                else if (MH_CORE == mt) ext = "core";
+                else if (MH_DYLIB == mt) ext = "dylib";
+                else if (MH_BUNDLE == mt) ext = "bundle";
 #endif /* BINARY_SUPPORT_DYLD */
-                }
-#if defined(BINARY_SUPPORT_DYLD)
-                if (MH_OBJECT == mt) {
-                    ext = "o";
-                } else if (MH_EXECUTE == mt) {
-                    ext = isX11 ? "x11app" : "tool";
-                } else if (PEF_FILETYPE == mt) {
-                    ext = "pef";
-                } else if (MH_CORE == mt) {
-                    ext = "core";
-                } else if (MH_DYLIB == mt) {
-                    ext = "dylib";
-                } else if (MH_BUNDLE == mt) {
-                    ext = "bundle";
-                } else 
-#endif /* BINARY_SUPPORT_DYLD */
-                if (0x7b5c7274 == magic && (6 > length || 'f' != bytes[4])) {
-                    ext = NULL;
-                } else if (0x47494638 == magic && (6 > length || (0x3761 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))) && 0x3961 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))))  {
-                    ext = NULL;
-                } else if (0x0000000c == magic && (6 > length || 0x6a50 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4)))))  {
-                    ext = NULL;
-                } else if (0x89504e47 == magic && (8 > length || 0x0d0a1a0a != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) {
-                    ext = NULL;
-                } else if (0x53747566 == magic && (8 > length || 0x66497420 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) {
-                    ext = NULL;
-                } else if (0x3026b275 == magic && (8 > length || 0x8e66cf11 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) {
-                    // ??? we do not distinguish between different wm types, returning wmv for any of wmv, wma, or asf
-                    ext = NULL;
-                } else if (0x504b0304 == magic && 38 <= length && 0x4d455441 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 30))) && 0x2d494e46 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 34)))) {
-                    ext = "jar";
-                } else if (0x464f524d == magic) {
+                else if (0x7b5c7274 == magic && (6 > length || 'f' != bytes[4])) ext = NULL;
+                else if (0x00010000 == magic && (6 > length || 0 != bytes[4])) ext = NULL;
+                else if (0x47494638 == magic && (6 > length || (0x3761 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))) && 0x3961 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))))  ext = NULL;
+                else if (0x0000000c == magic && (6 > length || 0x6a50 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))) ext = NULL;
+                else if (0x2356524d == magic && (6 > length || 0x4c20 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))) ext = NULL;
+                else if (0x28445746 == magic && (6 > length || 0x2056 != CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))))) ext = NULL;
+                else if (0x30373037 == magic && (6 > length || 0x30 != bytes[4] || !isdigit(bytes[5]))) ext = NULL;
+                else if (0x41433130 == magic && (6 > length || 0x31 != bytes[4] || !isdigit(bytes[5]))) ext = NULL;
+                else if (0x89504e47 == magic && (8 > length || 0x0d0a1a0a != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
+                else if (0x53747566 == magic && (8 > length || 0x66497420 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
+                else if (0x3026b275 == magic && (8 > length || 0x8e66cf11 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
+                else if (0x67696d70 == magic && (8 > length || 0x20786366 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
+                else if (0x424f4d53 == magic && (8 > length || 0x746f7265 != CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = NULL;
+                else if (0x25215053 == magic && 14 <= length && 0 == strncmp(bytes + 4, "-AdobeFont", 10)) ext = "pfa"; 
+                else if (0x504b0304 == magic && 38 <= length && 0x4d455441 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 30))) && 0x2d494e46 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 34)))) ext = "jar";
+                else if (0x464f524d == magic) {
                     // IFF
                     ext = NULL;
                     if (12 <= length) {
                         UInt32 iffMagic = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)));
-                        if (0x41494646 == iffMagic) {
-                            ext = "aiff";
-                        } else if (0x414946 == iffMagic) {
-                            ext = "aifc";
-                        }
+                        if (0x41494646 == iffMagic) ext = "aiff";
+                        else if (0x414946 == iffMagic) ext = "aifc";
                     }
                 } else if (0x52494646 == magic) {
                     // RIFF
                     ext = NULL;
                     if (12 <= length) {
                         UInt32 riffMagic = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)));
-                        if (0x57415645 == riffMagic) {
-                            ext = "wav";
-                        } else if (0x41564920 == riffMagic) {
-                            ext = "avi";
-                        }
+                        if (0x57415645 == riffMagic) ext = "wav";
+                        else if (0x41564920 == riffMagic) ext = "avi";
                     }
                 } else if (0xd0cf11e0 == magic) {
                     // OLE
-                    ext = NULL;
                     if (52 <= length) {
-                        UInt32 ft = _CFBundleGrokFileTypeForOLEFile(fd, 512 * (1 + CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 48)))));
-                        if (XLS_FILETYPE == ft) {
-                            ext = "xls";
-                        } else if (DOC_FILETYPE == ft) {
-                            ext = "doc";
-                        } else if (PPT_FILETYPE == ft) {
-                            ext = "ppt";
-                        }
+                        UInt32 ft = _CFBundleGrokFileTypeForOLEFile(fd, bytes, length, 512 * (1 + CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 48)))));
+                        if (XLS_FILETYPE == ft) ext = "xls";
+                        else if (DOC_FILETYPE == ft) ext = "doc";
+                        else if (PPT_FILETYPE == ft) ext = "ppt";
                     }
                 } else if (0x62656769 == magic) {
                     // uu
@@ -1899,119 +2081,128 @@ static Boolean _CFBundleGrokFileType(CFURLRef url, CFStringRef *extension, UInt3
             }
             if (extension && !ext) {
                 UInt16 shortMagic = CFSwapInt16HostToBig(*((UInt16 *)bytes));
-                if (8 <= length && 0x6d6f6f76 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) {
-                    ext = "mov";
-                } else if (8 <= length && 0x69647363 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) {
-                    ext = "qtif";
+                if (5 <= length && 0 == bytes[3] && 0 == bytes[4] && ((1 == bytes[1] && 1 == (0xf7 & bytes[2])) || (0 == bytes[1] && (2 == (0xf7 & bytes[2]) || (3 == (0xf7 & bytes[2])))))) ext = "tga";
+                else if (8 <= length && (0x6d6f6f76 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || 0x6d646174 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || 0x77696465 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = "mov";
+                else if (8 <= length && (0x69647363 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || 0x69646174 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = "qtif";
+                else if (8 <= length && 0x424f424f == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) ext = "cwk";
+                else if (8 <= length && 0x62706c69 == magic && 0x7374 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 4))) && isdigit(bytes[6]) && isdigit(bytes[7])) {
+                    for (i = 8; !ext && i < 128 && i + 16 <= length; i++) {
+                        if (0 == strncmp(bytes + i, "WebMainResource", 15)) ext = "webarchive";
+                    }
+                    if (!ext) ext = "plist";
                 } else if (12 <= length && 0x66747970 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4)))) {
                     // ??? list of ftyp values needs to be checked
-                    if (0x6d703432 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) {
-                        ext = "mp4";
-                    } else if (0x4d344120 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) {
-                        ext = "m4a";
-                    } else if (0x4d344220 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) {
-                        ext = "m4b";
-                    } else if (0x4d345020 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) {
-                        ext = "m4p";
-                    }
-                } else if (0x424d == shortMagic && 18 <= length && 40 == CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 14)))) {
-                    ext = "bmp";
-                } else if (40 <= length && 0x42696e48 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 34))) && 0x6578 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 38)))) {
-                    ext = "hqx";
-                } else if (128 <= length && 0x6d42494e == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 102)))) {
-                    ext = "bin";
-                } else if (128 <= length && 0 == bytes[0] && 0 < bytes[1] && bytes[1] < 64 && 0 == bytes[74] && 0 == bytes[82] && 0 == (statBuf.st_size % 128)) {
+                    if (0x6d703432 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "mp4";
+                    else if (0x4d344120 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4a";
+                    else if (0x4d344220 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4b";
+                    else if (0x4d345020 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 8)))) ext = "m4p";
+                } else if (0x424d == shortMagic && 18 <= length && 40 == CFSwapInt32HostToLittle(*((UInt32 *)(bytes + 14)))) ext = "bmp";
+                else if (20 <= length && 0 == strncmp(bytes + 6, "%!PS-AdobeFont", 14)) ext = "pfb";
+                else if (40 <= length && 0x42696e48 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 34))) && 0x6578 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 38)))) ext = "hqx";
+                else if (128 <= length && 0x6d42494e == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 102)))) ext = "bin";
+                else if (128 <= length && 0 == bytes[0] && 0 < bytes[1] && bytes[1] < 64 && 0 == bytes[74] && 0 == bytes[82] && 0 == (fileLength % 128)) {
                     unsigned df = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 83))), rf = CFSwapInt32HostToBig(*((UInt32 *)(bytes + 87))), blocks = 1 + (df + 127) / 128 + (rf + 127) / 128;
-                    if (df < 0x00800000 && rf < 0x00800000 && 1 < blocks && (off_t)(128 * blocks) == statBuf.st_size) {
-                        ext = "bin";
-                    }
-                } else if (265 <= length && 0x75737461 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 257))) && (0x72202000 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 261))) || 0x7200 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 261))))) {
-                    ext = "tar";
-                } else if (0xfeff == shortMagic || 0xfffe == shortMagic) {
-                    ext = "txt";
-                } else if (0x1f9d == shortMagic) {
-                    ext = "Z";
-                } else if (0x1f8b == shortMagic) {
-                    ext = "gz";
-                } else if (0xf702 == shortMagic) {
-                    ext = "dvi";
-                } else if (0x01da == shortMagic && (0 == bytes[2] || 1 == bytes[2]) && (0 < bytes[3] && 16 > bytes[3])) {
-                    ext = "sgi";
-                } else if (0x2321 == shortMagic) {
+                    if (df < 0x00800000 && rf < 0x00800000 && 1 < blocks && (off_t)(128 * blocks) == fileLength) ext = "bin";
+                } else if (265 <= length && 0x75737461 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 257))) && (0x72202000 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 261))) || 0x7200 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 261))))) ext = "tar";
+                else if (0xfeff == shortMagic || 0xfffe == shortMagic) ext = "txt";
+                else if (0x1f9d == shortMagic) ext = "Z";
+                else if (0x1f8b == shortMagic) ext = "gz";
+                else if (0x71c7 == shortMagic || 0xc771 == shortMagic) ext = "cpio";
+                else if (0xf702 == shortMagic) ext = "dvi";
+                else if (0x01da == shortMagic && (0 == bytes[2] || 1 == bytes[2]) && (0 < bytes[3] && 16 > bytes[3])) ext = "sgi";
+                else if (0x2321 == shortMagic) {
                     CFIndex endOfLine = 0, lastSlash = 0;
                     for (i = 2; 0 == endOfLine && i < length; i++) if ('\n' == bytes[i]) endOfLine = i;
                     if (endOfLine > 3) {
                         for (i = endOfLine - 1; 0 == lastSlash && i > 1; i--) if ('/' == bytes[i]) lastSlash = i;
                         if (lastSlash > 0) {
-                            if (0 == strncmp(bytes + lastSlash + 1, "perl", 4)) {
-                                ext = "pl";
-                            } else if (0 == strncmp(bytes + lastSlash + 1, "python", 6)) {
-                                ext = "py";
-                            } else if (0 == strncmp(bytes + lastSlash + 1, "ruby", 4)) {
-                                ext = "rb";
-                            } else {
-                                ext = "sh";
-                            }
+                            if (0 == strncmp(bytes + lastSlash + 1, "perl", 4)) ext = "pl";
+                            else if (0 == strncmp(bytes + lastSlash + 1, "python", 6)) ext = "py";
+                            else if (0 == strncmp(bytes + lastSlash + 1, "ruby", 4)) ext = "rb";
+                            else ext = "sh";
                         }
                     } 
-                } else if (0xffd8 == shortMagic && 0xff == bytes[2]) {
-                    ext = "jpeg";
-                } else if (0x4944 == shortMagic && '3' == bytes[2] && 0x20 > bytes[3]) {
-                    ext = "mp3";
-                } else if ('<' == bytes[0] && 14 <= length) {
+                } else if (0xffd8 == shortMagic && 0xff == bytes[2]) ext = "jpeg";
+                else if (0x4657 == shortMagic && 0x53 == bytes[2]) ext = "swf";
+                else if (0x4357 == shortMagic && 0x53 == bytes[2]) ext = "swc";
+                else if (0x4944 == shortMagic && '3' == bytes[2] && 0x20 > bytes[3]) ext = "mp3";
+                else if (0x425a == shortMagic && isdigit(bytes[2]) && isdigit(bytes[3])) ext = "bz";
+                else if (0x425a == shortMagic && 'h' == bytes[2] && isdigit(bytes[3]) && 8 <= length && (0x31415926 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))) || 0x17724538 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 4))))) ext = "bz2";
+                else if (0x0011 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 2))) || 0x0012 == CFSwapInt16HostToBig(*((UInt16 *)(bytes + 2)))) ext = "tfm";
+                else if ('<' == bytes[0] && 14 <= length) {
                     if (0 == strncasecmp(bytes + 1, "!doctype html", 13) || 0 == strncasecmp(bytes + 1, "head", 4) || 0 == strncasecmp(bytes + 1, "title", 5) || 0 == strncasecmp(bytes + 1, "html", 4)) {
                         ext = "html";
                     } else if (0 == strncasecmp(bytes + 1, "?xml", 4)) {
-                        if (116 <= length && 0 == strncasecmp(bytes + 100, "PropertyList.dtd", 16)) {
-                            ext = "plist";
-                        } else {
-                            ext = "xml";
+                        for (i = 4; !ext && i < 128 && i + 20 <= length; i++) {
+                            if ('<' == bytes[i]) {
+                                if (0 == strncasecmp(bytes + i + 1, "abiword", 7)) ext = "abw";
+                                else if (0 == strncasecmp(bytes + i + 1, "!doctype svg", 12)) ext = "svg";
+                                else if (0 == strncasecmp(bytes + i + 1, "!doctype x3d", 12)) ext = "x3d";
+                                else if (0 == strncasecmp(bytes + i + 1, "!doctype html", 13)) ext = "html";
+                                else if (0 == strncasecmp(bytes + i + 1, "!doctype plist", 14)) ext = "plist";
+                                else if (0 == strncasecmp(bytes + i + 1, "!doctype posingfont", 19)) ext = "sfont";
+                            }
                         }
+                        if (!ext) ext = "xml";
                     }
                 }
             }
         }
         if (extension && !ext) {
             //??? what about MacOSRoman?
-            for (i = 0; (isPlain || isZero) && i < length && i < 512; i++) {
+            for (i = 0; (isPlain || isZero) && !isHTML && i < length && i < 512; i++) {
                 char c = bytes[i];
                 if (0x7f <= c || (0x20 > c && !isspace(c))) isPlain = false;
                 if (0 != c) isZero = false;
+                if (isPlain && '<' == c && i + 14 <= length && 0 == strncasecmp(bytes + i + 1, "!doctype html", 13)) isHTML = true;
             }
-            if (isPlain) {
-                ext = "txt";
-            } else if (isZero && length >= MAGIC_BYTES_TO_READ && statBuf.st_size >= 526) {
-                if (lseek(fd, 512, SEEK_SET) == 512 && read(fd, bytes, 512) >= 14) {
-                    if (0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 10)))) {
-                        ext = "pict";
+            if (isHTML) {
+                ext = "html";
+            } else if (isPlain) {
+                if (16 <= length && 0 == strncmp(bytes, "StartFontMetrics", 16)) ext = "afm";
+                else ext = "txt";
+            } else if (isZero && length >= MAGIC_BYTES_TO_READ && fileLength >= 526) {
+                if (isFile) {
+                    if (lseek(fd, 512, SEEK_SET) == 512 && read(fd, buffer, MAGIC_BYTES_TO_READ) >= 14) {
+                        if (0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(buffer + 10)))) ext = "pict";
                     }
+                } else {
+                    if (526 <= length && 0x001102ff == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 522)))) ext = "pict";
                 }
             }
         }
-        if (extension && !ext && !isZero && length >= MAGIC_BYTES_TO_READ && statBuf.st_size >= 1024) {
-            off_t offset = statBuf.st_size - 512;
-            if (lseek(fd, offset, SEEK_SET) == offset && read(fd, bytes, 512) >= 512) {
-                if (0x6b6f6c79 == CFSwapInt32HostToBig(*((UInt32 *)bytes)) || (0x63647361 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 504))) && 0x656e6372 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + 508))))) {
-                    ext = "dmg";
+        if (extension && !ext && !isZero && length >= MAGIC_BYTES_TO_READ && fileLength >= 1024) {
+            if (isFile) {
+                off_t offset = fileLength - 512;
+                if (lseek(fd, offset, SEEK_SET) == offset && read(fd, buffer, 512) >= 512) {
+                    if (0x6b6f6c79 == CFSwapInt32HostToBig(*((UInt32 *)buffer)) || (0x63647361 == CFSwapInt32HostToBig(*((UInt32 *)(buffer + 504))) && 0x656e6372 == CFSwapInt32HostToBig(*((UInt32 *)(buffer + 508))))) ext = "dmg";
                 }
+            } else {
+                if (512 <= length && (0x6b6f6c79 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + length - 512))) || (0x63647361 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + length - 8))) && 0x656e6372 == CFSwapInt32HostToBig(*((UInt32 *)(bytes + length - 4)))))) ext = "dmg";
             }
         }
     }
     if (extension) *extension = ext ? CFStringCreateWithCStringNoCopy(NULL, ext, kCFStringEncodingASCII, kCFAllocatorNull) : NULL;
     if (machtype) *machtype = mt;
-    close(fd);
+    if (fd >= 0) close(fd);
     return (ext != NULL);
 }
 
 CFStringRef _CFBundleCopyFileTypeForFileURL(CFURLRef url) {
     CFStringRef extension = NULL;
-    (void)_CFBundleGrokFileType(url, &extension, NULL, NULL);
+    (void)_CFBundleGrokFileType(url, NULL, &extension, NULL, NULL);
+    return extension;
+}
+
+CFStringRef _CFBundleCopyFileTypeForFileData(CFDataRef data) {
+    CFStringRef extension = NULL;
+    (void)_CFBundleGrokFileType(NULL, data, &extension, NULL, NULL);
     return extension;
 }
 
 __private_extern__ CFDictionaryRef _CFBundleCopyInfoDictionaryInExecutable(CFURLRef url) {
     CFDictionaryRef result = NULL;
-    (void)_CFBundleGrokFileType(url, NULL, NULL, &result);
+    (void)_CFBundleGrokFileType(url, NULL, NULL, NULL, &result);
     return result;
 }
 
@@ -2021,7 +2212,7 @@ __private_extern__ __CFPBinaryType _CFBundleGrokBinaryType(CFURLRef executableUR
     // Attempt to grok the type of the binary by looking for DYLD magic numbers.  If one of the DYLD magic numbers is found, find out what type of Mach-o file it is.  Otherwise, look for the PEF magic numbers to see if it is CFM (if we understand CFM).
     __CFPBinaryType result = executableURL ? __CFBundleUnreadableBinary : __CFBundleNoBinary;
     UInt32 machtype = UNKNOWN_FILETYPE;
-    if (_CFBundleGrokFileType(executableURL, NULL, &machtype, NULL)) {
+    if (_CFBundleGrokFileType(executableURL, NULL, NULL, &machtype, NULL)) {
         switch (machtype) {
             case MH_EXECUTE:
                 result = __CFBundleDYLDExecutableBinary;
@@ -2425,28 +2616,24 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
 
 #if defined(__WIN32__)
     // * (Windows-only) First check the "Executables" directory parallel to the "Frameworks" directory case.
-    _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToFrameworksPathBuff, 16);
-    _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength);
-    _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, 9);
-
-    CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
-    bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
-    if (!_CFBundleCouldBeBundle(bundleURL)) {
-        CFRelease(bundleURL);
-        bundleURL = NULL;
-    }
-    // * (Windows-only) Next check the "Executables" directory parallel to the "PrivateFrameworks" directory case.
-    if (bundleURL == NULL) {
-        length = savedLength;
-        _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToPrivateFrameworksPathBuff, 23);
-        _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength);
-        _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, 9);
-
+    if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToFrameworksPathBuff, 16) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, 9)) {
         CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
         bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
         if (!_CFBundleCouldBeBundle(bundleURL)) {
             CFRelease(bundleURL);
             bundleURL = NULL;
+        }
+    }
+    // * (Windows-only) Next check the "Executables" directory parallel to the "PrivateFrameworks" directory case.
+    if (bundleURL == NULL) {
+        length = savedLength;
+        if (_CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, executablesToPrivateFrameworksPathBuff, 23) && _CFAppendPathComponent(pathBuff, &length, CFMaxPathSize, nameBuff, nameLength) && _CFAppendPathExtension(pathBuff, &length, CFMaxPathSize, frameworksExtension, 9)) {
+            CFStringSetExternalCharactersNoCopy(cheapStr, pathBuff, length, CFMaxPathSize);
+            bundleURL = CFURLCreateWithFileSystemPath(alloc, cheapStr, PLATFORM_PATH_STYLE, true);
+            if (!_CFBundleCouldBeBundle(bundleURL)) {
+                CFRelease(bundleURL);
+                bundleURL = NULL;
+            }
         }
     }
 #endif
@@ -2492,6 +2679,7 @@ __private_extern__ CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFAllocat
     return bundleURL;
 }
 
+#if defined(BINARY_SUPPORT_DYLD)
 static void _CFBundleEnsureBundleExistsForImagePath(CFStringRef imagePath) {
     // This finds the bundle for the given path.
     // If an image path corresponds to a bundle, we see if there is already a bundle instance.  If there is and it is NOT in the _dynamicBundles array, it is added to the staticBundles.  Do not add the main bundle to the list here.
@@ -2529,13 +2717,13 @@ static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths) {
         _CFBundleEnsureBundleExistsForImagePath(CFArrayGetValueAtIndex(imagePaths, i));
     }
 }
+#endif /* BINARY_SUPPORT_DYLD */
 
 static void _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(CFStringRef hint) {
-    CFArrayRef imagePaths;
     // Tickle the main bundle into existence
     (void)_CFBundleGetMainBundleAlreadyLocked();
 #if defined(BINARY_SUPPORT_DYLD)
-    imagePaths = _CFBundleDYLDCopyLoadedImagePathsForHint(hint);
+    CFArrayRef imagePaths = _CFBundleDYLDCopyLoadedImagePathsForHint(hint);
     if (imagePaths != NULL) {
         _CFBundleEnsureBundlesExistForImagePaths(imagePaths);
         CFRelease(imagePaths);
@@ -2545,8 +2733,6 @@ static void _CFBundleEnsureBundlesUpToDateWithHintAlreadyLocked(CFStringRef hint
 
 static void _CFBundleEnsureAllBundlesUpToDateAlreadyLocked(void) {
     // This method returns all the statically linked bundles.  This includes the main bundle as well as any frameworks that the process was linked against at launch time.  It does not include frameworks or opther bundles that were loaded dynamically.
-    
-    CFArrayRef imagePaths;
 
     // Tickle the main bundle into existence
     (void)_CFBundleGetMainBundleAlreadyLocked();
@@ -2560,7 +2746,7 @@ static void _CFBundleEnsureAllBundlesUpToDateAlreadyLocked(void) {
 #endif
 
 #if defined(BINARY_SUPPORT_DYLD)
-    imagePaths = _CFBundleDYLDCopyLoadedImagePathsIfChanged();
+    CFArrayRef imagePaths = _CFBundleDYLDCopyLoadedImagePathsIfChanged();
     if (imagePaths != NULL) {
         _CFBundleEnsureBundlesExistForImagePaths(imagePaths);
         CFRelease(imagePaths);
@@ -2664,10 +2850,10 @@ CF_EXPORT CFURLRef CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle) {
 
 #if defined(BINARY_SUPPORT_DYLD)
 
-static void *__CFBundleDYLDFindImage(char *buff) {
-    void *header = NULL;
-    unsigned long i, numImages = _dyld_image_count(), numMatches = 0;
-    char *curName, *p, *q;
+static const void *__CFBundleDYLDFindImage(char *buff) {
+    const void *header = NULL;
+    uint32_t i, numImages = _dyld_image_count(), numMatches = 0;
+    const char *curName, *p, *q;
 
     for (i = 0; !header && i < numImages; i++) {
         curName = _dyld_get_image_name(i);
@@ -2703,7 +2889,7 @@ __private_extern__ Boolean _CFBundleDYLDCheckLoaded(CFBundleRef bundle) {
             char buff[CFMaxPathSize];
 
             if (CFURLGetFileSystemRepresentation(executableURL, true, buff, CFMaxPathSize)) {
-                void *header = __CFBundleDYLDFindImage(buff);
+                const void *header = __CFBundleDYLDFindImage(buff);
                 if (header) {
                     if (bundle->_binaryType == __CFBundleUnknownBinary) {
                         bundle->_binaryType = __CFBundleDYLDFrameworkBinary;
@@ -2791,13 +2977,14 @@ __private_extern__ Boolean _CFBundleDYLDLoadFramework(CFBundleRef bundle) {
 
 __private_extern__ void _CFBundleDYLDUnloadBundle(CFBundleRef bundle) {
     if (bundle->_isLoaded) {
-        if (bundle->_moduleCookie && !NSUnLinkModule(bundle->_moduleCookie, NSUNLINKMODULE_OPTION_NONE)) {
+        if (bundle->_moduleCookie && !NSUnLinkModule((NSModule)(bundle->_moduleCookie), NSUNLINKMODULE_OPTION_NONE)) {
             CFLog(__kCFLogBundle, CFSTR("Internal error unloading bundle %@"), bundle);
         } else {
-            if (bundle->_moduleCookie && bundle->_imageCookie && !NSDestroyObjectFileImage(bundle->_imageCookie)) {
+            if (bundle->_moduleCookie && bundle->_imageCookie && !NSDestroyObjectFileImage((NSObjectFileImage)(bundle->_imageCookie))) {
                 /* MF:!!! Error destroying object file image */
             }
-            bundle->_connectionCookie = bundle->_imageCookie = bundle->_moduleCookie = NULL;
+            bundle->_connectionCookie = NULL;
+            bundle->_imageCookie = bundle->_moduleCookie = NULL;
             bundle->_isLoaded = false;
         }
     }
@@ -2816,7 +3003,7 @@ static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFString
     /* MF:??? ASCII appropriate here? */
     if (CFStringGetCString(symbolName, &(buff[1]), 1024, kCFStringEncodingASCII)) {
         if (bundle->_moduleCookie) {
-            symbol = NSLookupSymbolInModule(bundle->_moduleCookie, buff);
+            symbol = NSLookupSymbolInModule((NSModule)(bundle->_moduleCookie), buff);
         } else if (bundle->_imageCookie) {
             symbol = NSLookupSymbolInImage(bundle->_imageCookie, buff, NSLOOKUPSYMBOLINIMAGE_OPTION_BIND|NSLOOKUPSYMBOLINIMAGE_OPTION_RETURN_ON_ERROR);
         } 
@@ -2844,13 +3031,14 @@ static void *_CFBundleDYLDGetSymbolByNameWithSearch(CFBundleRef bundle, CFString
 }
 
 static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p) {
-    unsigned long i, j, n = _dyld_image_count();
+    uint32_t i, j, n = _dyld_image_count();
     Boolean foundit = false;
-    char *name;
+    const char *name;
     CFStringRef result = NULL;
     for (i = 0; !foundit && i < n; i++) {
-        struct mach_header *mh = _dyld_get_image_header(i);
-        unsigned long addr = (unsigned long)p - _dyld_get_image_vmaddr_slide(i);
+        // will need modification for 64-bit
+        const struct mach_header *mh = _dyld_get_image_header(i);
+        uint32_t addr = (uint32_t)p - _dyld_get_image_vmaddr_slide(i);
         if (mh) {
             struct load_command *lc = (struct load_command *)((char *)mh + sizeof(struct mach_header));
             for (j = 0; !foundit && j < mh->ncmds; j++, lc = (struct load_command *)((char *)lc + lc->cmdsize)) {
@@ -2868,12 +3056,12 @@ static CFStringRef _CFBundleDYLDCopyLoadedImagePathForPointer(void *p) {
 }
 
 __private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringRef hint) {
-    unsigned long i, numImages = _dyld_image_count();
+    uint32_t i, numImages = _dyld_image_count();
     CFMutableArrayRef result = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
     CFRange range = CFRangeMake(0, CFStringGetLength(hint));
     
     for (i=0; i<numImages; i++) {
-        char *curName = _dyld_get_image_name(i), *lastComponent = NULL;
+        const char *curName = _dyld_get_image_name(i), *lastComponent = NULL;
         if (curName != NULL) lastComponent = strrchr(curName, '/');
         if (lastComponent != NULL) {
             CFStringRef str = CFStringCreateWithCString(NULL, lastComponent + 1, CFStringFileSystemEncoding());
@@ -2894,13 +3082,13 @@ __private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsForHint(CFStringR
 
 __private_extern__ CFArrayRef _CFBundleDYLDCopyLoadedImagePathsIfChanged(void) {
     // This returns an array of the paths of all the dyld images in the process.  These paths may not be absolute, they may point at things that are not bundles, they may be staticly linked bundles or dynamically loaded bundles, they may be NULL.
-    static unsigned long _cachedDYLDImageCount = -1;
+    static uint32_t _cachedDYLDImageCount = -1;
 
-    unsigned long i, numImages = _dyld_image_count();
+    uint32_t i, numImages = _dyld_image_count();
     CFMutableArrayRef result = NULL;
 
     if (numImages != _cachedDYLDImageCount) {
-        char *curName;
+        const char *curName;
         CFStringRef curStr;
 
         result = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);

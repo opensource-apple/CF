@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -206,14 +204,14 @@ static void __CFBitVectorDeallocate(CFTypeRef cf) {
     CFMutableBitVectorRef bv = (CFMutableBitVectorRef)cf;
     CFAllocatorRef allocator = CFGetAllocator(bv);
     if (__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable) {
-	CFAllocatorDeallocate(allocator, bv->_buckets);
+	_CFAllocatorDeallocateGC(allocator, bv->_buckets);
     }
 }
 
 static CFTypeID __kCFBitVectorTypeID = _kCFRuntimeNotATypeID;
 
 static const CFRuntimeClass __CFBitVectorClass = {
-    0,
+    _kCFRuntimeScannedObject,
     "CFBitVector",
     NULL,	// init
     NULL,	// copy
@@ -249,7 +247,7 @@ static CFMutableBitVectorRef __CFBitVectorInit(CFAllocatorRef allocator, CFOptio
     case kCFBitVectorMutable:
 	__CFBitVectorSetCapacity(memory, __CFBitVectorRoundUpCapacity(1));
 	__CFBitVectorSetNumBuckets(memory, __CFBitVectorNumBucketsForCapacity(__CFBitVectorRoundUpCapacity(1)));
-	memory->_buckets = CFAllocatorAllocate(allocator, __CFBitVectorNumBuckets(memory) * sizeof(__CFBitVectorBucket), 0);
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, memory, memory->_buckets, _CFAllocatorAllocateGC(allocator, __CFBitVectorNumBuckets(memory) * sizeof(__CFBitVectorBucket), 0));
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory->_buckets, "CFBitVector (store)");
 	if (NULL == memory->_buckets) {
 	    CFRelease(memory);
@@ -268,7 +266,7 @@ static CFMutableBitVectorRef __CFBitVectorInit(CFAllocatorRef allocator, CFOptio
     __CFBitVectorSetCount(memory, numBits);
     if (bytes) {
 	/* This move is possible because bits are numbered from 0 on the left */
-	memmove(memory->_buckets, bytes, numBits / __CF_BITS_PER_BYTE + 1);
+	memmove(memory->_buckets, bytes, (numBits + __CF_BITS_PER_BYTE - 1) / __CF_BITS_PER_BYTE);
     }
     __CFBitVectorSetMutableVariety(memory, __CFBitVectorMutableVarietyFromFlags(flags));
     return memory;
@@ -385,7 +383,7 @@ static __CFBitVectorBucket __CFBitVectorGetBits(__CFBitVectorBucket bucketValue,
     __CFBitVectorBucket val;
     CFIndex nBits;
     val = bucketValue & bucketValueMask;
-    nBits = __CFMin(__CF_BITS_PER_BUCKET, context->totalBits);
+    nBits = __CFMin(__CF_BITS_PER_BUCKET - context->initBits, context->totalBits);
     /* First initBits bits go in *curByte ... */
     if (0 < context->initBits) {
 	if (!context->ignoreFirstInitBits) {
@@ -394,7 +392,6 @@ static __CFBitVectorBucket __CFBitVectorGetBits(__CFBitVectorBucket bucketValue,
 	    context->totalBits -= context->initBits;
 	    context->ignoreFirstInitBits = false;
 	}
-	nBits -= context->initBits;
 	val <<= context->initBits;
     }
     /* ... then next groups of __CF_BITS_PER_BYTE go in *curByte ... */
@@ -452,9 +449,10 @@ CFIndex CFBitVectorGetLastIndexOfBit(CFBitVectorRef bv, CFRange range, CFBit val
 static void __CFBitVectorGrow(CFMutableBitVectorRef bv, CFIndex numNewValues) {
     CFIndex oldCount = __CFBitVectorCount(bv);
     CFIndex capacity = __CFBitVectorRoundUpCapacity(oldCount + numNewValues);
+    CFAllocatorRef allocator = CFGetAllocator(bv);
     __CFBitVectorSetCapacity(bv, capacity);
     __CFBitVectorSetNumBuckets(bv, __CFBitVectorNumBucketsForCapacity(capacity));
-    bv->_buckets = CFAllocatorReallocate(CFGetAllocator(bv), bv->_buckets, __CFBitVectorNumBuckets(bv) * sizeof(__CFBitVectorBucket), 0);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bv, bv->_buckets, CFAllocatorReallocate(allocator, bv->_buckets, __CFBitVectorNumBuckets(bv) * sizeof(__CFBitVectorBucket), 0));
     if (__CFOASafe) __CFSetLastAllocationEventName(bv->_buckets, "CFBitVector (store)");
     if (NULL == bv->_buckets) HALT;
 }

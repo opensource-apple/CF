@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFInternal.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 /*
@@ -42,16 +40,34 @@
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFDate.h>
 #include <CoreFoundation/CFArray.h>
-#include "ForFoundationOnly.h"
+#include <CoreFoundation/CFRunLoop.h>
 #include "CFRuntime.h"
 #if defined(__MACH__)
+#include <xlocale.h>
 #include <mach/thread_switch.h>
+#include <mach/mach_time.h>
 #endif
 #if defined(__MACH__) || defined(__LINUX__) || defined(__FREEBSD__)
 #include <sys/time.h>
+#include <pthread.h>
 #endif
 #include <limits.h>
 #include <pthread.h>
+#include "auto_stubs.h"
+#include <libkern/OSAtomic.h>
+
+#if defined(__MACH__)
+#if defined(__ppc__)
+// This hack is in here because B&I kernel does not set up comm page with Tiger additions yet.
+#define AtomicCompareAndSwap(mem, old, new) ({bool result; if (((void **)OSMemoryBarrier)[1] == 0x0) {result = ((*(mem) == (old)) ? (*(mem) = (new), 1) : 0);} else {result = OSAtomicCompareAndSwap32(old, new, (int32_t *)mem); OSMemoryBarrier();} result;})
+#define AtomicAdd32(mem, val) ({if (((void **)OSMemoryBarrier)[1] == 0x0) {*(mem) += (val);} else {OSAtomicAdd32(val, mem); OSMemoryBarrier();} 0;})
+#else
+#define AtomicCompareAndSwap(mem, old, new) ({bool result; result = OSAtomicCompareAndSwap32(old, new, (int32_t *)mem); OSMemoryBarrier(); result;})
+#define AtomicAdd32(mem, val) ({OSAtomicAdd32(val, mem); OSMemoryBarrier(); 0;})
+#endif
+#endif
+
+#include "ForFoundationOnly.h"
 
 #if !defined(__MACH__)
 #define __private_extern__
@@ -74,11 +90,16 @@ CF_EXPORT void __CFSetNastyFile(CFTypeRef cf);
 
 CF_EXPORT void _CFMachPortInstallNotifyPort(CFRunLoopRef rl, CFStringRef mode);
 
-
-#if defined(__ppc__)
-#define HALT asm __volatile__("trap")
+#if defined(__ppc__) || defined(__ppc64__)
+    #define HALT asm __volatile__("trap")
 #elif defined(__i386__)
-#define HALT asm __volatile__("int3")
+    #if defined(__GNUC__)
+        #define HALT asm __volatile__("int3")
+    #elif defined(_MSC_VER) || defined(__MWERKS__)
+        #define HALT __asm int 3;
+    #else
+        #error Compiler not supported
+    #endif
 #endif
 
 #if defined(DEBUG)
@@ -118,6 +139,7 @@ extern void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char *fu
 /* Bit manipulation macros */
 /* Bits are numbered from 31 on left to 0 on right */
 /* May or may not work if you use them on bitfields in types other than UInt32, bitfields the full width of a UInt32, or anything else for which they were not designed. */
+/* In the following, N1 and N2 specify an inclusive range N2..N1 with N1 >= N2 */
 #define __CFBitfieldMask(N1, N2)	((((UInt32)~0UL) << (31UL - (N1) + (N2))) >> (31UL - N1))
 #define __CFBitfieldGetValue(V, N1, N2)	(((V) & __CFBitfieldMask(N1, N2)) >> (N2))
 #define __CFBitfieldSetValue(V, N1, N2, X)	((V) = ((V) & ~__CFBitfieldMask(N1, N2)) | (((X) << (N2)) & __CFBitfieldMask(N1, N2)))
@@ -136,6 +158,7 @@ typedef struct ___CFThreadSpecificData {
 } __CFThreadSpecificData;
 
 extern __CFThreadSpecificData *__CFGetThreadSpecificData(void);
+__private_extern__ void __CFFinalizeThreadData(void *arg);
 
 #if defined(__MACH__) || defined(__LINUX__) || defined(__FREEBSD__)
 extern pthread_key_t __CFTSDKey;
@@ -175,7 +198,7 @@ extern CFTypeID __CFGenericTypeID(const void *cf);
 // Use CFGetAllocator() in the general case, and this inline function in a few limited (but often called) situations.
 CF_INLINE CFAllocatorRef __CFGetAllocator(CFTypeRef cf) {	// !!! Use with CF types only, and NOT WITH CFAllocator!
     CFAssert1(__kCFAllocatorTypeID_CONST != __CFGenericTypeID(cf), __kCFLogAssertion, "__CFGetAllocator(): CFAllocator argument", cf);
-    if (__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 7, 7)) {
+    if (__builtin_expect(__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 7, 7), 1)) {
 	return kCFAllocatorSystemDefault;
     }
     return *(CFAllocatorRef *)((char *)cf - sizeof(CFAllocatorRef));
@@ -219,8 +242,6 @@ CF_EXPORT CFAllocatorRef _CFTemporaryMemoryAllocator(void);
 
 extern SInt64 __CFTimeIntervalToTSR(CFTimeInterval ti);
 extern CFTimeInterval __CFTSRToTimeInterval(SInt64 tsr);
-extern SInt64 __CFAbsoluteTimeToTSR(CFAbsoluteTime at);
-extern CFAbsoluteTime __CFTSRToAbsoluteTime(SInt64 tsr);
 
 extern CFStringRef __CFCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions);
 
@@ -231,8 +252,31 @@ extern Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFDictionaryRef l
 extern Boolean __CFStringScanHex(CFStringInlineBuffer *buf, SInt32 *indexPtr, unsigned *result);
 
 
+#ifdef __CONSTANT_CFSTRINGS__
 #define CONST_STRING_DECL(S, V) const CFStringRef S = __builtin___CFStringMakeConstantString(V);
+#else
 
+struct CF_CONST_STRING {
+    CFRuntimeBase _base;
+    uint8_t *_ptr;
+    uint32_t _length;
+};
+
+extern int __CFConstantStringClassReference[];
+
+/* CFNetwork also has a copy of the CONST_STRING_DECL macro (for use on platforms without constant string support in cc); please warn cfnetwork-core@group.apple.com of any necessary changes to this macro. -- REW, 1/28/2002 */
+#if defined(__ppc__) || defined(__ppc64__)
+#define CONST_STRING_DECL(S, V)			\
+static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, 0x0000, 0x07c8}, V, sizeof(V) - 1}; \
+const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#elif defined(__i386__)
+#define CONST_STRING_DECL(S, V)			\
+static struct CF_CONST_STRING __ ## S ## __ = {{&__CFConstantStringClassReference, 0x07c8, 0x0000}, V, sizeof(V) - 1}; \
+const CFStringRef S = (CFStringRef) & __ ## S ## __;
+#else
+#error undefined architecture
+#endif
+#endif
 
 #if defined(__MACH__)
 #define __kCFCharacterSetDir "/System/Library/CoreServices"
@@ -277,24 +321,40 @@ CF_EXPORT CFStringRef __CFStringCreateImmutableFunnel3(CFAllocatorRef alloc, con
 extern const void *__CFTypeCollectionRetain(CFAllocatorRef allocator, const void *ptr);
 extern void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *ptr);
 
-typedef uint32_t CFSpinLock_t;
 
 #if defined(__MACH__)
 
-// In libSystem:
-extern int __is_threaded;
+typedef OSSpinLock CFSpinLock_t;
+
+#define CFSpinLockInit OS_SPINLOCK_INIT
+
+#if defined(__i386__)
 extern void _spin_lock(CFSpinLock_t *lockp);
 extern void _spin_unlock(CFSpinLock_t *lockp);
-// It would be better to use _pthread_is_threaded() instead of
-// __is_threaded, but the latter is SO much faster it's hard to
-// resist, and CF _is_ an internal project that can rev if needed.
+#define OSSpinLockLock(p) _spin_lock(p)
+#define OSSpinLockUnlock(p) _spin_unlock(p)
+#endif
 
 CF_INLINE void __CFSpinLock(CFSpinLock_t *lockp) {
-    if (__is_threaded) _spin_lock(lockp);
+    OSSpinLockLock(lockp);
 }
 
 CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lockp) {
-    if (__is_threaded) _spin_unlock(lockp);
+    OSSpinLockUnlock(lockp);
+}
+
+#elif defined(__WIN32__)
+
+typedef LONG CFSpinLock_t;
+
+CF_INLINE void __CFSpinLock(CFSpinLock_t *slock) {
+    while (InterlockedExchange(slock, 1) != 0) {
+        Sleep(1);   // 1ms
+    }
+}
+
+CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lock) {
+    *lock = 0;
 }
 
 #else
@@ -305,9 +365,8 @@ CF_INLINE void __CFSpinUnlock(CFSpinLock_t *lockp) {
 
 #endif
 
-#if defined(__svr4__) || defined(__hpux__)
+#if defined(__svr4__) || defined(__hpux__) || defined(__WIN32__)
 #include <errno.h>
-#elif defined(__WIN32__)
 #elif defined(__MACH__) || defined(__LINUX__) || defined(__FREEBSD__)
 #include <sys/errno.h>
 #endif
@@ -367,11 +426,20 @@ CF_EXPORT CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex
 
 #define CF_IS_OBJC(typeID, obj)	(false)
 
+#define CF_OBJC_VOIDCALL0(obj, sel)
+#define CF_OBJC_VOIDCALL1(obj, sel, a1)
+#define CF_OBJC_VOIDCALL2(obj, sel, a1, a2)
+
+#define CF_OBJC_CALL0(rettype, retvar, obj, sel)
+#define CF_OBJC_CALL1(rettype, retvar, obj, sel, a1)
+#define CF_OBJC_CALL2(rettype, retvar, obj, sel, a1, a2)
+
 #define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel)
 #define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1)
 #define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2)
 #define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3)
 #define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4)
+#define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5)
 
 #endif
 
@@ -379,57 +447,95 @@ CF_EXPORT CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex
 #define __CFISAForTypeID(x) (NULL)
 #endif
 
+#define __CFMaxRuntimeTypes	256
+
 #if defined(__MACH__)
 
-struct objc_class {     // nasty, nasty
-        long __fields0__[2];
-        const char *name;
-        long __fields1__[7];
-};
-
-#define __CFMaxRuntimeTypes	256
+#include <objc/objc-class.h>
 	
 extern struct objc_class *__CFRuntimeObjCClassTable[];
 CF_INLINE void *__CFISAForTypeID(CFTypeID typeID) {
     return (void *)(__CFRuntimeObjCClassTable[typeID]);
 }
 
-typedef void *SEL;
-
-extern SEL (*__CFGetObjCSelector)(const char *);
+#if defined(__ppc__)
+#define __CFSendObjCMsg 0xfffeff00
+#else
 extern void * (*__CFSendObjCMsg)(const void *, SEL, ...);
+#endif
 
+#if 0
 // Although it might seem to make better performance to check for NULL
 // first, doing the other check first is better.
 CF_INLINE int CF_IS_OBJC(CFTypeID typeID, const void *obj) {
     return (((CFRuntimeBase *)obj)->_isa != __CFISAForTypeID(typeID) && ((CFRuntimeBase *)obj)->_isa > (void *)0xFFF);
 }
+#else
+#define CF_IS_OBJC(typeID, obj) (false)
+#endif
 
+// Invoke an ObjC method that returns void.
+// Assumes CF_IS_OBJC has already been checked.
+#define CF_OBJC_VOIDCALL0(obj, sel) \
+        {void (*func)(const void *, SEL) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s);}
+#define CF_OBJC_VOIDCALL1(obj, sel, a1) \
+        {void (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s, (a1));}
+#define CF_OBJC_VOIDCALL2(obj, sel, a1, a2) \
+        {void (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        func((const void *)obj, s, (a1), (a2));}
+
+
+// Invoke an ObjC method, leaving the result in "retvar".
+// Assumes CF_IS_OBJC has already been checked.
+#define CF_OBJC_CALL0(rettype, retvar, obj, sel) \
+        {rettype (*func)(const void *, SEL) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s);}
+#define CF_OBJC_CALL1(rettype, retvar, obj, sel, a1) \
+        {rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s, (a1));}
+#define CF_OBJC_CALL2(rettype, retvar, obj, sel, a1, a2) \
+        {rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+        static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+        retvar = func((const void *)obj, s, (a1), (a2));}
+
+// Invoke an ObjC method, return the result
 #define CF_OBJC_FUNCDISPATCH0(typeID, rettype, obj, sel) \
-	if (CF_IS_OBJC(typeID, obj)) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
 	{rettype (*func)(const void *, SEL) = (void *)__CFSendObjCMsg; \
-	static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
 	return func((const void *)obj, s);}
 #define CF_OBJC_FUNCDISPATCH1(typeID, rettype, obj, sel, a1) \
-	if (CF_IS_OBJC(typeID, obj)) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
 	{rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
 	return func((const void *)obj, s, (a1));}
 #define CF_OBJC_FUNCDISPATCH2(typeID, rettype, obj, sel, a1, a2) \
-	if (CF_IS_OBJC(typeID, obj)) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
 	{rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
 	return func((const void *)obj, s, (a1), (a2));}
 #define CF_OBJC_FUNCDISPATCH3(typeID, rettype, obj, sel, a1, a2, a3) \
-	if (CF_IS_OBJC(typeID, obj)) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
 	{rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
 	return func((const void *)obj, s, (a1), (a2), (a3));}
 #define CF_OBJC_FUNCDISPATCH4(typeID, rettype, obj, sel, a1, a2, a3, a4) \
-	if (CF_IS_OBJC(typeID, obj)) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
 	{rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
 	return func((const void *)obj, s, (a1), (a2), (a3), (a4));}
+#define CF_OBJC_FUNCDISPATCH5(typeID, rettype, obj, sel, a1, a2, a3, a4, a5) \
+	if (__builtin_expect(CF_IS_OBJC(typeID, obj), 0)) \
+	{rettype (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((const void *)obj, s, (a1), (a2), (a3), (a4), (a5));}
 
 #endif
 
@@ -440,11 +546,11 @@ extern void __CF_FAULT_CALLBACK(void **ptr);
 extern void *__CF_INVOKE_CALLBACK(void *, ...);
 
 #define FAULT_CALLBACK(V) __CF_FAULT_CALLBACK(V)
-#define INVOKE_CALLBACK1(P, A) __CF_INVOKE_CALLBACK(P, A)
-#define INVOKE_CALLBACK2(P, A, B) __CF_INVOKE_CALLBACK(P, A, B)
-#define INVOKE_CALLBACK3(P, A, B, C) __CF_INVOKE_CALLBACK(P, A, B, C)
-#define INVOKE_CALLBACK4(P, A, B, C, D) __CF_INVOKE_CALLBACK(P, A, B, C, D)
-#define INVOKE_CALLBACK5(P, A, B, C, D, E) __CF_INVOKE_CALLBACK(P, A, B, C, D, E)
+#define INVOKE_CALLBACK1(P, A) (((uintptr_t)(P) & 0x2) ? __CF_INVOKE_CALLBACK(P, A) : (P)(A))
+#define INVOKE_CALLBACK2(P, A, B) (((uintptr_t)(P) & 0x2) ? __CF_INVOKE_CALLBACK(P, A, B) : (P)(A, B))
+#define INVOKE_CALLBACK3(P, A, B, C) (((uintptr_t)(P) & 0x2) ? __CF_INVOKE_CALLBACK(P, A, B, C) : (P)(A, B, C))
+#define INVOKE_CALLBACK4(P, A, B, C, D) (((uintptr_t)(P) & 0x2) ? __CF_INVOKE_CALLBACK(P, A, B, C, D) : (P)(A, B, C, D))
+#define INVOKE_CALLBACK5(P, A, B, C, D, E) (((uintptr_t)(P) & 0x2) ? __CF_INVOKE_CALLBACK(P, A, B, C, D, E) : (P)(A, B, C, D, E))
 #else
 #define FAULT_CALLBACK(V)
 #define INVOKE_CALLBACK1(P, A) (P)(A)
@@ -454,8 +560,67 @@ extern void *__CF_INVOKE_CALLBACK(void *, ...);
 #define INVOKE_CALLBACK5(P, A, B, C, D, E) (P)(A, B, C, D, E)
 #endif
 
+#if defined(__MACH__)
+
+/* For the support of functionality which needs CarbonCore or other frameworks */
+extern void *__CFLookupCarbonCoreFunction(const char *name);
+extern void *__CFLookupCFNetworkFunction(const char *name);
+
+// These macros define an upcall or weak "symbol-lookup" wrapper function.
+// The parameters are:
+//   R : the return type of the function
+//   N : the name of the function (in the other library)
+//   P : the parenthesized parameter list of the function
+//   A : the parenthesized actual argument list to be passed
+//  opt: a fifth optional argument can be passed in which is the
+//       return value of the wrapper when the function cannot be
+//       found; should be of type R, & can be a function call
+// The name of the resulting wrapper function is:
+//    __CFCarbonCore_N (where N is the second parameter)
+//    __CFNetwork_N (where N is the second parameter)
+//
+// Example:
+//   DEFINE_WEAK_CARBONCORE_FUNC(void, DisposeHandle, (Handle h), (h))
+//
+
+#define DEFINE_WEAK_CARBONCORE_FUNC(R, N, P, A, ...)		\
+static R __CFCarbonCore_ ## N P {				\
+    static R (*dyfunc) P = (void *)(~(uintptr_t)0);		\
+    if ((void *)(~(uintptr_t)0) == dyfunc) {			\
+        dyfunc = __CFLookupCarbonCoreFunction(#N); }		\
+    return dyfunc ? dyfunc A : (R)(0 , ## __VA_ARGS__);		\
+}
+
+#define DEFINE_WEAK_CFNETWORK_FUNC(R, N, P, A, ...)		\
+static R __CFNetwork_ ## N P {					\
+    static R (*dyfunc) P = (void *)(~(uintptr_t)0);		\
+    if ((void *)(~(uintptr_t)0) == dyfunc) {			\
+        dyfunc = __CFLookupCFNetworkFunction(#N); }		\
+    return dyfunc ? dyfunc A : (R)(0 , ## __VA_ARGS__);		\
+}
+
+#else
+
+#define DEFINE_WEAK_CARBONCORE_FUNC(R, N, P, A, ...)
+#define DEFINE_WEAK_CFNETWORK_FUNC(R, N, P, A, ...)
+
+#endif
+
 
 __private_extern__ CFArrayRef _CFBundleCopyUserLanguages(Boolean useBackstops);
 
-#endif /* ! __COREFOUNDATION_CFINTERNAL__ */
+/* GC related internal SPIs. */
+extern malloc_zone_t *__CFCollectableZone;
+__private_extern__ void _CFStorageSetWeak(struct __CFStorage *storage);
 
+#if defined(__WIN32__)
+__private_extern__ const char *_CFDLLPath(void);
+__private_extern__ void __CFStringCleanup(void);
+__private_extern__ void __CFSocketCleanup(void);
+__private_extern__ void __CFUniCharCleanup(void);
+__private_extern__ void __CFStreamCleanup(void);
+// We should export this as SPI or API to clients - 3514284
+CF_EXPORT CFAbsoluteTime _CFAbsoluteTimeFromFileTime(const FILETIME *ft);
+#endif
+
+#endif /* ! __COREFOUNDATION_CFINTERNAL__ */

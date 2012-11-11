@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -75,6 +73,12 @@ enum {		/* Bits 3-2 */
     __kCFBagHasCustomCallBacks = 3	/* callbacks are at end of header */
 };
 
+enum {		/* Bit 4 */
+    __kCFCollectionIsWeak = 0,
+    __kCFCollectionIsStrong = 1,
+};
+
+
 struct __CFBagBucket {
     const void *_key;
     CFIndex _count;
@@ -106,6 +110,16 @@ CF_INLINE bool __CFBagBucketIsOccupied(CFBagRef bag, const struct __CFBagBucket 
 
 /* Bits 1-0 of the base reserved bits are used for mutability variety */
 /* Bits 3-2 of the base reserved bits are used for callback indicator bits */
+/* Bits 4-5 are used by GC */
+
+static bool isStrongMemory(CFTypeRef collection) {
+    return  ! __CFBitfieldGetValue(((const CFRuntimeBase *)collection)->_info, 4, 4);
+}
+
+static bool needsRestore(CFTypeRef collection) {
+    return __CFBitfieldGetValue(((const CFRuntimeBase *)collection)->_info, 5, 5);
+}
+
 
 CF_INLINE CFIndex __CFBagGetType(CFBagRef bag) {
     return __CFBitfieldGetValue(((const CFRuntimeBase *)bag)->_info, 1, 0);
@@ -166,7 +180,7 @@ static void __CFBagFindBuckets1(CFBagRef bag, const void *key, struct __CFBagBuc
 	    return;
 	} else if (__CFBagBucketIsDeleted(bag, currentBucket)) {
 	    /* do nothing */
-	} else if (currentBucket->_key == key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void *))cb->equal, currentBucket->_key, key, bag->_context))) {
+	} else if (currentBucket->_key == key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void *))cb->equal, currentBucket->_key, key, bag->_context))) {
 	    *match = currentBucket;
 	    return;
 	}
@@ -191,9 +205,9 @@ static void __CFBagFindBuckets2(CFBagRef bag, const void *key, struct __CFBagBuc
 	    return;
 	} else if (__CFBagBucketIsDeleted(bag, currentBucket)) {
 	    if (!*nomatch) *nomatch = currentBucket;
-	} else if (!*match && (currentBucket->_key == key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void *))cb->equal, currentBucket->_key, key, bag->_context)))) {
+	} else if (!*match && (currentBucket->_key == key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void *))cb->equal, currentBucket->_key, key, bag->_context)))) {
 	    *match = currentBucket;
-	    if (*nomatch) return;
+	    return;
 	}
 	probe = (probe + probeskip) % bag->_bucketsNum;
 	if (start == probe) return;
@@ -313,19 +327,24 @@ static CFStringRef __CFBagCopyDescription(CFTypeRef cf) {
 static void __CFBagDeallocate(CFTypeRef cf) {
     CFMutableBagRef bag = (CFMutableBagRef)cf;
     CFAllocatorRef allocator = CFGetAllocator(bag);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	const CFBagCallBacks *cb = __CFBagGetCallBacks(bag);
+	if (cb->retain == NULL && cb->release == NULL)
+	    return; // XXX_PCB keep bag intact during finalization.
+    }
     if (__CFBagGetType(bag) == __kCFBagImmutable) {
         __CFBitfieldSetValue(((CFRuntimeBase *)bag)->_info, 1, 0, __kCFBagFixedMutable);
     }
     CFBagRemoveAllValues(bag);
     if (__CFBagGetType(bag) == __kCFBagMutable && bag->_buckets) {
-	CFAllocatorDeallocate(allocator, bag->_buckets);
+	_CFAllocatorDeallocateGC(allocator, bag->_buckets);
     }
 }
 
 static CFTypeID __kCFBagTypeID = _kCFRuntimeNotATypeID;
 
 static const CFRuntimeClass __CFBagClass = {
-    0,
+    _kCFRuntimeScannedObject,
     "CFBag",
     NULL,	// init
     NULL,	// copy
@@ -348,7 +367,22 @@ static CFBagRef __CFBagInit(CFAllocatorRef allocator, UInt32 flags, CFIndex capa
     struct __CFBag *memory;
     UInt32 size;
     CFIndex idx;
+    CFBagCallBacks nonRetainingCallbacks;
     __CFBitfieldSetValue(flags, 31, 2, 0);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	if (!callBacks || (callBacks->retain == NULL && callBacks->release == NULL)) {
+	    __CFBitfieldSetValue(flags, 4, 4, 1); // setWeak
+	}
+	else {
+	    if (callBacks->retain == __CFTypeCollectionRetain && callBacks->release == __CFTypeCollectionRelease) {
+		nonRetainingCallbacks = *callBacks;
+		nonRetainingCallbacks.retain = NULL;
+		nonRetainingCallbacks.release = NULL;
+		callBacks = &nonRetainingCallbacks;
+		__CFBitfieldSetValue(flags, 5, 5, 1); // setNeedsRestore
+	    }
+	}
+    }
     if (__CFBagCallBacksMatchNull(callBacks)) {
 	__CFBitfieldSetValue(flags, 3, 2, __kCFBagHasNullCallBacks);
     } else if (__CFBagCallBacksMatchCFType(callBacks)) {
@@ -377,6 +411,9 @@ static CFBagRef __CFBagInit(CFAllocatorRef allocator, UInt32 flags, CFIndex capa
     memory->_context = NULL;
     switch (__CFBitfieldGetValue(flags, 1, 0)) {
     case __kCFBagImmutable:
+        if (!isStrongMemory(memory)) {  // if weak, don't scan
+            auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_OBJECT_UNSCANNED);
+        }
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFBag (immutable)");
 	memory->_capacity = capacity;	/* Don't round up capacity */
 	memory->_bucketsNum = __CFBagNumBucketsForCapacity(memory->_capacity);
@@ -386,6 +423,9 @@ static CFBagRef __CFBagInit(CFAllocatorRef allocator, UInt32 flags, CFIndex capa
 	}
 	break;
     case __kCFBagFixedMutable:
+        if (!isStrongMemory(memory)) {  // if weak, don't scan
+            auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_OBJECT_UNSCANNED);
+        }
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFBag (mutable-fixed)");
 	memory->_capacity = capacity;	/* Don't round up capacity */
 	memory->_bucketsNum = __CFBagNumBucketsForCapacity(memory->_capacity);
@@ -440,12 +480,26 @@ CFBagRef CFBagCreateCopy(CFAllocatorRef allocator, CFBagRef bag) {
     const CFBagCallBacks *cb;
     CFIndex numValues = CFBagGetCount(bag);
     const void **list, *buffer[256];
-    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (list != buffer && __CFOASafe) __CFSetLastAllocationEventName(list, "CFBag (temp)");
     CFBagGetValues(bag, list);
-    cb = CF_IS_OBJC(__kCFBagTypeID, bag) ? &kCFTypeBagCallBacks : __CFBagGetCallBacks(bag);
+    CFBagCallBacks patchedCB;
+    if (CF_IS_OBJC(__kCFBagTypeID, bag)) {
+	cb = &kCFTypeBagCallBacks; 
+    }
+    else {
+	cb = __CFBagGetCallBacks(bag);
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	    if (needsRestore(bag)) {
+		patchedCB = *cb;    // copy
+		cb = &patchedCB;    // reset to copy
+		patchedCB.retain = __CFTypeCollectionRetain;
+		patchedCB.release = __CFTypeCollectionRelease;
+	    }
+	}
+    }
     result = CFBagCreate(allocator, list, numValues, cb);
-    if (list != buffer) CFAllocatorDeallocate(allocator, list);
+    if (list != buffer) CFAllocatorDeallocate(allocator, list); // XXX_PCB GC OK
     return result;
 }
 
@@ -455,21 +509,37 @@ CFMutableBagRef CFBagCreateMutableCopy(CFAllocatorRef allocator, CFIndex capacit
     CFIndex idx, numValues = CFBagGetCount(bag);
     const void **list, *buffer[256];
     CFAssert3(0 == capacity || numValues <= capacity, __kCFLogAssertion, "%s(): for fixed-mutable bags, capacity (%d) must be greater than or equal to initial number of values (%d)", __PRETTY_FUNCTION__, capacity, numValues);
-    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (list != buffer && __CFOASafe) __CFSetLastAllocationEventName(list, "CFBag (temp)");
     CFBagGetValues(bag, list);
-    cb = CF_IS_OBJC(__kCFBagTypeID, bag) ? &kCFTypeBagCallBacks : __CFBagGetCallBacks(bag);
+    CFBagCallBacks patchedCB;
+    if (CF_IS_OBJC(__kCFBagTypeID, bag)) {
+	cb = &kCFTypeBagCallBacks; 
+    }
+    else {
+	cb = __CFBagGetCallBacks(bag);
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	    if (needsRestore(bag)) {
+		patchedCB = *cb;    // copy
+		cb = &patchedCB;    // reset to copy
+		patchedCB.retain = __CFTypeCollectionRetain;
+		patchedCB.release = __CFTypeCollectionRelease;
+	    }
+	}
+    }
     result = CFBagCreateMutable(allocator, capacity, cb);
     if (0 == capacity) _CFBagSetCapacity(result, numValues);
     for (idx = 0; idx < numValues; idx++) {
 	CFBagAddValue(result, list[idx]);
     }
-    if (list != buffer) CFAllocatorDeallocate(allocator, list);
+    if (list != buffer) CFAllocatorDeallocate(allocator, list); // GC OK
     return result;
 }
 
+
 void _CFBagSetContext(CFBagRef bag, void *context) {
-    ((struct __CFBag *)bag)->_context = context;
+    CFAllocatorRef allocator = CFGetAllocator(bag);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bag, bag->_context, context);
 }
 
 CFIndex CFBagGetCount(CFBagRef bag) {
@@ -506,13 +576,17 @@ Boolean CFBagGetValueIfPresent(CFBagRef bag, const void *candidate, const void *
     __CFGenericValidateType(bag, __kCFBagTypeID);
     if (0 == bag->_count) return false;
     __CFBagFindBuckets1(bag, candidate, &match);
-    return (match ? ((value ? *value = match->_key : NULL), true) : false);
+    return (match ? ((value ? __CFObjCStrongAssign(match->_key, value) : NULL), true) : false);
 }
 
 void CFBagGetValues(CFBagRef bag, const void **values) {
     struct __CFBagBucket *buckets;
     CFIndex idx, cnt, nbuckets;
     __CFGenericValidateType(bag, __kCFBagTypeID);
+    if (CF_USING_COLLECTABLE_MEMORY) {
+	// GC: speculatively issue a write-barrier on the copied to buffers (3743553).
+	__CFObjCWriteBarrierRange(values, bag->_count * sizeof(void *));
+    }
     buckets = bag->_buckets;
     nbuckets = bag->_bucketsNum;
     for (idx = 0; idx < nbuckets; idx++) {
@@ -544,9 +618,11 @@ static void __CFBagGrow(CFMutableBagRef bag, CFIndex numNewValues) {
     struct __CFBagBucket *oldbuckets = bag->_buckets;
     CFIndex idx, oldnbuckets = bag->_bucketsNum;
     CFIndex oldCount = bag->_count;
+    CFAllocatorRef allocator = CFGetAllocator(bag);
     bag->_capacity = __CFBagRoundUpCapacity(oldCount + numNewValues);
     bag->_bucketsNum = __CFBagNumBucketsForCapacity(bag->_capacity);
-    bag->_buckets = CFAllocatorAllocate(CFGetAllocator(bag), bag->_bucketsNum * sizeof(struct __CFBagBucket), 0);
+    void *bucket = _CFAllocatorAllocateGC(allocator, bag->_bucketsNum * sizeof(struct __CFBagBucket), isStrongMemory(bag) ? AUTO_MEMORY_SCANNED : AUTO_MEMORY_UNSCANNED);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bag, bag->_buckets, bucket);
     if (__CFOASafe) __CFSetLastAllocationEventName(bag->_buckets, "CFBag (store)");
     if (NULL == bag->_buckets) HALT;
     for (idx = bag->_bucketsNum; idx--;) {
@@ -558,12 +634,14 @@ static void __CFBagGrow(CFMutableBagRef bag, CFIndex numNewValues) {
 	    struct __CFBagBucket *match, *nomatch;
 	    __CFBagFindBuckets2(bag, oldbuckets[idx]._key, &match, &nomatch);
 	    CFAssert3(!match, __kCFLogAssertion, "%s(): two values (%p, %p) now hash to the same slot; mutable value changed while in table or hash value is not immutable", __PRETTY_FUNCTION__, oldbuckets[idx]._key, match->_key);
-	    nomatch->_key = oldbuckets[idx]._key;
-	    nomatch->_count = oldbuckets[idx]._count;
+	    if (nomatch) {
+		CF_WRITE_BARRIER_ASSIGN(allocator, nomatch->_key, oldbuckets[idx]._key);
+		nomatch->_count = oldbuckets[idx]._count;
+	    }
 	}
     }
     CFAssert1(bag->_count == oldCount, __kCFLogAssertion, "%s(): bag count differs after rehashing; error", __PRETTY_FUNCTION__);
-    CFAllocatorDeallocate(CFGetAllocator(bag), oldbuckets);
+    _CFAllocatorDeallocateGC(CFGetAllocator(bag), oldbuckets);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
@@ -579,6 +657,7 @@ void _CFBagSetCapacity(CFMutableBagRef bag, CFIndex cap) {
 
 void CFBagAddValue(CFMutableBagRef bag, const void *value) {
     struct __CFBagBucket *match, *nomatch;
+    CFAllocatorRef allocator;
     const CFBagCallBacks *cb;
     const void *newValue;
     __CFGenericValidateType(bag, __kCFBagTypeID);
@@ -599,9 +678,10 @@ void CFBagAddValue(CFMutableBagRef bag, const void *value) {
     if (match) {
 	match->_count++; bag->_count++;
     } else {
+        allocator = CFGetAllocator(bag);
 	cb = __CFBagGetCallBacks(bag);
 	if (cb->retain) {
-	    newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), CFGetAllocator(bag), value, bag->_context);
+	    newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), allocator, value, bag->_context);
 	} else {
 	    newValue = value;
 	}
@@ -611,7 +691,7 @@ void CFBagAddValue(CFMutableBagRef bag, const void *value) {
 	if (bag->_deletedMarker == newValue) {
 	    __CFBagFindNewDeletedMarker(bag);
 	}
-	nomatch->_key = newValue;
+	CF_WRITE_BARRIER_ASSIGN(allocator, nomatch->_key, newValue);
 	nomatch->_count = 1;
 	bag->_bucketsUsed++;
 	bag->_count++;
@@ -620,6 +700,7 @@ void CFBagAddValue(CFMutableBagRef bag, const void *value) {
 
 void CFBagReplaceValue(CFMutableBagRef bag, const void *value) {
     struct __CFBagBucket *match;
+    CFAllocatorRef allocator;
     const CFBagCallBacks *cb;
     const void *newValue;
     __CFGenericValidateType(bag, __kCFBagTypeID);
@@ -634,14 +715,15 @@ void CFBagReplaceValue(CFMutableBagRef bag, const void *value) {
     if (0 == bag->_count) return;
     __CFBagFindBuckets1(bag, value, &match);
     if (!match) return;
+    allocator = CFGetAllocator(bag);
     cb = __CFBagGetCallBacks(bag);
     if (cb->retain) {
-	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), CFGetAllocator(bag), value, bag->_context);
+	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), allocator, value, bag->_context);
     } else {
 	newValue = value;
     }
     if (cb->release) {
-	INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))cb->release), CFGetAllocator(bag), match->_key, bag->_context);
+	INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))cb->release), allocator, match->_key, bag->_context);
 	match->_key = bag->_deletedMarker;
     }
     if (bag->_emptyMarker == newValue) {
@@ -650,11 +732,12 @@ void CFBagReplaceValue(CFMutableBagRef bag, const void *value) {
     if (bag->_deletedMarker == newValue) {
 	__CFBagFindNewDeletedMarker(bag);
     }
-    match->_key = newValue;
+    CF_WRITE_BARRIER_ASSIGN(allocator, match->_key, newValue);
 }
 
 void CFBagSetValue(CFMutableBagRef bag, const void *value) {
     struct __CFBagBucket *match, *nomatch;
+    CFAllocatorRef allocator;
     const CFBagCallBacks *cb;
     const void *newValue;
     __CFGenericValidateType(bag, __kCFBagTypeID);
@@ -671,15 +754,16 @@ void CFBagSetValue(CFMutableBagRef bag, const void *value) {
 	break;
     }
     __CFBagFindBuckets2(bag, value, &match, &nomatch);
+    allocator = CFGetAllocator(bag);
     cb = __CFBagGetCallBacks(bag);
     if (cb->retain) {
-	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), CFGetAllocator(bag), value, bag->_context);
+	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), allocator, value, bag->_context);
     } else {
 	newValue = value;
     }
     if (match) {
 	if (cb->release) {
-	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))cb->release), CFGetAllocator(bag), match->_key, bag->_context);
+	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))cb->release), allocator, match->_key, bag->_context);
 	    match->_key = bag->_deletedMarker;
 	}
 	if (bag->_emptyMarker == newValue) {
@@ -688,7 +772,7 @@ void CFBagSetValue(CFMutableBagRef bag, const void *value) {
 	if (bag->_deletedMarker == newValue) {
 	    __CFBagFindNewDeletedMarker(bag);
 	}
-	match->_key = newValue;
+	CF_WRITE_BARRIER_ASSIGN(allocator, match->_key, newValue);
     } else {
 	CFAssert3(__kCFBagFixedMutable != __CFBagGetType(bag) || bag->_count < bag->_capacity, __kCFLogAssertion, "%s(): capacity exceeded on fixed-capacity bag %p (capacity = %d)", __PRETTY_FUNCTION__, bag, bag->_capacity);
 	if (bag->_emptyMarker == newValue) {
@@ -697,7 +781,7 @@ void CFBagSetValue(CFMutableBagRef bag, const void *value) {
 	if (bag->_deletedMarker == newValue) {
 	    __CFBagFindNewDeletedMarker(bag);
 	}
-	nomatch->_key = newValue;
+	CF_WRITE_BARRIER_ASSIGN(allocator, nomatch->_key, newValue);
 	nomatch->_count = 1;
 	bag->_bucketsUsed++;
 	bag->_count++;

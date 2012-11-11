@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,14 +21,14 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFStringEncodingConverterPriv.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__)
 #define __COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__ 1
 
 #include <CoreFoundation/CFBase.h>
-#include "CFStringEncodingConverterExt.h" 
+#include <CoreFoundation/CFStringEncodingConverterExt.h>
 
 #define MAX_IANA_ALIASES (4)
 
@@ -65,12 +63,12 @@ typedef struct {
     UInt32 scriptCode;
 } _CFConverterEntry;
 
-extern CFStringEncodingConverter __CFConverterASCII;
-extern CFStringEncodingConverter __CFConverterISOLatin1;
-extern CFStringEncodingConverter __CFConverterMacRoman;
-extern CFStringEncodingConverter __CFConverterWinLatin1;
-extern CFStringEncodingConverter __CFConverterNextStepLatin;
-extern CFStringEncodingConverter __CFConverterUTF8;
+extern const CFStringEncodingConverter __CFConverterASCII;
+extern const CFStringEncodingConverter __CFConverterISOLatin1;
+extern const CFStringEncodingConverter __CFConverterMacRoman;
+extern const CFStringEncodingConverter __CFConverterWinLatin1;
+extern const CFStringEncodingConverter __CFConverterNextStepLatin;
+extern const CFStringEncodingConverter __CFConverterUTF8;
 
 
 #endif /* ! __COREFOUNDATION_CFSTRINGENCODINGCONVERTERPRIV__ */

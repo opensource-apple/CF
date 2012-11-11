@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFURLAccess.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -55,6 +53,12 @@ values represent errors common to any scheme.  Scheme-specific error
 codes should be positive, non-zero, and should be used only if one of
 the predefined Apple error codes does not apply.  Error codes should
 be publicized and documented with the scheme-specific properties.
+
+NOTE: When asking for the resource data, this call will allocate the entire
+resource in memory. This can be very expensive, depending on the size of the
+resource (file). Please use CFStream or other techniques if you are downloading
+large files.
+
 */
 CF_EXPORT
 Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode);

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -82,7 +80,7 @@ typedef struct {
     unsigned int _validEntriesBitmap;
     unsigned char _numOfAllocEntries;
     unsigned char _isAnnexInverted;
-    unsigned short _padding;
+    uint16_t _padding;
 } CFCharSetAnnexStruct;
 
 struct __CFCharacterSet {
@@ -236,7 +234,7 @@ static Boolean __CFCSetIsBitmapEqualToRange(const UInt32 *bits, UniChar firstCha
         UInt32 lastCharMask;
 
         length = firstCharIndex % sizeof(UInt32);
-        firstCharMask = ((((UInt32)0xFF) << (firstChar & (BITSPERBYTE - 1))) << (((sizeof(UInt32) - 1) - length) * BITSPERBYTE)) | (0xFFFFFFFF >> ((length + 1) * BITSPERBYTE));
+        firstCharMask = (((((UInt32)0xFF) << (firstChar & (BITSPERBYTE - 1))) & 0xFF) << (((sizeof(UInt32) - 1) - length) * BITSPERBYTE)) | (0xFFFFFFFF >> ((length + 1) * BITSPERBYTE));
         
         length = lastCharIndex % sizeof(UInt32);
         lastCharMask = ((((UInt32)0xFF) >> ((BITSPERBYTE - 1) - (lastChar & (BITSPERBYTE - 1)))) << (((sizeof(UInt32) - 1) - length) * BITSPERBYTE)) | (0xFFFFFFFF << ((sizeof(UInt32) - length) * BITSPERBYTE));
@@ -707,7 +705,7 @@ static uint8_t *__CFCreateCompactBitmap(CFAllocatorRef allocator, const uint8_t 
         src += __kCFCompactBitmapPageSize;
     }
 
-    dst = (uint8_t *)CFAllocatorAllocate(allocator, __kCFCompactBitmapNumPages + (__kCFCompactBitmapPageSize * numPages), 0);
+    dst = (uint8_t *)CFAllocatorAllocate(allocator, __kCFCompactBitmapNumPages + (__kCFCompactBitmapPageSize * numPages), AUTO_MEMORY_UNSCANNED);
 
     if (numPages > 0) {
         uint8_t *dstBody = dst + __kCFCompactBitmapNumPages;
@@ -800,7 +798,8 @@ static void __CFCSetRemoveNonBMPPlanesInRange(CFMutableCharacterSetRef cset, CFR
 
 static void __CFCSetMakeBitmap(CFMutableCharacterSetRef cset) {
     if (!__CFCSetIsBitmap(cset) || !__CFCSetBitmapBits(cset)) {
-        uint8_t *bitmap = CFAllocatorAllocate(CFGetAllocator(cset), __kCFBitmapSize, 0);
+        CFAllocatorRef allocator = CFGetAllocator(cset);
+        uint8_t *bitmap = CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
         __CFCSetGetBitmap(cset, bitmap);
         
         if (__CFCSetIsBuiltin(cset)) {
@@ -814,7 +813,9 @@ static void __CFCSetMakeBitmap(CFMutableCharacterSetRef cset) {
 
                 __CFCSetAllocateAnnexForPlane(cset, numPlanes - 1);
                 for (idx = 1;idx < numPlanes;idx++) {
-                    if (NULL == annexBitmap) annexBitmap = CFAllocatorAllocate(CFGetAllocator(cset), __kCFBitmapSize, 0);
+                    if (NULL == annexBitmap) {
+                        annexBitmap = CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
+                    }
                     result = CFUniCharGetBitmapForPlane(__CFCSetBuiltinType(cset), idx, annexBitmap, false);
                     if (result == kCFUniCharBitmapEmpty) continue;
                     if (result == kCFUniCharBitmapAll) {
@@ -829,13 +830,13 @@ static void __CFCSetMakeBitmap(CFMutableCharacterSetRef cset) {
                     __CFCSetPutHasHashValue(annexSet, false);
                     annexBitmap = NULL;
                 }
-                if (annexBitmap) CFAllocatorDeallocate(CFGetAllocator(cset), annexBitmap);
+                if (annexBitmap) CFAllocatorDeallocate(allocator, annexBitmap);
             }
         } else if (__CFCSetIsCompactBitmap(cset) && __CFCSetCompactBitmapBits(cset)) {
-            CFAllocatorDeallocate(CFGetAllocator(cset), __CFCSetCompactBitmapBits(cset));
+            CFAllocatorDeallocate(allocator, __CFCSetCompactBitmapBits(cset));
             __CFCSetPutCompactBitmapBits(cset, NULL);
         } else if (__CFCSetIsString(cset) && __CFCSetStringBuffer(cset)) {
-            CFAllocatorDeallocate(CFGetAllocator(cset), __CFCSetStringBuffer(cset));
+            CFAllocatorDeallocate(allocator, __CFCSetStringBuffer(cset));
             __CFCSetPutStringBuffer(cset, NULL);
         } else if (__CFCSetIsRange(cset)) { // We may have to allocate annex here
             Boolean needsToInvert = (!__CFCSetHasNonBMPPlane(cset) && __CFCSetIsInverted(cset) ? true : false);
@@ -1418,7 +1419,7 @@ CFCharacterSetRef CFCharacterSetCreateWithCharactersInString(CFAllocatorRef allo
         CFMutableCharacterSetRef cset;
 
         if (!(cset = __CFCSetGenericCreate(allocator, __kCFCharSetClassString))) return NULL;
-        __CFCSetPutStringBuffer(cset, CFAllocatorAllocate(CFGetAllocator(cset), __kCFStringCharSetMax * sizeof(UniChar), 0));
+        __CFCSetPutStringBuffer(cset, CFAllocatorAllocate(CFGetAllocator(cset), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
         __CFCSetPutStringLength(cset, length);
         CFStringGetCharacters(theString, CFRangeMake(0, length), __CFCSetStringBuffer(cset));
         qsort(__CFCSetStringBuffer(cset), length, sizeof(UniChar), chcompar);
@@ -1453,7 +1454,7 @@ CFCharacterSetRef CFCharacterSetCreateWithBitmapRepresentation(CFAllocatorRef al
         uint8_t *cBitmap;
 
         if (length < __kCFBitmapSize) {
-            bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, 0);
+            bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
             memmove(bitmap, CFDataGetBytePtr(theData), length);
             memset(bitmap + length, 0, __kCFBitmapSize - length);
 
@@ -1470,7 +1471,7 @@ CFCharacterSetRef CFCharacterSetCreateWithBitmapRepresentation(CFAllocatorRef al
             cBitmap = __CFCreateCompactBitmap(allocator, CFDataGetBytePtr(theData));
 
             if (cBitmap == NULL) {
-                bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, 0);
+                bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
                 memmove(bitmap, CFDataGetBytePtr(theData), __kCFBitmapSize);
 
                 __CFCSetPutBitmapBits(cset, bitmap);
@@ -1490,7 +1491,7 @@ CFCharacterSetRef CFCharacterSetCreateWithBitmapRepresentation(CFAllocatorRef al
                     --length; // Decrement the plane no byte
 
                     if (length < __kCFBitmapSize) {
-                        bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, 0);
+                        bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
                         memmove(bitmap, bytes, length);
                         memset(bitmap + length, 0, __kCFBitmapSize - length);
             
@@ -1507,7 +1508,7 @@ CFCharacterSetRef CFCharacterSetCreateWithBitmapRepresentation(CFAllocatorRef al
                         cBitmap = __CFCreateCompactBitmap(allocator, bytes);
             
                         if (cBitmap == NULL) {
-                            bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, 0);
+                            bitmap = (uint8_t *)CFAllocatorAllocate(allocator, __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
                             memmove(bitmap, bytes, __kCFBitmapSize);
             
                             __CFCSetPutBitmapBits(annexSet, bitmap);
@@ -1582,7 +1583,7 @@ CFMutableCharacterSetRef __CFCharacterSetCreateCopy(CFAllocatorRef alloc, CFChar
             break;
 
         case __kCFCharSetClassString:
-            __CFCSetPutStringBuffer(cset, CFAllocatorAllocate(alloc, __kCFStringCharSetMax * sizeof(UniChar), 0));
+            __CFCSetPutStringBuffer(cset, CFAllocatorAllocate(alloc, __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
             __CFCSetPutStringLength(cset, __CFCSetStringLength(theSet));
             memmove(__CFCSetStringBuffer(cset), __CFCSetStringBuffer(theSet), __CFCSetStringLength(theSet) * sizeof(UniChar));
             break;
@@ -1592,7 +1593,7 @@ CFMutableCharacterSetRef __CFCharacterSetCreateCopy(CFAllocatorRef alloc, CFChar
                 uint8_t * bitmap = (isMutable ? NULL : __CFCreateCompactBitmap(alloc, __CFCSetBitmapBits(theSet)));
 
                 if (bitmap == NULL) {
-                    bitmap = (uint8_t *)CFAllocatorAllocate(alloc, sizeof(uint8_t) * __kCFBitmapSize, 0);
+                    bitmap = (uint8_t *)CFAllocatorAllocate(alloc, sizeof(uint8_t) * __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
                     memmove(bitmap, __CFCSetBitmapBits(theSet), __kCFBitmapSize);
                     __CFCSetPutBitmapBits(cset, bitmap);
                 } else {
@@ -1609,7 +1610,7 @@ CFMutableCharacterSetRef __CFCharacterSetCreateCopy(CFAllocatorRef alloc, CFChar
 
             if (compactBitmap) {
                 uint32_t size = __CFCSetGetCompactBitmapSize(compactBitmap);
-                uint8_t *newBitmap = (uint8_t *)CFAllocatorAllocate(alloc, size, 0);
+                uint8_t *newBitmap = (uint8_t *)CFAllocatorAllocate(alloc, size, AUTO_MEMORY_UNSCANNED);
 
                 memmove(newBitmap, compactBitmap, size);
                 __CFCSetPutCompactBitmapBits(cset, newBitmap);
@@ -2103,7 +2104,7 @@ void CFCharacterSetAddCharactersInRange(CFMutableCharacterSetRef theSet, CFRange
         } else if (__CFCSetIsString(theSet) && __CFCSetStringLength(theSet) + theRange.length < __kCFStringCharSetMax) {
             UniChar *buffer;
             if (!__CFCSetStringBuffer(theSet))
-                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), 0));
+                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
             buffer = __CFCSetStringBuffer(theSet) + __CFCSetStringLength(theSet);
             __CFCSetPutStringLength(theSet, __CFCSetStringLength(theSet) + theRange.length);
             while (theRange.length--) *buffer++ = theRange.location++;
@@ -2161,7 +2162,7 @@ void CFCharacterSetRemoveCharactersInRange(CFMutableCharacterSetRef theSet, CFRa
         } else if (__CFCSetIsString(theSet) && __CFCSetStringLength(theSet) + theRange.length < __kCFStringCharSetMax) {
             UniChar *buffer;
             if (!__CFCSetStringBuffer(theSet))
-                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), 0));
+                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
             buffer = __CFCSetStringBuffer(theSet) + __CFCSetStringLength(theSet);
             __CFCSetPutStringLength(theSet, __CFCSetStringLength(theSet) + theRange.length);
             while (theRange.length--) *buffer++ = theRange.location++;
@@ -2205,7 +2206,7 @@ void CFCharacterSetAddCharactersInString(CFMutableCharacterSetRef theSet,  CFStr
             if (__CFCSetIsEmpty(theSet)) __CFCSetPutStringLength(theSet, 0); // Make sure to reset this
 
             if (!__CFCSetStringBuffer(theSet))
-                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), 0));
+                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
             buffer = __CFCSetStringBuffer(theSet) + __CFCSetStringLength(theSet);
 
             __CFCSetPutClassType(theSet, __kCFCharSetClassString);
@@ -2249,7 +2250,7 @@ void CFCharacterSetRemoveCharactersInString(CFMutableCharacterSetRef theSet, CFS
             if (__CFCSetIsEmpty(theSet)) __CFCSetPutStringLength(theSet, 0); // Make sure to reset this
 
             if (!__CFCSetStringBuffer(theSet))
-                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), 0));
+                __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
             buffer = __CFCSetStringBuffer(theSet) + __CFCSetStringLength(theSet);
 
             __CFCSetPutClassType(theSet, __kCFCharSetClassString);
@@ -2455,12 +2456,12 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                 case __kCFCharSetClassString:
                     __CFCSetPutStringLength(theSet, __CFCSetStringLength(theOtherSet));
                     if (!__CFCSetStringBuffer(theSet))
-                        __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), 0));
+                        __CFCSetPutStringBuffer(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), __kCFStringCharSetMax * sizeof(UniChar), AUTO_MEMORY_UNSCANNED));
                    memmove(__CFCSetStringBuffer(theSet), __CFCSetStringBuffer(theOtherSet), __CFCSetStringLength(theSet) * sizeof(UniChar));
                     break;
 
                 case __kCFCharSetClassBitmap:
-                    __CFCSetPutBitmapBits(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), sizeof(uint8_t) * __kCFBitmapSize, 0));
+                    __CFCSetPutBitmapBits(theSet, CFAllocatorAllocate(CFGetAllocator(theSet), sizeof(uint8_t) * __kCFBitmapSize, AUTO_MEMORY_UNSCANNED));
                     memmove(__CFCSetBitmapBits(theSet), __CFCSetBitmapBits(theOtherSet), __kCFBitmapSize);
                     break;
 
@@ -2468,7 +2469,7 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                     const uint8_t *cBitmap = __CFCSetCompactBitmapBits(theOtherSet);
                     uint8_t *newBitmap;
                     uint32_t size = __CFCSetGetCompactBitmapSize(cBitmap);
-                    newBitmap = (uint8_t *)CFAllocatorAllocate(CFGetAllocator(theSet), sizeof(uint8_t) * size, 0);
+                    newBitmap = (uint8_t *)CFAllocatorAllocate(CFGetAllocator(theSet), sizeof(uint8_t) * size, AUTO_MEMORY_UNSCANNED);
                     __CFCSetPutBitmapBits(theSet, newBitmap);
                     memmove(newBitmap, cBitmap, size);
                     }
@@ -2593,7 +2594,7 @@ void CFCharacterSetInvert(CFMutableCharacterSetRef theSet) {
         UInt32 *bitmap = (UInt32*) __CFCSetBitmapBits(theSet);
 
         if (NULL == bitmap) {
-            bitmap =  (UInt32 *)CFAllocatorAllocate(CFGetAllocator(theSet), __kCFBitmapSize, 0);
+            bitmap =  (UInt32 *)CFAllocatorAllocate(CFGetAllocator(theSet), __kCFBitmapSize, AUTO_MEMORY_UNSCANNED);
             __CFCSetPutBitmapBits(theSet, (uint8_t *)bitmap);
             for (idx = 0;idx < count;idx++) bitmap[idx] = 0xFFFFFFFF;
         } else {
@@ -2670,7 +2671,6 @@ CFCharacterSetKeyedCodingType _CFCharacterSetGetKeyedCodingType(CFCharacterSetRe
     }
 }
 
-bool _CFCharacterSetIsMutable(CFCharacterSetRef cset) { return __CFCSetIsMutable(cset); }
 CFCharacterSetPredefinedSet _CFCharacterSetGetKeyedCodingBuiltinType(CFCharacterSetRef cset) { return __CFCSetBuiltinType(cset); }
 CFRange _CFCharacterSetGetKeyedCodingRange(CFCharacterSetRef cset) { return CFRangeMake(__CFCSetRangeFirstChar(cset), __CFCSetRangeLength(cset)); }
 CFStringRef _CFCharacterSetCreateKeyedCodingString(CFCharacterSetRef cset) { return CFStringCreateWithCharacters(NULL, __CFCSetStringBuffer(cset), __CFCSetStringLength(cset)); }

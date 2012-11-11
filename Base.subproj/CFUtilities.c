@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,8 +25,9 @@
 	Responsibility: Christopher Kane
 */
 
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFInternal.h"
+#include "CFPriv.h"
 #include <CoreFoundation/CFBundle.h>
 #include <CoreFoundation/CFURLAccess.h>
 #include <CoreFoundation/CFPropertyList.h>
@@ -36,13 +35,16 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #if defined(__MACH__)
     #include <mach/mach.h>
     #include <pthread.h>
-    #include <mach-o/dyld.h>
     #include <mach-o/loader.h>
+    #include <mach-o/dyld.h>
     #include <crt_externs.h>
+    #include <dlfcn.h>
     #include <Security/AuthSession.h>
+    #include <sys/stat.h>
 #endif
 #if defined(__WIN32__)
     #include <windows.h>
@@ -51,10 +53,7 @@
 #if defined(__LINUX__) || defined(__FREEBSD__)
     #include <string.h>
     #include <pthread.h>
-    #include <stdlib.h>
 #endif
-
-extern char **_CFGetProgname(void);
 
 #define LESS16(A, W)	do { if (A < ((uint64_t)1 << (W))) LESS8(A, (W) - 8); LESS8(A, (W) + 8); } while (0)
 #define LESS8(A, W)	do { if (A < ((uint64_t)1 << (W))) LESS4(A, (W) - 4); LESS4(A, (W) + 4); } while (0)
@@ -262,8 +261,6 @@ static CFStringRef _CFCopyLocalizedVersionKey(CFBundleRef *bundlePtr, CFStringRe
     return localized ? localized : CFRetain(nonLocalized);
 }
 
-// Note, if this function is changed to cache the computed data using frozen named data support, it should really be called once per path (that is why the results are cached below in the functions calling this).
-//
 static CFDictionaryRef _CFCopyVersionDictionary(CFStringRef path) {
     CFPropertyListRef plist = NULL;
     CFDataRef data;
@@ -317,24 +314,22 @@ CFStringRef CFCopySystemVersionString(void) {
     return versionString;
 }
 
-// These two functions cache the dictionaries to avoid calling _CFCopyVersionDictionary() more than once per dict desired
+// Obsolete: These two functions cache the dictionaries to avoid calling _CFCopyVersionDictionary() more than once per dict desired
+// In fact, they do not cache any more, because the file can change after
+// apps are running in some situations, and apps need the new info.
+// Proper caching and testing to see if the file has changed, without race
+// conditions, would require semi-convoluted use of fstat().
 
 CFDictionaryRef _CFCopySystemVersionDictionary(void) {
-    static CFPropertyListRef plist = NULL;	// Set to -1 for failed lookup
-    if (!plist) {
+    CFPropertyListRef plist = NULL;
 	plist = _CFCopyVersionDictionary(CFSTR("/System/Library/CoreServices/SystemVersion.plist"));
-        if (!plist) plist = (CFPropertyListRef)(-1);
-    }
-    return (plist == (CFPropertyListRef)(-1)) ? NULL : CFRetain(plist);
+    return plist;
 }
 
 CFDictionaryRef _CFCopyServerVersionDictionary(void) {
-    static CFPropertyListRef plist = NULL;	// Set to -1 for failed lookup
-    if (!plist) {
+    CFPropertyListRef plist = NULL;
 	plist = _CFCopyVersionDictionary(CFSTR("/System/Library/CoreServices/ServerVersion.plist"));
-        if (!plist) plist = (CFPropertyListRef)(-1);
-    }
-    return (plist == (CFPropertyListRef)(-1)) ? NULL : CFRetain(plist);
+    return plist;
 }
 
 CONST_STRING_DECL(_kCFSystemVersionProductNameKey, "ProductName")
@@ -347,57 +342,35 @@ CONST_STRING_DECL(_kCFSystemVersionProductVersionStringKey, "Version")
 CONST_STRING_DECL(_kCFSystemVersionBuildStringKey, "Build")
 
 #if defined(__MACH__)
+
+typedef struct {
+    uint16_t    primaryVersion;
+    uint8_t     secondaryVersion;
+    uint8_t     tertiaryVersion;
+} CFLibraryVersion;
+
 CFLibraryVersion CFGetExecutableLinkedLibraryVersion(CFStringRef libraryName) {
     CFLibraryVersion ret = {0xFFFF, 0xFF, 0xFF};
-    struct mach_header *mh;
-    struct load_command *lc;
-    unsigned int idx;
     char library[CFMaxPathSize];	// search specs larger than this are pointless
-
     if (!CFStringGetCString(libraryName, library, sizeof(library), kCFStringEncodingUTF8)) return ret;
-    mh = _dyld_get_image_header(0);	// image header #0 is the executable
-    if (NULL == mh) return ret;
-    lc = (struct load_command *)((char *)mh + sizeof(struct mach_header));
-    for (idx = 0; idx < mh->ncmds; idx++) {
-        if (lc->cmd == LC_LOAD_DYLIB) {
-            struct dylib_command *dl = (struct dylib_command *)lc;
-            char *path = (char *)lc + dl->dylib.name.offset;
-            if (NULL != strstr(path, library)) {
-		ret.primaryVersion = dl->dylib.current_version >> 16;
-		ret.secondaryVersion = (dl->dylib.current_version >> 8) & 0xff;
-		ret.tertiaryVersion = dl->dylib.current_version & 0xff;
-		return ret;
-            }
-        }
-        lc = (struct load_command *)((char *)lc + lc->cmdsize);
+    int32_t version = NSVersionOfLinkTimeLibrary(library);
+    if (-1 != version) {
+	ret.primaryVersion = version >> 16;
+	ret.secondaryVersion = (version >> 8) & 0xff;
+	ret.tertiaryVersion = version & 0xff;
     }
     return ret;
 }
 
 CFLibraryVersion CFGetExecutingLibraryVersion(CFStringRef libraryName) {
     CFLibraryVersion ret = {0xFFFF, 0xFF, 0xFF};
-    struct mach_header *mh;
-    struct load_command *lc;
-    unsigned int idx1, idx2, cnt;
     char library[CFMaxPathSize];	// search specs larger than this are pointless
-
     if (!CFStringGetCString(libraryName, library, sizeof(library), kCFStringEncodingUTF8)) return ret;
-    cnt = _dyld_image_count();
-    for (idx1 = 1; idx1 < cnt; idx1++) {
-	char *image_name = _dyld_get_image_name(idx1);
-	if (NULL == image_name || NULL == strstr(image_name, library)) continue;
-	mh = _dyld_get_image_header(idx1);
-	if (NULL == mh) return ret;
-	lc = (struct load_command *)((char *)mh + sizeof(struct mach_header));
-	for (idx2 = 0; idx2 < mh->ncmds; idx2++) {
-	    if (lc->cmd == LC_ID_DYLIB) {
-		struct dylib_command *dl = (struct dylib_command *)lc;
-		ret.primaryVersion = dl->dylib.current_version >> 16;
-		ret.secondaryVersion = (dl->dylib.current_version >> 8) & 0xff;
-		ret.tertiaryVersion = dl->dylib.current_version & 0xff;
-		return ret;
-	    }
-	}
+    int32_t version = NSVersionOfRunTimeLibrary(library);
+    if (-1 != version) {
+	ret.primaryVersion = version >> 16;
+	ret.secondaryVersion = (version >> 8) & 0xff;
+	ret.tertiaryVersion = version & 0xff;
     }
     return ret;
 }
@@ -416,7 +389,7 @@ Else
    Continue checking (the next library)
 */
 #define checkLibrary(LIBNAME, VERSIONFIELD) \
-    {int vers = CFGetExecutableLinkedLibraryVersion(LIBNAME).primaryVersion; \
+    {uint16_t vers = (NSVersionOfLinkTimeLibrary(LIBNAME) >> 16); \
      if ((vers != 0xFFFF) && (versionInfo[version].VERSIONFIELD != 0xFFFF) && ((version == 0) || (versionInfo[version-1].VERSIONFIELD < versionInfo[version].VERSIONFIELD))) return (results[version] = ((vers < versionInfo[version].VERSIONFIELD) ? false : true)); }
 
 CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
@@ -442,9 +415,10 @@ CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
 	{55, 7, 620, 425, 226, 122, 16, 10, 67},	/* CFSystemVersionPuma (used the last versions) */
         {56, 8, 631, 431, 232, 122, 17, 11, 73},	/* CFSystemVersionJaguar */
         {67, 9, 704, 481, 281, 126, 19, 16, 159},	/* CFSystemVersionPanther */
-        {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}	/* CFSystemVersionMerlot */
+        {73, 10, 750, 505, 305, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF},	/* CFSystemVersionTiger */
+        {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF},	/* CFSystemVersionChablis */
     };
-    static char results[CFSystemVersionMax] = {-2, -2, -2, -2, -2};	/* We cache the results per-release; there are only a few of these... */
+    static char results[CFSystemVersionMax] = {-2, -2, -2, -2, -2, -2};	/* We cache the results per-release; there are only a few of these... */
     if (version >= CFSystemVersionMax) return false;	/* Actually, we don't know the answer, and something scary is going on */
     if (results[version] != -2) return results[version];
 
@@ -453,25 +427,53 @@ CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
         return results[version];
     }
     
-    checkLibrary(CFSTR("/libSystem."), libSystemVersion);	// Pretty much everyone links with this
-    checkLibrary(CFSTR("/Cocoa."), cocoaVersion);
-    checkLibrary(CFSTR("/AppKit."), appkitVersion);
-    checkLibrary(CFSTR("/Foundation."), fouVersion);
-    checkLibrary(CFSTR("/CoreFoundation."), cfVersion);
-    checkLibrary(CFSTR("/Carbon."), carbonVersion);
-    checkLibrary(CFSTR("/ApplicationServices."), applicationServicesVersion);
-    checkLibrary(CFSTR("/CoreServices."), coreServicesVersion);
-    checkLibrary(CFSTR("/IOKit."), iokitVersion);
+    checkLibrary("System", libSystemVersion);	// Pretty much everyone links with this
+    checkLibrary("Cocoa", cocoaVersion);
+    checkLibrary("AppKit", appkitVersion);
+    checkLibrary("Foundation", fouVersion);
+    checkLibrary("CoreFoundation", cfVersion);
+    checkLibrary("Carbon", carbonVersion);
+    checkLibrary("ApplicationServices", applicationServicesVersion);
+    checkLibrary("CoreServices", coreServicesVersion);
+    checkLibrary("IOKit", iokitVersion);
     
     /* If not found, then simply return NO to indicate earlier --- compatibility by default, unfortunately */
     return false;
 }
+#else
+CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version) {
+    return true;
+}
 #endif
 
 
+__private_extern__ void *__CFLookupCarbonCoreFunction(const char *name) {
+    static void *image = NULL;
+    if (NULL == image) {
+	image = dlopen("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/CarbonCore", RTLD_LAZY | RTLD_LOCAL);
+    }
+    void *dyfunc = NULL;
+    if (image) {
+	dyfunc = dlsym(image, name);
+    }
+    return dyfunc;
+}
+
+__private_extern__ void *__CFLookupCFNetworkFunction(const char *name) {
+    static void *image = NULL;
+    if (NULL == image) {
+	image = dlopen("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CFNetwork.framework/Versions/A/CFNetwork", RTLD_LAZY | RTLD_LOCAL);
+    }
+    void *dyfunc = NULL;
+    if (image) {
+	dyfunc = dlsym(image, name);
+    }
+    return dyfunc;
+}
 
 
-void CFShow(const void *obj) { // ??? supposed to use stderr for Logging ?
+
+static void _CFShowToFile(FILE *file, Boolean flush, const void *obj) {
      CFStringRef str;
      CFIndex idx, cnt;
      CFStringInlineBuffer buffer;
@@ -490,19 +492,36 @@ void CFShow(const void *obj) { // ??? supposed to use stderr for Logging ?
      }
      cnt = CFStringGetLength(str);
 
+     // iTunes used OutputDebugStringW(theString);
+
      CFStringInitInlineBuffer(str, &buffer, CFRangeMake(0, cnt));
      for (idx = 0; idx < cnt; idx++) {
          UniChar ch = __CFStringGetCharacterFromInlineBufferQuick(&buffer, idx);
          if (ch < 128) {
-             fprintf (stderr, "%c", ch);
+             fprintf(file, "%c", ch);
 	     lastNL = (ch == '\n');
          } else {
-             fprintf (stderr, "\\u%04x", ch);
+             fprintf(file, "\\u%04x", ch);
          }
      }
-     if (!lastNL) fprintf(stderr, "\n");
+     if (!lastNL) {
+         fprintf(file, "\n");
+         if (flush) fflush(file);
+     }
 
      if (str) CFRelease(str);
+}
+
+void CFShow(const void *obj) {
+     _CFShowToFile(stderr, true, obj);
+}
+    
+static CFGregorianDate gregorianDate(void) {
+    CFTimeZoneRef tz = CFTimeZoneCopySystem();	// specifically choose system time zone for logs
+    CFGregorianDate gdate = CFAbsoluteTimeGetGregorianDate(CFAbsoluteTimeGetCurrent(), tz);
+    CFRelease(tz);
+    gdate.second = gdate.second + 0.0005;
+    return gdate;
 }
 
 void CFLog(int p, CFStringRef format, ...) {
@@ -516,18 +535,16 @@ void CFLog(int p, CFStringRef format, ...) {
 
     __CFSpinLock(&lock); 
 #if defined(__WIN32__)
-    printf("*** CFLog (%d): %s[%d] ", p, __argv[0], GetCurrentProcessId());
+    fprintf(stderr, "*** %s[%ld] CFLog(%d): ", *_CFGetProgname(), GetCurrentProcessId(), p);
 #else
-	// Date format: YYYY '-' MM '-' DD ' ' hh ':' mm ':' ss.fff
-	CFTimeZoneRef tz = CFTimeZoneCopySystem();	// specifically choose system time zone for logs
-	CFGregorianDate gdate = CFAbsoluteTimeGetGregorianDate(CFAbsoluteTimeGetCurrent(), tz);
-	CFRelease(tz);
-	gdate.second = gdate.second + 0.0005;
-    fprintf(stderr, "%04d-%02d-%02d %02d:%02d:%06.3f %s[%d] CFLog (%d): ", (int)gdate.year, gdate.month, gdate.day, gdate.hour, gdate.minute, gdate.second, *_CFGetProgname(), getpid(), p);
+    CFGregorianDate gdate = gregorianDate();
+    // Date format: YYYY '-' MM '-' DD ' ' hh ':' mm ':' ss.fff
+    fprintf_l(stderr, NULL, "%04d-%02d-%02d %02d:%02d:%06.3f %s[%d] CFLog (%d): ", (int)gdate.year, gdate.month, gdate.day, gdate.hour, gdate.minute, gdate.second, *_CFGetProgname(), getpid(), p);
 #endif
 
     CFShow(result);
     __CFSpinUnlock(&lock); 
     CFRelease(result);
 }
+
 

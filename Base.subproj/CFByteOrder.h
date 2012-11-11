@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,13 +21,13 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFByteOrder.h
-	Copyright (c) 1995-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1995-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBYTEORDER__)
 #define __COREFOUNDATION_CFBYTEORDER__ 1
 
-#if defined(__i386) && !defined(__LITTLE_ENDIAN__)
+#if defined(__i386__) && !defined(__LITTLE_ENDIAN__)
     #define __LITTLE_ENDIAN__ 1
 #endif
 

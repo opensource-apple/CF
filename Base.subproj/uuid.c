@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,6 +25,127 @@
 	Responsibility: Doug Davidson
 */
 
+#include <CoreFoundation/CFBase.h>
+#include <CoreFoundation/CFDate.h>
+#include "CFInternal.h"
+#include "CFUtilitiesPriv.h"
+#include <string.h>
+
+typedef struct
+{
+    unsigned char eaddr[6];      /* 6 bytes of ethernet hardware address */
+} uuid_address_t;
+
+#if defined(__WIN32__)
+
+static OSErr GetEthernetAddr(uuid_address_t *addr) {
+    return -1;
+}
+
+#else
+
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/sockio.h>
+#include <sys/uio.h>
+#include <sys/errno.h>
+
+#include <netinet/in.h>
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_types.h>
+
+#if !defined(MAX)
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+#endif
+
+#define IFR_NEXT(ifr)   \
+    ((struct ifreq *) ((char *) (ifr) + sizeof(*(ifr)) + \
+      MAX(0, (int) (ifr)->ifr_addr.sa_len - (int) sizeof((ifr)->ifr_addr))))
+
+static OSErr GetEthernetAddr(uuid_address_t *addr) {
+    struct ifconf ifc;
+    struct ifreq ifrbuf[30], *ifr;
+    register int s, i;
+    Boolean foundIt = false;
+
+    if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        return -1;
+    }
+
+    ifc.ifc_buf = (caddr_t)ifrbuf;
+    ifc.ifc_len = sizeof (ifrbuf);
+    if (ioctl(s, SIOCGIFCONF, &ifc) ==  -1) {
+        close(s);
+        return -1;
+    }
+
+    for (ifr = (struct ifreq *)ifc.ifc_buf, i=0; (char *)ifr < &ifc.ifc_buf[ifc.ifc_len]; ifr = IFR_NEXT(ifr), i++) {
+        unsigned char *p, c;
+
+        if (*ifr->ifr_name == '\0') {
+            continue;
+        }
+        /*
+         * Adapt to buggy kernel implementation (> 9 of a type)
+         */
+
+        p = &ifr->ifr_name[strlen(ifr->ifr_name)-1];
+        if ((c = *p) > '0'+9) {
+            snprintf(p, 2, "%d", c-'0'); // at least 3 bytes available here, we hope!
+        }
+
+        if (strcmp(ifr->ifr_name, "en0") == 0) {
+            if (ifr->ifr_addr.sa_family == AF_LINK) {
+                struct sockaddr_dl *sa = ((struct sockaddr_dl *)&ifr->ifr_addr);
+                if (sa->sdl_type == IFT_ETHER || sa->sdl_type == IFT_FDDI || sa->sdl_type == IFT_ISO88023 || sa->sdl_type == IFT_ISO88024 || sa->sdl_type == IFT_ISO88025) {
+                    for (i=0, p=&sa->sdl_data[sa->sdl_nlen] ; i++ < sa->sdl_alen; p++) {
+                        addr->eaddr[i-1] = *p;
+                    }
+                    foundIt = true;
+                    break;
+                }
+            }
+        }
+    }
+    close(s);
+    return (foundIt ? 0 : -1);
+}
+
+#undef IFR_NEXT
+
+#endif // __WIN32__
+
+__private_extern__ CFStringRef __CFCopyRegularEthernetAddrString(void) {
+    uuid_address_t addr;
+    static CFStringRef string = NULL;
+    static Boolean lookedUpAddr = false;
+    
+    if (!lookedUpAddr) {
+        if (GetEthernetAddr(&addr) == 0) {
+            string = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%02x:%02x:%02x:%02x:%02x:%02x"), addr.eaddr[0], addr.eaddr[1], addr.eaddr[2], addr.eaddr[3], addr.eaddr[4], addr.eaddr[5]);
+        }
+        lookedUpAddr = true;
+    }
+    return (string ? CFRetain(string) : NULL);
+}
+
+__private_extern__ CFStringRef __CFCopyEthernetAddrString(void) {
+    uuid_address_t addr;
+    static CFStringRef string = NULL;
+    static Boolean lookedUpAddr = false;
+    
+    if (!lookedUpAddr) {
+        if (GetEthernetAddr(&addr) == 0) {
+            string = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%02x%02x%02x%02x%02x%02x"), addr.eaddr[0], addr.eaddr[1], addr.eaddr[2], addr.eaddr[3], addr.eaddr[4], addr.eaddr[5]);
+        }
+        lookedUpAddr = true;
+    }
+    return (string ? CFRetain(string) : NULL);
+}
+
 #if defined(__WIN32__)
 /* _CFGenerateUUID function just calls the COM library's UUID generator
  * (Aleksey Dukhnyakov)
@@ -35,13 +154,13 @@
 #include <ole2.h>
 #include <objbase.h>
 
-unsigned long _CFGenerateUUID(uuid_t *uuid) {
+LONG _CFGenerateUUID(uint8_t *uuid_bytes) {
     RPC_STATUS rStatus;
 
     /* call GetScode() function to get RPC_STATUS, because
      * CoCreateGuid(uuid) function return HRESULT type
      */
-    rStatus = GetScode(CoCreateGuid(uuid));
+    rStatus = GetScode(CoCreateGuid((uuid_t *)uuid_bytes));
 
     /* We accept only following results RPC_S_OK, RPC_S_UUID_LOCAL_ONLY
      */
@@ -98,21 +217,6 @@ unsigned long _CFGenerateUUID(uuid_t *uuid) {
 **
 */
 
-#include <CoreFoundation/CFBase.h>
-#include <CoreFoundation/CFDate.h>
-#include "CFInternal.h"
-#include <string.h>
-
-
-/* uuid_t already defined in RPCDCE.H (WIN32 header) 
- * (Aleksey Dukhnyakov) 
- */ 
-#if defined(__WIN32__)  
-#define UUID_T_DEFINED 1
-#endif
-
-#if !defined(UUID_T_DEFINED)
-#define UUID_T_DEFINED 1
 
 /*    uuid
  *
@@ -120,39 +224,28 @@ unsigned long _CFGenerateUUID(uuid_t *uuid) {
  *    structure regardless what platform it is on.
  */
 
-struct uuid_t {
-    unsigned long        time_low;
-    unsigned short        time_mid;
-    unsigned short        time_hi_and_version;
+struct uuid_v1_t {
+    uint32_t        time_low;
+    uint16_t        time_mid;
+    uint16_t        time_hi_and_version;
     unsigned char        clock_seq_hi_and_reserved;
     unsigned char        clock_seq_low;
     unsigned char        node[6];
 };
 
-typedef struct uuid_t uuid_t;
-
-#endif
+typedef struct uuid_v1_t uuid_v1_t;
 
 enum {
     kUUIDInternalError = -21001,
     kUUIDInvalidString = -21002
 };
 
-extern unsigned long _CFGenerateUUID(uuid_t *uuid);
-
-typedef struct
-{
-    unsigned char eaddr[6];      /* 6 bytes of ethernet hardware address */
-} uuid_address_t;
-
 typedef struct {
-    unsigned long lo;
-    unsigned long hi;
+    uint32_t lo;
+    uint32_t hi;
 } uuid_time_t;
 
 static OSErr GenRandomEthernet(uuid_address_t *addr);
-static OSErr GetEthernetAddr(uuid_address_t *addr);
-
 static OSErr ReadPrefData(void);
 
 /*
@@ -161,8 +254,8 @@ static OSErr ReadPrefData(void);
 
 static uuid_address_t GSavedENetAddr = {{0, 0, 0, 0, 0, 0}};
 static uuid_time_t GLastTime = {0, 0};            /* Clock state info */
-static unsigned short GTimeAdjust = 0;
-static unsigned short GClockSeq = 0;
+static uint16_t GTimeAdjust = 0;
+static uint16_t GClockSeq = 0;
 
 
 /*
@@ -333,8 +426,8 @@ static const long      uuid_c_version          = 1;
  ****************************************************************************/
 
 typedef struct {
-    unsigned long lo;
-    unsigned long hi;
+    uint32_t lo;
+    uint32_t hi;
 } unsigned64_t;
 
 /*
@@ -343,17 +436,17 @@ typedef struct {
  
 static uuid_time_t          time_now = {0, 0};     /* utc time as of last query        */
 //static uuid_time_t          time_last;    /* utc time last time I looked      */
-//static unsigned short       time_adjust;  /* 'adjustment' to ensure uniqness  */
-//static unsigned short       clock_seq;    /* 'adjustment' for backwards clocks*/
+//static uint16_t       time_adjust;  /* 'adjustment' to ensure uniqness  */
+//static uint16_t       clock_seq;    /* 'adjustment' for backwards clocks*/
 
 /*
  * true_random variables
  */
 
-static unsigned long     rand_m = 0;         /* multiplier                       */
-static unsigned long     rand_ia = 0;        /* adder #1                         */
-static unsigned long     rand_ib = 0;        /* adder #2                         */
-static unsigned long     rand_irand = 0;     /* random value                     */
+static uint32_t     rand_m = 0;         /* multiplier                       */
+static uint32_t     rand_ia = 0;        /* adder #1                         */
+static uint32_t     rand_ib = 0;        /* adder #2                         */
+static uint32_t     rand_irand = 0;     /* random value                     */
 
 typedef enum
 {
@@ -386,7 +479,7 @@ static void true_random_init (void);
 /*
  * T R U E _ R A N D O M
  */
-static unsigned short true_random (void);
+static uint16_t true_random (void);
 
 
 /*
@@ -398,7 +491,7 @@ static unsigned short true_random (void);
  *       I've put it in here as 16-bits since there isn't a
  *       14-bit unsigned integer type (yet)
  */ 
-static void new_clock_seq ( unsigned short * /*clock_seq*/);
+static void new_clock_seq ( uint16_t * /*clock_seq*/);
 
 
 /*
@@ -426,6 +519,13 @@ static uuid_address_t saved_addr = {{0, 0, 0, 0, 0, 0}};
 static int got_address = false;
 static int last_addr_result = false;
 
+static OSErr GenRandomEthernet(uuid_address_t *addr) {
+    unsigned int i;
+    for (i = 0; i < 6; i++) {
+        addr->eaddr[i] = (unsigned char)(true_random() & 0xff);
+    }
+    return 0;
+}
 
 /*
 **++
@@ -499,44 +599,6 @@ static int uuid_get_address(uuid_address_t *addr)
         memmove (&saved_addr, addr, sizeof (uuid_address_t));
     }
     return last_addr_result;
-}
-
-static OSErr GenRandomEthernet(uuid_address_t *addr) {
-    unsigned int i;
-    for (i = 0; i < 6; i++) {
-        addr->eaddr[i] = (unsigned char)(true_random() & 0xff);
-    }
-    return 0;
-}
-
-__private_extern__ CFStringRef __CFCopyRegularEthernetAddrString(void) {
-    uuid_address_t addr;
-    static CFStringRef string = NULL;
-    static Boolean lookedUpAddr = false;
-    
-    if (!lookedUpAddr) {
-        // dont use the cache, since a random enet addr might have been put in it
-        if (GetEthernetAddr(&addr) == 0) {
-            string = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%02x:%02x:%02x:%02x:%02x:%02x"), addr.eaddr[0], addr.eaddr[1], addr.eaddr[2], addr.eaddr[3], addr.eaddr[4], addr.eaddr[5]);
-        }
-        lookedUpAddr = true;
-    }
-    return (string ? CFRetain(string) : NULL);
-}
-
-__private_extern__ CFStringRef __CFCopyEthernetAddrString(void) {
-    uuid_address_t addr;
-    static CFStringRef string = NULL;
-    static Boolean lookedUpAddr = false;
-    
-    if (!lookedUpAddr) {
-        // dont use the cache, since a random enet addr might have been put in it
-        if (GetEthernetAddr(&addr) == 0) {
-            string = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%02x%02x%02x%02x%02x%02x"), addr.eaddr[0], addr.eaddr[1], addr.eaddr[2], addr.eaddr[3], addr.eaddr[4], addr.eaddr[5]);
-        }
-        lookedUpAddr = true;
-    }
-    return (string ? CFRetain(string) : NULL);
 }
 
 /*****************************************************************************
@@ -719,11 +781,11 @@ static void uuid__get_os_time (uuid_time_t * uuid_time)
     double utc_at = at / utc_conversion_factor;
     
     /* Convert 'at' in double seconds to 100ns units in utc */
-    utc.hi = (unsigned long)utc_at;
+    utc.hi = (uint32_t)utc_at;
     utc_at -= (double)utc.hi;
     utc_at *= utc_conversion_factor;
     utc_at *= 10000000.0;
-    utc.lo = (unsigned long)utc_at;
+    utc.lo = (uint32_t)utc_at;
 
     /*
      * Offset between DTSS formatted times and Unix formatted times.
@@ -795,60 +857,9 @@ static OSErr init()
     return 0;
 }
 
-/*
-** New name: GenerateUID
-** 
-**++
-**
-**  ROUTINE NAME:       uuid_create
-**
-**  SCOPE:              PUBLIC - declared in UUID.IDL
-**
-**  DESCRIPTION:
-**
-**  Create a new UUID. Note: we only know how to create the new
-**  and improved UUIDs.
-**
-**  INPUTS:             none
-**
-**  INPUTS/OUTPUTS:     none
-**
-**  OUTPUTS:
-**
-**      uuid            A new UUID value
-**
-**      status          return status value
-**
-**          uuid_s_ok
-**          uuid_s_coding_error
-**
-**  IMPLICIT INPUTS:    none
-**
-**  IMPLICIT OUTPUTS:   none
-**
-**  FUNCTION VALUE:     void
-**
-**  SIDE EFFECTS:       none
-**
-**--
-**/
-
-/*
-PUBLIC void uuid_create
-#ifdef _DCE_PROTO_
-(
-    uuid_t                  *uuid,
-    unsigned long              *status
-)
-#else
-(uuid, status)
-uuid_t                  *uuid;
-unsigned long              *status;
-#endif
-*/
-
-__private_extern__ unsigned long _CFGenerateUUID(uuid_t *uuid)
+static uint32_t _CFGenerateV1UUID(uint8_t *uuid_bytes)
 {
+    uuid_v1_t *uuid = (uuid_v1_t *)uuid_bytes;
     OSErr                    err;
     uuid_address_t            eaddr;
     int               got_no_time = false;
@@ -935,6 +946,37 @@ __private_extern__ unsigned long _CFGenerateUUID(uuid_t *uuid)
     return 0;
 }
 
+#if defined(__MACH__)
+
+#include <uuid/uuid.h>
+
+__private_extern__ uint32_t _CFGenerateUUID(uuid_t *uuid_bytes) {
+    static Boolean useV1UUIDs = false, checked = false;
+    uuid_t uuid;
+    if (!checked) {
+        const char *value = getenv("CFUUIDVersionNumber");
+        if (value) {
+            if (1 == strtoul(value, NULL, 0)) useV1UUIDs = true;
+        } else {
+            if (!_CFExecutableLinkedOnOrAfter(CFSystemVersionTiger)) useV1UUIDs = true;
+        }
+        checked = true;
+    }
+    if (useV1UUIDs) return _CFGenerateV1UUID(uuid_bytes);
+    uuid_generate_random(uuid);
+    memcpy(uuid_bytes, uuid, sizeof(uuid));
+    return 0;
+} 
+
+#else
+
+__private_extern__ uint32_t _CFGenerateUUID(uuid_t *uuid_bytes) {
+    return _CFGenerateV1UUID(uuid_bytes);
+}
+
+#endif  // __MACH__
+
+
 /*****************************************************************************
  *
  *  LOCAL MATH PROCEDURES - math procedures used internally by the UUID module
@@ -1020,16 +1062,16 @@ static uuid_compval_t time_cmp(uuid_time_t *time1,uuid_time_t *time2)
 static void true_random_init (void)
 {
     uuid_time_t         t;
-    unsigned short          *seedp, seed=0;
+    uint16_t          *seedp, seed=0;
 
 
     /*
      * optimal/recommended starting values according to the reference
      */
-    static unsigned long   rand_m_init     = 971;
-    static unsigned long   rand_ia_init    = 11113;
-    static unsigned long   rand_ib_init    = 104322;
-    static unsigned long   rand_irand_init = 4181;
+    static uint32_t   rand_m_init     = 971;
+    static uint32_t   rand_ia_init    = 11113;
+    static uint32_t   rand_ib_init    = 104322;
+    static uint32_t   rand_irand_init = 4181;
 
     rand_m = rand_m_init;
     rand_ia = rand_ia_init;
@@ -1048,7 +1090,7 @@ static void true_random_init (void)
      * are multiple processes creating UUID's on a system, we add in the PID.
      */
     uuid__get_os_time(&t);
-    seedp = (unsigned short *)(&t);
+    seedp = (uint16_t *)(&t);
     seed ^= *seedp++;
     seed ^= *seedp++;
     seed ^= *seedp++;
@@ -1063,7 +1105,7 @@ static void true_random_init (void)
 ** using this routine should modify the return value accordingly.
 **/
 
-static unsigned short true_random (void)
+static uint16_t true_random (void)
 {
     rand_m += 7;
     rand_ia += 1907;
@@ -1097,11 +1139,11 @@ static unsigned short true_random (void)
 static void new_clock_seq 
 #ifdef _DCE_PROTO_
 (
-    unsigned short              *clkseq
+    uint16_t              *clkseq
 )
 #else
 (clkseq)
-unsigned short              *clkseq;
+uint16_t              *clkseq;
 #endif
 {
     /*
@@ -1152,6 +1194,7 @@ static OSErr ReadPrefData(void)
     GTimeAdjust = 0;
     GClockSeq = 0;
 
+
     return 0;
 }
 
@@ -1175,93 +1218,7 @@ static void WritePrefData(void)
 {
 }
 
-#endif
-
-
-#if defined(__MACH__)
-
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <sys/sockio.h>
-#include <sys/uio.h>
-#include <sys/errno.h>
-
-#include <netinet/in.h>
-#include <net/if.h>
-#include <net/if_dl.h>
-#include <net/if_types.h>
-
-#if !defined(MAX)
-#define MAX(a, b) ((a) < (b) ? (b) : (a))
-#endif
-
-#define IFR_NEXT(ifr)   \
-    ((struct ifreq *) ((char *) (ifr) + sizeof(*(ifr)) + \
-      MAX(0, (int) (ifr)->ifr_addr.sa_len - (int) sizeof((ifr)->ifr_addr))))
-
-static OSErr GetEthernetAddr(uuid_address_t *addr) {
-    struct ifconf ifc;
-    struct ifreq ifrbuf[30], *ifr;
-    register int s, i;
-    Boolean foundIt = false;
-
-    if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        return -1;
-    }
-
-    ifc.ifc_buf = (caddr_t)ifrbuf;
-    ifc.ifc_len = sizeof (ifrbuf);
-    if (ioctl(s, SIOCGIFCONF, &ifc) ==  -1) {
-        close(s);
-        return -1;
-    }
-
-    for (ifr = (struct ifreq *)ifc.ifc_buf, i=0; (char *)ifr < &ifc.ifc_buf[ifc.ifc_len]; ifr = IFR_NEXT(ifr), i++) {
-        unsigned char *p, c;
-
-        if (*ifr->ifr_name == '\0') {
-            continue;
-        }
-        /*
-         * Adapt to buggy kernel implementation (> 9 of a type)
-         */
-
-        p = &ifr->ifr_name[strlen(ifr->ifr_name)-1];
-        if ((c = *p) > '0'+9) {
-            sprintf(p, "%d", c-'0');
-        }
-
-        if (strcmp(ifr->ifr_name, "en0") == 0) {
-            if (ifr->ifr_addr.sa_family == AF_LINK) {
-                struct sockaddr_dl *sa = ((struct sockaddr_dl *)&ifr->ifr_addr);
-                if (sa->sdl_type == IFT_ETHER || sa->sdl_type == IFT_FDDI || sa->sdl_type == IFT_ISO88023 || sa->sdl_type == IFT_ISO88024 || sa->sdl_type == IFT_ISO88025) {
-                    for (i=0, p=&sa->sdl_data[sa->sdl_nlen] ; i++ < sa->sdl_alen; p++) {
-                        addr->eaddr[i-1] = *p;
-                    }
-                    foundIt = true;
-                    break;
-                }
-            }
-        }
-    }
-    close(s);
-    return (foundIt ? 0 : -1);
-}
-
-#elif defined (__WIN32__)
-
-#error Dont know how to find Ethernet Address on Win32
-// MF:!!! Maybe on Windows we should just call the COM library's UUID generator...
-
-#elif defined (__LINUX__) || defined(__FREEBSD__)
-
-static OSErr GetEthernetAddr(uuid_address_t *addr) {
-    return -1;
-}
-
-#endif
+#endif // 0
 
 #undef HI_WORD
 #undef RAND_MASK
@@ -1291,7 +1248,5 @@ static OSErr GetEthernetAddr(uuid_address_t *addr) {
 #undef UUID_C_100NS_PER_USEC
 #undef UADD_UVLW_2_UVLW
 #undef UADD_UW_2_UVLW
-#undef IFR_NEXT
 
-#endif
-
+#endif // __WIN32__

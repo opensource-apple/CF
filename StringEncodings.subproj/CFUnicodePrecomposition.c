@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,66 +25,15 @@
 	Responsibility: Aki Inoue
 */
 
-#if !defined(KERNEL)
-#define KERNEL 0
-#endif
-
 #include <string.h>
-#if KERNEL
-#include "CFUnicodePrecomposition.h"
-#include "CFUniCharPrecompData.h"
-#else KERNEL
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFCharacterSet.h>
 #include "CFUniChar.h"
 #include "CFUnicodePrecomposition.h"
 #include "CFInternal.h"
 #include "CFUniCharPriv.h"
-#endif KERNEL
 
 // Canonical Precomposition
-#if KERNEL
-static const uint32_t __CFUniCharPrecompositionTableLength = (sizeof(__CFUniCharPrecompSourceTable) / (sizeof(uint32_t) * 2));
-CF_EXPORT uint8_t **CFUniCharCombiningPriorityTable;
-CF_EXPORT uint8_t **CFUniCharCombiningPriorityExtraTable;
-CF_EXPORT uint8_t CFUniCharNumberOfPlanesForCombiningPriority;
-
-CF_EXPORT uint8_t __CFUniCharGetCombiningPriority(UTF32Char character) {
-    if (character < (CFUniCharNumberOfPlanesForCombiningPriority << 16)) {
-        uint32_t plane = character >> 16;
-        const uint8_t *bitmap = CFUniCharCombiningPriorityTable[plane];
-
-        if (bitmap) {
-            uint8_t value = bitmap[(character >> 8) & 0xFF];
-
-            if (value) {
-                bitmap = CFUniCharCombiningPriorityExtraTable[plane] + ((value - 1) * 256);
-                return bitmap[character % 256];
-            }
-        }
-    }
-    return 0;
-}
-
-CF_EXPORT uint8_t **CFUniCharNonBaseBitmap;
-CF_EXPORT uint8_t CFUniCharNumberOfPlanesForNonBaseBitmap;
-
-CF_INLINE bool __CFUniCharIsNonBaseCharacter(UTF32Char character) {
-    if (character < (CFUniCharNumberOfPlanesForNonBaseBitmap << 16)) {
-        const uint8_t *bitmap = CFUniCharNonBaseBitmap[character >> 16];
-        uint8_t value = bitmap[(character >> 8) & 0xFF];
-
-        if (value == 0xFF) {
-            return true;
-        } else if (value) {
-            bitmap = bitmap + ((value - 1) * 32) + 256;
-            return (bitmap[(character & 0xFF) / 8] & (1 << (character % 8)) ? true : false);
-        }
-    }
-    return false;
-}
-
-#else KERNEL
 static UTF32Char *__CFUniCharPrecompSourceTable = NULL;
 static uint32_t __CFUniCharPrecompositionTableLength = 0;
 static uint16_t *__CFUniCharBMPPrecompDestinationTable = NULL;
@@ -128,7 +75,6 @@ static void __CFUniCharLoadPrecompositionTable(void) {
 CF_INLINE bool __CFUniCharIsNonBaseCharacter(UTF32Char character) {
     return CFUniCharIsMemberOfBitmap(character, (character < 0x10000 ? __CFUniCharNonBaseBitmapForBMP_P : CFUniCharGetBitmapPtrForPlane(kCFUniCharNonBaseCharacterSet, ((character >> 16) & 0xFF))));
 }
-#endif KERNEL
 
 typedef struct {
     UTF16Char _key;
@@ -174,28 +120,20 @@ static uint32_t __CFUniCharGetMappedValue_P(const __CFUniCharPrecomposeMappings 
     return 0;
 }
 
-#if !KERNEL
 __private_extern__
-#endif !KERNEL
 UTF32Char CFUniCharPrecomposeCharacter(UTF32Char base, UTF32Char combining) {
     uint32_t value;
 
-#if !KERNEL
     if (NULL == __CFUniCharPrecompSourceTable) __CFUniCharLoadPrecompositionTable();
-#endif !KERNEL
 
     if (!(value = __CFUniCharGetMappedValue_P((const __CFUniCharPrecomposeMappings *)__CFUniCharPrecompSourceTable, __CFUniCharPrecompositionTableLength, combining))) return 0xFFFD;
 
-#if !KERNEL
     // We don't have precomposition in non-BMP
     if (value & kCFUniCharNonBmpFlag) {
         value = __CFUniCharGetMappedValue_P((const __CFUniCharPrecomposeMappings *)((uint32_t *)__CFUniCharNonBMPPrecompDestinationTable + (value & 0xFFFF)), (value >> 16) & 0x7FFF, base);
     } else {
-#endif !KERNEL
         value = __CFUniCharGetMappedBMPValue((const __CFUniCharPrecomposeBMPMappings *)((uint32_t *)__CFUniCharBMPPrecompDestinationTable + (value & 0xFFFF)), (value >> 16), base);
-#if !KERNEL
     }
-#endif !KERNEL
     return (value ? value : 0xFFFD);
 }
 
@@ -227,9 +165,7 @@ bool CFUniCharPrecompose(const UTF16Char *characters, uint32_t length, uint32_t 
     bool currentBaseIsBMP = true;
     bool isPrecomposed;
 
-#if !KERNEL
     if (NULL == __CFUniCharPrecompSourceTable) __CFUniCharLoadPrecompositionTable();
-#endif !KERNEL
 
     while (length > 0) {
         currentChar = *(characters++);
@@ -244,11 +180,7 @@ bool CFUniCharPrecompose(const UTF16Char *characters, uint32_t length, uint32_t 
             isPrecomposed = (precomposedChar == 0xFFFD ? false : true);
             if (isPrecomposed) lastChar = precomposedChar;
 
-#if KERNEL
-            currentClass = __CFUniCharGetCombiningPriority(currentChar);
-#else KERNEL
             currentClass = (currentChar > 0xFFFF ? CFUniCharGetUnicodeProperty(currentChar, kCFUniCharCombiningProperty) : CFUniCharGetCombiningPropertyForCharacter(currentChar, __CFUniCharCombiningClassForBMP));
-#endif KERNEL
 
             if ((lastClass == 0) || (currentClass != lastClass)) {
                 if ((precomposedChar = CFUniCharPrecomposeCharacter(lastChar, currentChar)) == 0xFFFD) {

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -29,10 +27,10 @@
 
 #include <CoreFoundation/CFNumber.h>
 #include "CFInternal.h"
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include <math.h>
 #include <float.h>
-#if defined(__WIN32__)
+#if defined(__WIN32__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #define isnan _isnan
 #define isinf !_finite
 #endif
@@ -143,14 +141,10 @@ static struct __CFNumber __kCFNumberPositiveInfinity = {
 const CFNumberRef kCFNumberPositiveInfinity = &__kCFNumberPositiveInfinity;
 
 
-/* Eight bits in base:
-    Bits 6..0: type (bits 4..0 is CFNumberType)
+/* Seven bits in base:
+    Bits 4..0: CFNumber type
+    Bit 6: is unsigned number
 */
-enum {
-    __kCFNumberIsPositiveInfinity = (0x20 | kCFNumberFloat64Type),
-    __kCFNumberIsNegativeInfinity = (0x40 | kCFNumberFloat64Type),
-    __kCFNumberIsNaN = (0x60 | kCFNumberFloat64Type)
-};
 
 
 /* ??? These tables should be changed on different architectures, depending on the actual sizes of basic C types such as int, long, float; also size of CFIndex. We can probably compute these tables at runtime.
@@ -225,12 +219,12 @@ CF_INLINE CFIndex __CFNumberSizeOfType(CFNumberType type) {
 // Needs to handle all canonical types
 #define GET_VALUE(value, type, resultPtr)	\
     switch (type) {				\
-        case kCFNumberSInt8Type:	*(int8_t *)(valuePtr) = (int8_t)value; break;	\
-        case kCFNumberSInt16Type:	*(int16_t *)(valuePtr) = (int16_t)value; break;	\
-        case kCFNumberSInt32Type:	*(SInt32 *)(valuePtr) = (SInt32)value; break;	\
-        case kCFNumberSInt64Type:	*(int64_t *)(valuePtr) = (int64_t)value; break;	\
-        case kCFNumberFloat32Type:	*(Float32 *)(valuePtr) = (Float32)value; break;	\
-        case kCFNumberFloat64Type:	*(Float64 *)(valuePtr) = (Float64)value; break;	\
+        case kCFNumberSInt8Type:	*(int8_t *)(resultPtr) = (int8_t)value; break;	\
+        case kCFNumberSInt16Type:	*(int16_t *)(resultPtr) = (int16_t)value; break;	\
+        case kCFNumberSInt32Type:	*(SInt32 *)(resultPtr) = (SInt32)value; break;	\
+        case kCFNumberSInt64Type:	*(int64_t *)(resultPtr) = (int64_t)value; break;	\
+        case kCFNumberFloat32Type:	*(Float32 *)(resultPtr) = (Float32)value; break;	\
+        case kCFNumberFloat64Type:	*(Float64 *)(resultPtr) = (Float64)value; break;	\
 	default: break;	\
     }
 
@@ -238,10 +232,10 @@ CF_INLINE CFIndex __CFNumberSizeOfType(CFNumberType type) {
 // Needs to handle all storage types
 CF_INLINE void __CFNumberGetValue(const __CFNumberValue *value, CFNumberType numberType, CFNumberType typeToGet, void *valuePtr) {
     switch (numberType) {
-        case kCFNumberSInt32Type:	GET_VALUE(value->valSInt32, typeToGet, resultPtr); break;	
-        case kCFNumberSInt64Type:	GET_VALUE(value->valSInt64, typeToGet, resultPtr); break;	
-        case kCFNumberFloat32Type:	GET_VALUE(value->valFloat32, typeToGet, resultPtr); break;
-        case kCFNumberFloat64Type:	GET_VALUE(value->valFloat64, typeToGet, resultPtr); break;
+        case kCFNumberSInt32Type:	GET_VALUE(value->valSInt32, typeToGet, valuePtr); break;	
+        case kCFNumberSInt64Type:	GET_VALUE(value->valSInt64, typeToGet, valuePtr); break;	
+        case kCFNumberFloat32Type:	GET_VALUE(value->valFloat32, typeToGet, valuePtr); break;
+        case kCFNumberFloat64Type:	GET_VALUE(value->valFloat64, typeToGet, valuePtr); break;
 	default: break;	\
     }
 }
@@ -446,39 +440,81 @@ __private_extern__ void __CFNumberInitialize(void) {
 
     _CFRuntimeSetInstanceTypeID(&__kCFNumberNaN, __kCFNumberTypeID);
     __kCFNumberNaN._base._isa = __CFISAForTypeID(__kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberNaN._base._info, 6, 0, __kCFNumberIsNaN);
+    __CFBitfieldSetValue(__kCFNumberNaN._base._info, 4, 0, kCFNumberFloat64Type);
     __kCFNumberNaN.value.valFloat64 = *(double *)&dnan;
 
     _CFRuntimeSetInstanceTypeID(& __kCFNumberNegativeInfinity, __kCFNumberTypeID);
     __kCFNumberNegativeInfinity._base._isa = __CFISAForTypeID(__kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberNegativeInfinity._base._info, 6, 0, __kCFNumberIsNegativeInfinity);
+    __CFBitfieldSetValue(__kCFNumberNegativeInfinity._base._info, 4, 0, kCFNumberFloat64Type);
     __kCFNumberNegativeInfinity.value.valFloat64 = *(double *)&negInf;
 
     _CFRuntimeSetInstanceTypeID(& __kCFNumberPositiveInfinity, __kCFNumberTypeID);
     __kCFNumberPositiveInfinity._base._isa = __CFISAForTypeID(__kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._info, 6, 0, __kCFNumberIsPositiveInfinity);
+    __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._info, 4, 0, kCFNumberFloat64Type);
     __kCFNumberPositiveInfinity.value.valFloat64 = *(double *)&posInf;
+}
+
+Boolean _CFNumberIsU(CFNumberRef num) {
+    return __CFBitfieldGetValue(__kCFNumberPositiveInfinity._base._info, 6, 6);
+}
+
+void _CFNumberSetU(CFNumberRef num, Boolean unsign) {
+    __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._info, 6, 6, (unsign ? 1 : 0));
 }
 
 CFTypeID CFNumberGetTypeID(void) {
     return __kCFNumberTypeID;
 }
 
+#define MinCachedInt (-1)
+#define MaxCachedInt (12)
+#define NotToBeCached (MinCachedInt - 1)
+static CFNumberRef _CFNumberCache[MaxCachedInt - MinCachedInt + 1] = {NULL};	// Storing CFNumberRefs for SInt32 range MinCachedInt..MaxCachedInt
+static CFSpinLock_t _CFNumberCacheLock = 0;
+
 CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const void *valuePtr) {
     CFNumberRef num;
     CFNumberType equivType, storageType;
+    int32_t valToBeCached = NotToBeCached;
+    
+    equivType = __CFNumberGetCanonicalTypeForType(type);
 
-    if ((type == kCFNumberFloat32Type) || (type == kCFNumberFloatType)) {
-	Float32 val = *(Float32 *)(valuePtr);
-	if (isnan(val)) return CFRetain(kCFNumberNaN);
-	if (isinf(val)) return CFRetain((val < 0.0) ? kCFNumberNegativeInfinity : kCFNumberPositiveInfinity);
-    } else if ((type == kCFNumberFloat64Type) || (type == kCFNumberDoubleType)) {
-	Float64 val = *(Float64 *)(valuePtr);
-	if (isnan(val)) return CFRetain(kCFNumberNaN);
-	if (isinf(val)) return CFRetain((val < 0.0) ? kCFNumberNegativeInfinity : kCFNumberPositiveInfinity);
+    // Take care of some special cases; in some cases we will return here without actually creating a new CFNumber
+    switch (equivType) {
+	case kCFNumberFloat32Type: {
+	    Float32 val = *(Float32 *)(valuePtr);
+	    if (isnan(val)) return CFRetain(kCFNumberNaN);
+	    if (isinf(val)) return CFRetain((val < 0.0) ? kCFNumberNegativeInfinity : kCFNumberPositiveInfinity);
+	    break;
+	}
+	case kCFNumberFloat64Type: {
+	    Float64 val = *(Float64 *)(valuePtr);
+	    if (isnan(val)) return CFRetain(kCFNumberNaN);
+	    if (isinf(val)) return CFRetain((val < 0.0) ? kCFNumberNegativeInfinity : kCFNumberPositiveInfinity);
+	    break;
+	}
+	default: {
+	    switch (equivType) {
+		case kCFNumberSInt64Type: {SInt64 val = *(SInt64 *)(valuePtr); if (val >= MinCachedInt && val <= MaxCachedInt) valToBeCached = val; break;}
+		case kCFNumberSInt32Type: {SInt32 val = *(SInt32 *)(valuePtr); if (val >= MinCachedInt && val <= MaxCachedInt) valToBeCached = val; break;}
+		case kCFNumberSInt16Type: {SInt16 val = *(SInt16 *)(valuePtr); if (val >= MinCachedInt && val <= MaxCachedInt) valToBeCached = val; break;}
+		case kCFNumberSInt8Type:  {SInt8  val = *(SInt8 *)(valuePtr);  if (val >= MinCachedInt && val <= MaxCachedInt) valToBeCached = val; break;}
+		default:;
+	    }
+	    if (valToBeCached != NotToBeCached) {	    // Even if not yet cached, this will assure that we cache it after the number is created
+		__CFSpinLock(&_CFNumberCacheLock);
+		CFNumberRef result = _CFNumberCache[valToBeCached - MinCachedInt];
+		__CFSpinUnlock(&_CFNumberCacheLock);
+		if (result) return CFRetain(result);
+		// Turns out it's a number we want do cache, but don't have cached yet; so let's normalize it so we're only caching 32-bit int
+		valuePtr = &valToBeCached;
+		type = kCFNumberSInt32Type;
+		equivType = __CFNumberGetCanonicalTypeForType(type);
+	    }
+	    break;
+	}
     }
 
-    equivType = __CFNumberGetCanonicalTypeForType(type);
     storageType = __CFNumberGetStorageTypeForType(type);
 
     num = (CFNumberRef)_CFRuntimeCreateInstance(allocator, __kCFNumberTypeID, __CFNumberSizeOfType(storageType), NULL);
@@ -487,6 +523,15 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
     }
     SET_VALUE((__CFNumberValue *)&(num->value), equivType, valuePtr);
     __CFBitfieldSetValue(((struct __CFNumber *)num)->_base._info, 6, 0, storageType);
+    
+    // If this was a number worth caching, cache it
+    if (valToBeCached != NotToBeCached) {
+	int slot = valToBeCached - MinCachedInt;
+	__CFSpinLock(&_CFNumberCacheLock);
+	if (_CFNumberCache[slot] == NULL) _CFNumberCache[slot] = num;
+	__CFSpinUnlock(&_CFNumberCacheLock);
+	if (_CFNumberCache[slot] == num) CFRetain(num);	// Extra retain for the cached number
+    }
     return num;
 }
 

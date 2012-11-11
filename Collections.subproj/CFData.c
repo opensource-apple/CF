@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,7 +26,7 @@
 */
 
 #include <CoreFoundation/CFData.h>
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFInternal.h"
 #include <string.h>
 
@@ -161,14 +159,21 @@ static void __CFDataDeallocate(CFTypeRef cf) {
     CFAllocatorRef allocator = CFGetAllocator(data);
     switch (__CFMutableVariety(data)) {
     case kCFMutable:
-	CFAllocatorDeallocate(allocator, data->_bytes);
+	_CFAllocatorDeallocateGC(allocator, data->_bytes);
+	data->_bytes = NULL;
 	break;
     case kCFFixedMutable:
 	break;
     case kCFImmutable:
 	if (NULL != data->_bytesDeallocator) {
-	    CFAllocatorDeallocate(data->_bytesDeallocator, data->_bytes);
-	    CFRelease(data->_bytesDeallocator);
+	    if (CF_IS_COLLECTABLE_ALLOCATOR(data->_bytesDeallocator)) {
+		// GC:  for finalization safety, let collector reclaim the buffer in the next GC cycle.
+		auto_zone_release(__CFCollectableZone, data->_bytes);
+            } else {
+		CFAllocatorDeallocate(data->_bytesDeallocator, data->_bytes);
+		CFRelease(data->_bytesDeallocator);
+		data->_bytes = NULL;
+	    }
 	}
 	break;
     }
@@ -222,8 +227,10 @@ static CFMutableDataRef __CFDataInit(CFAllocatorRef allocator, CFOptionFlags fla
     case kCFMutable:
 	__CFDataSetCapacity(memory, __CFDataRoundUpCapacity(1));
 	__CFDataSetNumBytes(memory, __CFDataNumBytesForCapacity(__CFDataRoundUpCapacity(1)));
+	// GC: if allocated in the collectable zone, mark the object as needing to be scanned.
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_MEMORY_SCANNED);
 	// assume that allocators give 16-byte aligned memory back -- it is their responsibility
-	memory->_bytes = CFAllocatorAllocate(allocator, __CFDataNumBytes(memory) * sizeof(uint8_t), 0);
+	CF_WRITE_BARRIER_BASE_ASSIGN(allocator, memory, memory->_bytes, _CFAllocatorAllocateGC(allocator, __CFDataNumBytes(memory) * sizeof(uint8_t), AUTO_MEMORY_UNSCANNED));
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory->_bytes, "CFData (store)");
 	if (NULL == memory->_bytes) {
 	    CFRelease(memory);
@@ -247,7 +254,7 @@ static CFMutableDataRef __CFDataInit(CFAllocatorRef allocator, CFOptionFlags fla
 	__CFDataSetCapacity(memory, capacity);
 	__CFDataSetNumBytes(memory, __CFDataNumBytesForCapacity(capacity));
 	if (bytesDeallocator != NULL) {
-	    memory->_bytes = (uint8_t *)bytes;
+            CF_WRITE_BARRIER_BASE_ASSIGN(allocator, memory, memory->_bytes, (uint8_t *)bytes);
 	    memory->_bytesDeallocator = CFRetain(bytesDeallocator);
 	    __CFDataSetNumBytesUsed(memory, length);
 	    __CFDataSetLength(memory, length);
@@ -315,9 +322,10 @@ void CFDataGetBytes(CFDataRef data, CFRange range, uint8_t *buffer) {
 static void __CFDataGrow(CFMutableDataRef data, CFIndex numNewValues) {
     CFIndex oldLength = __CFDataLength(data);
     CFIndex capacity = __CFDataRoundUpCapacity(oldLength + numNewValues);
+    CFAllocatorRef allocator = CFGetAllocator(data);
     __CFDataSetCapacity(data, capacity);
     __CFDataSetNumBytes(data, __CFDataNumBytesForCapacity(capacity));
-    data->_bytes = CFAllocatorReallocate(CFGetAllocator(data), data->_bytes, __CFDataNumBytes(data) * sizeof(uint8_t), 0);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, data, data->_bytes, _CFAllocatorReallocateGC(allocator, data->_bytes, __CFDataNumBytes(data) * sizeof(uint8_t), AUTO_MEMORY_UNSCANNED));
     if (__CFOASafe) __CFSetLastAllocationEventName(data->_bytes, "CFData (store)");
     if (NULL == data->_bytes) HALT;
 }

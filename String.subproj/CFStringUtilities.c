@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -30,6 +28,7 @@
 #include "CFInternal.h"
 #include "CFStringEncodingConverterExt.h"
 #include "CFUniChar.h"
+#include <CoreFoundation/CFStringEncodingExt.h>
 #include <limits.h>
 #if defined(__MACH__) || defined(__LINUX__)
 #include <stdlib.h>
@@ -39,16 +38,20 @@
 #endif
 
 
-
 Boolean CFStringIsEncodingAvailable(CFStringEncoding theEncoding) {
     switch (theEncoding) {
         case kCFStringEncodingASCII: // Built-in encodings
         case kCFStringEncodingMacRoman:
-        case kCFStringEncodingUnicode:
         case kCFStringEncodingUTF8:
         case kCFStringEncodingNonLossyASCII:
         case kCFStringEncodingWindowsLatin1:
         case kCFStringEncodingNextStepLatin:
+        case kCFStringEncodingUTF16:
+        case kCFStringEncodingUTF16BE:
+        case kCFStringEncodingUTF16LE:
+        case kCFStringEncodingUTF32:
+        case kCFStringEncodingUTF32BE:
+        case kCFStringEncodingUTF32LE:
             return true;
 
         default:
@@ -65,25 +68,31 @@ CFStringRef CFStringGetNameOfEncoding(CFStringEncoding theEncoding) {
     CFStringRef theName = mappingTable ? CFDictionaryGetValue(mappingTable, (const void*)theEncoding) : NULL;
 
     if (!theName) {
-        if (theEncoding == kCFStringEncodingUnicode) {
-            theName = CFSTR("Unicode (UTF-16)");
-        } else if (theEncoding == kCFStringEncodingUTF8) {
-            theName = CFSTR("Unicode (UTF-8)");
-        } else if (theEncoding == kCFStringEncodingNonLossyASCII) {
-            theName = CFSTR("Non-lossy ASCII");
-        } else {
-            const uint8_t *encodingName = CFStringEncodingName(theEncoding);
-
-            if (encodingName) {
-                theName = CFStringCreateWithCString(NULL, encodingName, kCFStringEncodingASCII);
+        switch (theEncoding) {
+            case kCFStringEncodingUTF8: theName = CFSTR("Unicode (UTF-8)"); break;
+            case kCFStringEncodingUTF16: theName = CFSTR("Unicode (UTF-16)"); break;
+            case kCFStringEncodingUTF16BE: theName = CFSTR("Unicode (UTF-16BE)"); break;
+            case kCFStringEncodingUTF16LE: theName = CFSTR("Unicode (UTF-16LE)"); break;
+            case kCFStringEncodingUTF32: theName = CFSTR("Unicode (UTF-32)"); break;
+            case kCFStringEncodingUTF32BE: theName = CFSTR("Unicode (UTF-32BE)"); break;
+            case kCFStringEncodingUTF32LE: theName = CFSTR("Unicode (UTF-32LE)"); break;
+            case kCFStringEncodingNonLossyASCII: theName = CFSTR("Non-lossy ASCII"); break;
+    
+            default: {
+                const uint8_t *encodingName = CFStringEncodingName(theEncoding);
+    
+                if (encodingName) {
+                    theName = CFStringCreateWithCString(NULL, encodingName, kCFStringEncodingASCII);
+                }
             }
+            break;
+        }
 
-            if (theName) {
-                if (!mappingTable) mappingTable = CFDictionaryCreateMutable(NULL, 0, (const CFDictionaryKeyCallBacks *)NULL, &kCFTypeDictionaryValueCallBacks);
+        if (theName) {
+            if (!mappingTable) mappingTable = CFDictionaryCreateMutable(NULL, 0, (const CFDictionaryKeyCallBacks *)NULL, &kCFTypeDictionaryValueCallBacks);
 
-                CFDictionaryAddValue(mappingTable, (const void*)theEncoding, (const void*)theName);
-                CFRelease(theName);
-            }
+            CFDictionaryAddValue(mappingTable, (const void*)theEncoding, (const void*)theName);
+            CFRelease(theName);
         }
     }
 
@@ -93,22 +102,18 @@ CFStringRef CFStringGetNameOfEncoding(CFStringEncoding theEncoding) {
 CFStringEncoding CFStringConvertIANACharSetNameToEncoding(CFStringRef  charsetName) {
     static CFMutableDictionaryRef mappingTable = NULL;
     CFStringEncoding result = kCFStringEncodingInvalidId;
-    CFMutableStringRef lowerCharsetName = CFStringCreateMutableCopy(NULL, 0, charsetName);
-
-    /* Create lowercase copy */
-    CFStringLowercase(lowerCharsetName, NULL);
+    CFMutableStringRef lowerCharsetName;
 
     /* Check for common encodings first */
-    if (CFStringCompare(lowerCharsetName, CFSTR("utf-8"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-        CFRelease(lowerCharsetName);
+    if (CFStringCompare(charsetName, CFSTR("utf-8"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
         return kCFStringEncodingUTF8;
-    } else if (CFStringCompare(lowerCharsetName, CFSTR("iso-8859-1"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-        CFRelease(lowerCharsetName);
+    } else if (CFStringCompare(charsetName, CFSTR("iso-8859-1"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
         return kCFStringEncodingISOLatin1;
-    } else if (CFStringCompare(lowerCharsetName, CFSTR("utf-16be"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-        CFRelease(lowerCharsetName);
-        return kCFStringEncodingUnicode;
     }
+
+    /* Create lowercase copy */
+    lowerCharsetName = CFStringCreateMutableCopy(NULL, 0, charsetName);
+    CFStringLowercase(lowerCharsetName, NULL);
 
     if (mappingTable == NULL) {
         CFMutableDictionaryRef table = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, (const CFDictionaryValueCallBacks *)NULL);
@@ -129,10 +134,15 @@ CFStringEncoding CFStringConvertIANACharSetNameToEncoding(CFStringRef  charsetNa
             }
             encodings++;
         }
-        // Adding Unicode (UCS-2) names
-        CFDictionaryAddValue(table, (const void*)CFSTR("unicode-1-1"), (const void*)kCFStringEncodingUnicode);
-        CFDictionaryAddValue(table, (const void*)CFSTR("utf-16"), (const void*)kCFStringEncodingUnicode);
-        CFDictionaryAddValue(table, (const void*)CFSTR("iso-10646-ucs-2"), (const void*)kCFStringEncodingUnicode);
+        // Adding Unicode names
+        CFDictionaryAddValue(table, (const void*)CFSTR("unicode-1-1"), (const void*)kCFStringEncodingUTF16);
+        CFDictionaryAddValue(table, (const void*)CFSTR("iso-10646-ucs-2"), (const void*)kCFStringEncodingUTF16);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-16"), (const void*)kCFStringEncodingUTF16);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-16be"), (const void*)kCFStringEncodingUTF16BE);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-16le"), (const void*)kCFStringEncodingUTF16LE);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-32"), (const void*)kCFStringEncodingUTF32);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-32be"), (const void*)kCFStringEncodingUTF32BE);
+        CFDictionaryAddValue(table, (const void*)CFSTR("utf-32le"), (const void*)kCFStringEncodingUTF32LE);
 
         mappingTable = table;
     }
@@ -151,23 +161,32 @@ CFStringRef CFStringConvertEncodingToIANACharSetName(CFStringEncoding encoding) 
     CFStringRef theName = mappingTable ? (CFStringRef)CFDictionaryGetValue(mappingTable, (const void*)encoding) : NULL;
 
     if (!theName) {
-        if (encoding == kCFStringEncodingUnicode) {
-            theName = CFSTR("UTF-16BE");
-        } else {
-            const char **nameList = CFStringEncodingCanonicalCharsetNames(encoding);
-
-            if (nameList && *nameList) {
-                CFMutableStringRef upperCaseName;
-
-                theName = CFStringCreateWithCString(NULL, *nameList, kCFStringEncodingASCII);
-                if (theName) {
-                    upperCaseName = CFStringCreateMutableCopy(NULL, 0, theName);
-                    CFStringUppercase(upperCaseName, 0);
-                    CFRelease(theName);
-                    theName = upperCaseName;
+        switch (encoding) {
+            case kCFStringEncodingUTF16: theName = CFSTR("UTF-16"); break;
+            case kCFStringEncodingUTF16BE: theName = CFSTR("UTF-16BE"); break;
+            case kCFStringEncodingUTF16LE: theName = CFSTR("UTF-16LE"); break;
+            case kCFStringEncodingUTF32: theName = CFSTR("UTF-32"); break;
+            case kCFStringEncodingUTF32BE: theName = CFSTR("UTF-32BE"); break;
+            case kCFStringEncodingUTF32LE: theName = CFSTR("UTF-32LE"); break;
+    
+    
+            default: {
+                const char **nameList = CFStringEncodingCanonicalCharsetNames(encoding);
+    
+                if (nameList && *nameList) {
+                    CFMutableStringRef upperCaseName;
+    
+                    theName = CFStringCreateWithCString(NULL, *nameList, kCFStringEncodingASCII);
+                    if (theName) {
+                        upperCaseName = CFStringCreateMutableCopy(NULL, 0, theName);
+                        CFStringUppercase(upperCaseName, 0);
+                        CFRelease(theName);
+                        theName = upperCaseName;
+                    }
                 }
             }
-       }
+            break;
+        }
 
         if (theName) {
             if (!mappingTable) mappingTable = CFDictionaryCreateMutable(NULL, 0, (const CFDictionaryKeyCallBacks *)NULL, &kCFTypeDictionaryValueCallBacks);
@@ -205,19 +224,29 @@ enum {
 #define NSENCODING_MASK (1 << 31)
 
 UInt32 CFStringConvertEncodingToNSStringEncoding(CFStringEncoding theEncoding) {
-    if (theEncoding == kCFStringEncodingUTF8) {
-        return NSUTF8StringEncoding;
-    } else {
-        theEncoding &= 0xFFF;
-    }
-    switch (theEncoding) {
+    switch (theEncoding & 0xFFF) {
         case kCFStringEncodingASCII: return NSASCIIStringEncoding;
         case kCFStringEncodingNextStepLatin: return NSNEXTSTEPStringEncoding;
         case kCFStringEncodingISOLatin1: return NSISOLatin1StringEncoding;
         case kCFStringEncodingNonLossyASCII: return NSNonLossyASCIIStringEncoding;
-        case kCFStringEncodingUnicode: return NSUnicodeStringEncoding;
         case kCFStringEncodingWindowsLatin1: return NSWindowsCP1252StringEncoding;
         case kCFStringEncodingMacRoman: return NSMacOSRomanStringEncoding;
+#if defined(__MACH__)
+        case kCFStringEncodingEUC_JP: return NSJapaneseEUCStringEncoding;
+        case kCFStringEncodingMacSymbol: return NSSymbolStringEncoding;
+        case kCFStringEncodingDOSJapanese: return NSShiftJISStringEncoding;
+        case kCFStringEncodingISOLatin2: return NSISOLatin2StringEncoding;
+        case kCFStringEncodingWindowsCyrillic: return NSWindowsCP1251StringEncoding;
+        case kCFStringEncodingWindowsGreek: return NSWindowsCP1253StringEncoding;
+        case kCFStringEncodingWindowsLatin5: return NSWindowsCP1254StringEncoding;
+        case kCFStringEncodingWindowsLatin2: return NSWindowsCP1250StringEncoding;
+        case kCFStringEncodingISO_2022_JP: return NSISO2022JPStringEncoding;
+        case kCFStringEncodingUnicode:
+            if (theEncoding == kCFStringEncodingUTF16) return NSUnicodeStringEncoding;
+            else if (theEncoding == kCFStringEncodingUTF8) return NSUTF8StringEncoding;
+#endif // __MACH__
+            /* fall-through for other encoding schemes */
+
         default:
             return NSENCODING_MASK | theEncoding;
     }
@@ -230,9 +259,20 @@ CFStringEncoding CFStringConvertNSStringEncodingToEncoding(UInt32 theEncoding) {
         case NSUTF8StringEncoding: return kCFStringEncodingUTF8;
         case NSISOLatin1StringEncoding: return kCFStringEncodingISOLatin1;
         case NSNonLossyASCIIStringEncoding: return kCFStringEncodingNonLossyASCII;
-        case NSUnicodeStringEncoding: return kCFStringEncodingUnicode;
+        case NSUnicodeStringEncoding: return kCFStringEncodingUTF16;
         case NSWindowsCP1252StringEncoding: return kCFStringEncodingWindowsLatin1;
         case NSMacOSRomanStringEncoding: return kCFStringEncodingMacRoman;
+#if defined(__MACH__)
+        case NSSymbolStringEncoding: return kCFStringEncodingMacSymbol;
+        case NSJapaneseEUCStringEncoding: return kCFStringEncodingEUC_JP;
+        case NSShiftJISStringEncoding: return kCFStringEncodingDOSJapanese;
+        case NSISO2022JPStringEncoding: return kCFStringEncodingISO_2022_JP;
+        case NSISOLatin2StringEncoding: return kCFStringEncodingISOLatin2;
+        case NSWindowsCP1251StringEncoding: return kCFStringEncodingWindowsCyrillic;
+        case NSWindowsCP1253StringEncoding: return kCFStringEncodingWindowsGreek;
+        case NSWindowsCP1254StringEncoding: return kCFStringEncodingWindowsLatin5;
+        case NSWindowsCP1250StringEncoding: return kCFStringEncodingWindowsLatin2;
+#endif // __MACH__
         default:
             return ((theEncoding & NSENCODING_MASK) ? theEncoding & ~NSENCODING_MASK : kCFStringEncodingInvalidId);
     }
@@ -248,56 +288,144 @@ static const uint16_t _CFToDOSCodePageList[] = {
 };
 
 static const uint16_t _CFToWindowsCodePageList[] = {
-    1252, 1250, 1251, 1253, 1254, 1255, 1256, 1257, 1361,
+    1252, 1250, 1251, 1253, 1254, 1255, 1256, 1257, 1258,
+};
+
+static const uint16_t _CFEUCToCodePage[] = { // 0x900
+    51932, 51936, 51950, 51949,
 };
 
 UInt32 CFStringConvertEncodingToWindowsCodepage(CFStringEncoding theEncoding) {
-    if (theEncoding == kCFStringEncodingUTF8) {
-        return 65001;
-    } else {
-        theEncoding &= 0xFFF;
+#if defined(__MACH__)
+    CFStringEncoding encodingBase = theEncoding & 0x0FFF;
+#endif
+
+    switch (theEncoding & 0x0F00) {
+#if defined(__MACH__)
+    case 0: // Mac OS script
+        if (encodingBase <= kCFStringEncodingMacCentralEurRoman) {
+            return MACCODEPAGE_BASE + encodingBase;
+        } else if (encodingBase == kCFStringEncodingMacTurkish) {
+            return 10081;
+        } else if (encodingBase == kCFStringEncodingMacCroatian) {
+            return 10082;
+        } else if (encodingBase == kCFStringEncodingMacIcelandic) {
+            return 10079;
+        }
+        break;
+#endif
+
+    case 0x100: // Unicode
+        switch (theEncoding) {
+        case kCFStringEncodingUTF8: return 65001;
+        case kCFStringEncodingUTF16: return 1200;
+        case kCFStringEncodingUTF16BE: return 1201;
+        case kCFStringEncodingUTF32: return 65005;
+        case kCFStringEncodingUTF32BE: return 65006;
+        }
+        break;
+
+#if defined(__MACH__)
+    case 0x0200: // ISO 8859 series
+        if (encodingBase <= kCFStringEncodingISOLatin10) return ISO8859CODEPAGE_BASE + (encodingBase - 0x200);
+        break;
+
+    case 0x0400: // DOS codepage
+        if (encodingBase <= kCFStringEncodingDOSChineseTrad) return _CFToDOSCodePageList[encodingBase - 0x400]; 
+        break;
+
+    case 0x0500: // ANSI (Windows) codepage
+        if (encodingBase <= kCFStringEncodingWindowsVietnamese) return _CFToWindowsCodePageList[theEncoding - 0x500];
+        else if (encodingBase == kCFStringEncodingWindowsKoreanJohab) return 1361;
+        break;
+
+    case 0x600: // National standards
+        if (encodingBase == kCFStringEncodingASCII) return 20127;
+        else if (encodingBase == kCFStringEncodingGB_18030_2000) return 54936;
+        break;
+
+    case 0x0800: // ISO 2022 series
+        switch (encodingBase) {
+        case kCFStringEncodingISO_2022_JP: return 50220;
+        case kCFStringEncodingISO_2022_CN: return 50227;
+        case kCFStringEncodingISO_2022_KR: return 50225;
+        }
+        break;
+
+    case 0x0900: // EUC series
+        if (encodingBase <= kCFStringEncodingEUC_KR) return _CFEUCToCodePage[encodingBase - 0x0900];
+        break;
+
+
+    case 0x0A00: // Misc encodings
+        switch (encodingBase) {
+        case kCFStringEncodingKOI8_R: return 20866;
+        case kCFStringEncodingHZ_GB_2312: return 52936;
+        case kCFStringEncodingKOI8_U: return 21866;
+        }
+        break;
+
+    case 0x0C00: // IBM EBCDIC encodings
+        if (encodingBase == kCFStringEncodingEBCDIC_CP037) return 37;
+        break;
+#endif  // __MACH__
     }
+
     return kCFStringEncodingInvalidId;
 }
 
+#if defined(__MACH__)
 static const struct {
     uint16_t acp;
     uint16_t encoding;
 } _CFACPToCFTable[] = {
-    {437,0x0400},
-    {737,0x0405},
-    {775,0x0406},
-    {850,0x0410},
-    {851,0x0411},
-    {852,0x0412},
-    {855,0x0413},
-    {857,0x0414},
-    {860,0x0415},
-    {861,0x0416},
-    {862,0x0417},
-    {863,0x0418},
-    {864,0x0419},
-    {865,0x041A},
-    {866,0x041B},
-    {869,0x041C},
-    {874,0x041D},
-    {932,0x0420},
-    {936,0x0421},
-    {949,0x0422},
-    {950,0x0423},
-    {1250,0x0501},
-    {1251,0x0502},
-    {1252,0x0500},
-    {1253,0x0503},
-    {1254,0x0504},
-    {1255,0x0505},
-    {1256,0x0506},
-    {1257,0x0507},
-    {1361,0x0510},
-    {0xFFFF,0xFFFF},
+    {37, kCFStringEncodingEBCDIC_CP037},
+    {437, kCFStringEncodingDOSLatinUS},
+    {737, kCFStringEncodingDOSGreek},
+    {775, kCFStringEncodingDOSBalticRim},
+    {850, kCFStringEncodingDOSLatin1},
+    {851, kCFStringEncodingDOSGreek1},
+    {852, kCFStringEncodingDOSLatin2},
+    {855, kCFStringEncodingDOSCyrillic},
+    {857, kCFStringEncodingDOSTurkish},
+    {860, kCFStringEncodingDOSPortuguese},
+    {861, kCFStringEncodingDOSIcelandic},
+    {862, kCFStringEncodingDOSHebrew},
+    {863, kCFStringEncodingDOSCanadianFrench},
+    {864, kCFStringEncodingDOSArabic},
+    {865, kCFStringEncodingDOSNordic},
+    {866, kCFStringEncodingDOSRussian},
+    {869, kCFStringEncodingDOSGreek2},
+    {874, kCFStringEncodingDOSThai},
+    {932, kCFStringEncodingDOSJapanese},
+    {936, kCFStringEncodingDOSChineseSimplif},
+    {949, kCFStringEncodingDOSKorean},
+    {950, kCFStringEncodingDOSChineseTrad},
+    {1250, kCFStringEncodingWindowsLatin2},
+    {1251, kCFStringEncodingWindowsCyrillic},
+    {1252, kCFStringEncodingWindowsLatin1},
+    {1253, kCFStringEncodingWindowsGreek},
+    {1254, kCFStringEncodingWindowsLatin5},
+    {1255, kCFStringEncodingWindowsHebrew},
+    {1256, kCFStringEncodingWindowsArabic},
+    {1257, kCFStringEncodingWindowsBalticRim},
+    {1258, kCFStringEncodingWindowsVietnamese},
+    {1361, kCFStringEncodingWindowsKoreanJohab},
+    {20127, kCFStringEncodingASCII},
+    {20866, kCFStringEncodingKOI8_R},
+    {21866, kCFStringEncodingKOI8_U},
+    {50220, kCFStringEncodingISO_2022_JP},
+    {50225, kCFStringEncodingISO_2022_KR},
+    {50227, kCFStringEncodingISO_2022_CN},
+    {51932, kCFStringEncodingEUC_JP},
+    {51936, kCFStringEncodingEUC_CN},
+    {51949, kCFStringEncodingEUC_KR},
+    {51950, kCFStringEncodingEUC_TW},
+    {52936, kCFStringEncodingHZ_GB_2312},
+    {54936, kCFStringEncodingGB_18030_2000},
 };
 
-static SInt32 bsearchEncoding(unsigned short target) {
+static SInt32 bsearchEncoding(uint16_t target) {
     const unsigned int *start, *end, *divider;
     unsigned int size = sizeof(_CFACPToCFTable) / sizeof(UInt32);
 
@@ -305,30 +433,44 @@ static SInt32 bsearchEncoding(unsigned short target) {
     while (start <= end) {
         divider = start + ((end - start) / 2);
 
-        if (*(const unsigned short*)divider == target) return *((const unsigned short*)divider + 1);
-        else if (*(const unsigned short*)divider > target) end = divider - 1;
-        else if (*(const unsigned short*)(divider + 1) > target) return *((const unsigned short*)divider + 1);
+        if (*(const uint16_t*)divider == target) return *((const uint16_t*)divider + 1);
+        else if (*(const uint16_t*)divider > target) end = divider - 1;
+        else if (*(const uint16_t*)(divider + 1) > target) return *((const uint16_t*)divider + 1);
         else start = divider + 1;
     }
     return (kCFStringEncodingInvalidId);
 }
+#endif
 
 CFStringEncoding CFStringConvertWindowsCodepageToEncoding(UInt32 theEncoding) {
     if (theEncoding == 0 || theEncoding == 1) { // ID for default (system) codepage
         return CFStringGetSystemEncoding();
-    } else if (theEncoding < MACCODEPAGE_BASE) { // MS CodePage
-        return bsearchEncoding(theEncoding);
-    } else if (theEncoding < 20000) { // MAC ScriptCode
-        return theEncoding - MACCODEPAGE_BASE;
-    } else if ((theEncoding - ISO8859CODEPAGE_BASE) < 10) { // ISO8859 range
+    } else if ((theEncoding >= MACCODEPAGE_BASE) && (theEncoding < 20000)) { // Mac script
+        if (theEncoding <= 10029) return theEncoding - MACCODEPAGE_BASE; // up to Mac Central European
+#if defined(__MACH__)
+        else if (theEncoding == 10079) return kCFStringEncodingMacIcelandic;
+        else if (theEncoding == 10081) return kCFStringEncodingMacTurkish;
+        else if (theEncoding == 10082) return kCFStringEncodingMacCroatian;
+#endif
+    } else if ((theEncoding >= ISO8859CODEPAGE_BASE) && (theEncoding <= 28605)) { // ISO 8859
         return (theEncoding - ISO8859CODEPAGE_BASE) + 0x200;
+    } else if (theEncoding == 65001) { // UTF-8
+        return kCFStringEncodingUTF8;
+    } else if (theEncoding == 12000) { // UTF-16
+        return kCFStringEncodingUTF16;
+    } else if (theEncoding == 12001) { // UTF-16BE
+        return kCFStringEncodingUTF16BE;
+    } else if (theEncoding == 65005) { // UTF-32
+        return kCFStringEncodingUTF32;
+    } else if (theEncoding == 65006) { // UTF-32BE
+        return kCFStringEncodingUTF32BE;
     } else {
-        switch (theEncoding) {
-            case 65001: return kCFStringEncodingUTF8;
-            case 20127: return kCFStringEncodingASCII;
-            default: return kCFStringEncodingInvalidId;
-        }
+#if defined(__MACH__)
+        return bsearchEncoding(theEncoding);
+#endif
     }
+
+    return kCFStringEncodingInvalidId;
 }
 
 CFStringEncoding CFStringGetMostCompatibleMacStringEncoding(CFStringEncoding encoding) {
@@ -338,4 +480,5 @@ CFStringEncoding CFStringGetMostCompatibleMacStringEncoding(CFStringEncoding enc
 
     return macEncoding;
 }
+
 

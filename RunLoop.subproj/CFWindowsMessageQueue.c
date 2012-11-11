@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -32,8 +30,8 @@
 #include "CFWindowsMessageQueue.h"
 #include "CFInternal.h"
 
-extern unsigned long __CFRunLoopGetWindowsMessageQueueMask(CFRunLoopRef rl, CFStringRef mode);
-extern void __CFRunLoopSetWindowsMessageQueueMask(CFRunLoopRef rl, unsigned long mask, CFStringRef mode);
+extern uint32_t __CFRunLoopGetWindowsMessageQueueMask(CFRunLoopRef rl, CFStringRef mode);
+extern void __CFRunLoopSetWindowsMessageQueueMask(CFRunLoopRef rl, uint32_t mask, CFStringRef mode);
 
 struct __CFWindowsMessageQueue {
     CFRuntimeBase _base;
@@ -66,33 +64,33 @@ CF_INLINE void __CFWindowsMessageQueueUnlock(CFWindowsMessageQueueRef wmq) {
     __CFSpinUnlock(&(wmq->_lock));
 }
 
-CFTypeID CFWindowsMessageQueueGetTypeID(void) {
-    return __kCFWindowsMessageQueueTypeID;
-}
-
-Boolean __CFWindowsMessageQueueEqual(CFTypeRef cf1, CFTypeRef cf2) {
+static Boolean __CFWindowsMessageQueueEqual(CFTypeRef cf1, CFTypeRef cf2) {
     CFWindowsMessageQueueRef wmq1 = (CFWindowsMessageQueueRef)cf1;
     CFWindowsMessageQueueRef wmq2 = (CFWindowsMessageQueueRef)cf2;
     return (wmq1 == wmq2);
 }
 
-CFHashCode __CFWindowsMessageQueueHash(CFTypeRef cf) {
+static CFHashCode __CFWindowsMessageQueueHash(CFTypeRef cf) {
     CFWindowsMessageQueueRef wmq = (CFWindowsMessageQueueRef)cf;
     return (CFHashCode)wmq;
 }
 
-CFStringRef __CFWindowsMessageQueueCopyDescription(CFTypeRef cf) {
+static CFStringRef __CFWindowsMessageQueueCopyDescription(CFTypeRef cf) {
+/* Some commentary, possibly as out of date as much of the rest of the file was
 #warning CF: this and many other CopyDescription functions are probably
 #warning CF: broken, in that some of these fields being printed out can
 #warning CF: be NULL, when the object is in the invalid state
+*/
     CFWindowsMessageQueueRef wmq = (CFWindowsMessageQueueRef)cf;
     CFMutableStringRef result;
     result = CFStringCreateMutable(CFGetAllocator(wmq), 0);
     __CFWindowsMessageQueueLock(wmq);
+/* More commentary, which we don't really need to see with every build
 #warning CF: here, and probably everywhere with a per-instance lock,
 #warning CF: the locked state will always be true because we lock,
 #warning CF: and you cannot call description if the object is locked;
 #warning CF: probably should not lock description, and call it unsafe
+*/
     CFStringAppendFormat(result, NULL, CFSTR("<CFWindowsMessageQueue 0x%x [0x%x]>{locked = %s, valid = %s, mask = 0x%x,\n    run loops = %@}"), (UInt32)cf, (UInt32)CFGetAllocator(wmq), (wmq->_lock ? "Yes" : "No"), (__CFWindowsMessageQueueIsValid(wmq) ? "Yes" : "No"), (UInt32)wmq->_mask, wmq->_runLoops);
     __CFWindowsMessageQueueUnlock(wmq);
     return result;
@@ -103,25 +101,42 @@ CFAllocatorRef __CFWindowsMessageQueueGetAllocator(CFTypeRef cf) {
     return wmq->_allocator;
 }
 
-void __CFWindowsMessageQueueDeallocate(CFTypeRef cf) {
+static void __CFWindowsMessageQueueDeallocate(CFTypeRef cf) {
     CFWindowsMessageQueueRef wmq = (CFWindowsMessageQueueRef)cf;
     CFAllocatorRef allocator = CFGetAllocator(wmq);
     CFAllocatorDeallocate(allocator, wmq);
     CFRelease(allocator);
 }
 
+static CFTypeID __kCFWindowsMessageQueueTypeID = _kCFRuntimeNotATypeID;
+
+static const CFRuntimeClass __CFWindowsMessageQueueClass = {
+    0,
+    "CFWindowsMessageQueue",
+    NULL,	// init
+    NULL,	// copy
+    __CFWindowsMessageQueueDeallocate,
+    __CFWindowsMessageQueueEqual,
+    __CFWindowsMessageQueueHash,
+    NULL,	//
+    __CFWindowsMessageQueueCopyDescription
+};
+
+__private_extern__ void __CFWindowsMessageQueueInitialize(void) {
+    __kCFWindowsMessageQueueTypeID = _CFRuntimeRegisterClass(&__CFWindowsMessageQueueClass);
+}
+
+CFTypeID CFWindowsMessageQueueGetTypeID(void) {
+    return __kCFWindowsMessageQueueTypeID;
+}
+
 CFWindowsMessageQueueRef CFWindowsMessageQueueCreate(CFAllocatorRef allocator, DWORD mask) {
     CFWindowsMessageQueueRef memory;
-    UInt32 size;
-    size = sizeof(struct __CFWindowsMessageQueue);
-    allocator = (NULL == allocator) ? CFRetain(__CFGetDefaultAllocator()) : CFRetain(allocator);
-    memory = CFAllocatorAllocate(allocator, size, 0);
+    UInt32 size = sizeof(struct __CFWindowsMessageQueue) - sizeof(CFRuntimeBase);
+    memory = (CFWindowsMessageQueueRef)_CFRuntimeCreateInstance(allocator, __kCFWindowsMessageQueueTypeID, size, NULL);
     if (NULL == memory) {
-	CFRelease(allocator);
-	return NULL;
+        return NULL;
     }
-    __CFGenericInitBase(memory, NULL, __kCFWindowsMessageQueueTypeID);
-    memory->_allocator = allocator;
     __CFWindowsMessageQueueSetValid(memory);
     memory->_lock = 0;
     memory->_mask = mask;
@@ -166,7 +181,7 @@ static void __CFWindowsMessageQueueSchedule(void *info, CFRunLoopRef rl, CFStrin
     CFWindowsMessageQueueRef wmq = info;
     __CFWindowsMessageQueueLock(wmq);
     if (__CFWindowsMessageQueueIsValid(wmq)) {
-	unsigned long mask;
+	uint32_t mask;
 	CFArrayAppendValue(wmq->_runLoops, rl);
 	mask = __CFRunLoopGetWindowsMessageQueueMask(rl, mode);
 	mask |= wmq->_mask;
@@ -210,11 +225,11 @@ CFRunLoopSourceRef CFWindowsMessageQueueCreateRunLoopSource(CFAllocatorRef alloc
 	CFRunLoopSourceContext context;
 	context.version = 0;
 	context.info = (void *)wmq;
-	context.retain = (const void *(*)(const void *))CFRetain;
-	context.release = (void (*)(const void *))CFRelease;
-	context.copyDescription = (CFStringRef (*)(const void *))__CFWindowsMessageQueueCopyDescription;
-	context.equal = (Boolean (*)(const void *, const void *))__CFWindowsMessageQueueEqual;
-	context.hash = (CFHashCode (*)(const void *))__CFWindowsMessageQueueHash;
+	context.retain = CFRetain;
+	context.release = CFRelease;
+	context.copyDescription = __CFWindowsMessageQueueCopyDescription;
+	context.equal = __CFWindowsMessageQueueEqual;
+	context.hash = __CFWindowsMessageQueueHash;
 	context.schedule = __CFWindowsMessageQueueSchedule;
 	context.cancel = __CFWindowsMessageQueueCancel;
 	context.perform = __CFWindowsMessageQueuePerform;

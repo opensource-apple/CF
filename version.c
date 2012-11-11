@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -21,6 +19,9 @@
  * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
+ */
+/*
+ Note that this file is only used to build the CFLite version of CF using the makefile, but not the version that ships with OS X.
  */
 
 #define _STRINGIFY(X)	#X

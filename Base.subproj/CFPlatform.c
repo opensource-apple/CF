@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -30,8 +28,6 @@
 #include "CFInternal.h"
 #include "CFPriv.h"
 #if defined(__WIN32__)
-    #include <sys/stat.h>
-    #include <string.h>
     #include <windows.h>
     #include <stdlib.h>
 #else
@@ -41,7 +37,6 @@
     #include <pwd.h>
 #endif
 #if defined(__MACH__)
-    #include <mach-o/dyld.h>
     #include <crt_externs.h>
 #endif
 
@@ -53,21 +48,15 @@ extern char *getenv(const char *name);
 #define kCFPlatformInterfaceStringEncoding	CFStringGetSystemEncoding()
 #endif
 
-char **_CFArgv(void) {
 #if defined(__MACH__)
+char **_CFArgv(void) {
     return *_NSGetArgv();
-#else
-    return NULL;
-#endif
 }
 
 int _CFArgc(void) {
-#if defined(__MACH__)
     return *_NSGetArgc();
-#else
-    return 0;
-#endif
 }
+#endif
 
 
 __private_extern__ Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
@@ -86,12 +75,14 @@ __private_extern__ Boolean _CFIsCFM(void) {
     return __CFIsCFM;
 }
 
-
 #if defined(__WIN32__)
-#define PATH_LIST_SEP ';'
+#define PATH_SEP '\\'
 #else
-#define PATH_LIST_SEP ':'
+#define PATH_SEP '/'
 #endif
+
+#if !defined(__WIN32__)
+#define PATH_LIST_SEP ':'
 
 static char *_CFSearchForNameInPath(CFAllocatorRef alloc, const char *name, char *path) {
     struct stat statbuf;
@@ -124,19 +115,61 @@ static char *_CFSearchForNameInPath(CFAllocatorRef alloc, const char *name, char
     return NULL;
 }
 
+#endif
 
+
+#if defined(__WIN32__)
+// Returns the path to the CF DLL, which we can then use to find resources like char sets
+
+__private_extern__ const char *_CFDLLPath(void) {
+    static TCHAR cachedPath[MAX_PATH+1] = "";
+
+    if ('\0' == cachedPath[0]) {
+#if defined(DEBUG)
+        char *DLLFileName = "CoreFoundation_debug";
+#elif defined(PROFILE)
+        char *DLLFileName = "CoreFoundation_profile";
+#else
+        char *DLLFileName = "CoreFoundation";
+#endif
+        HMODULE ourModule = GetModuleHandle(DLLFileName);
+        CFAssert(ourModule, __kCFLogAssertion, "GetModuleHandle failed");
+
+        DWORD wResult = GetModuleFileName(ourModule, cachedPath, MAX_PATH+1);
+        CFAssert1(wResult > 0, __kCFLogAssertion, "GetModuleFileName failed: %d", GetLastError());
+        CFAssert1(wResult < MAX_PATH+1, __kCFLogAssertion, "GetModuleFileName result truncated: %s", cachedPath);
+
+        // strip off last component, the DLL name
+        CFIndex idx;
+        for (idx = wResult - 1; idx; idx--) {
+            if ('\\' == cachedPath[idx]) {
+                cachedPath[idx] = '\0';
+                break;
+            }
+        }
+    }
+    return cachedPath;
+}
+#endif
 
 static const char *__CFProcessPath = NULL;
-static const char *__CFprogname = "";
+static const char *__CFprogname = NULL;
 
-const char **_CFGetProgname(void) {	// This is a hack around the broken _NSGetPrognam(), for now; will be removed
+const char **_CFGetProgname(void) {
+    if (!__CFprogname)
+        _CFProcessPath();		// sets up __CFprogname as a side-effect
     return &__CFprogname;
+}
+
+const char **_CFGetProcessPath(void) {
+    if (!__CFProcessPath)
+        _CFProcessPath();		// sets up __CFProcessPath as a side-effect
+    return &__CFProcessPath;
 }
 
 const char *_CFProcessPath(void) {
     CFAllocatorRef alloc = NULL;
     char *thePath = NULL;
-    int execIndex = 0;
     
     if (__CFProcessPath) return __CFProcessPath;
     if (!__CFProcessPath) {
@@ -153,9 +186,10 @@ const char *_CFProcessPath(void) {
     }
 
 #if defined(__MACH__)
+    int execIndex = 0;
     {
 	struct stat exec, lcfm;
-        unsigned long size = CFMaxPathSize;
+        uint32_t size = CFMaxPathSize;
         char buffer[CFMaxPathSize];
         if (0 == _NSGetExecutablePath(buffer, &size) &&
             strcasestr(buffer, "LaunchCFMApp") != NULL &&
@@ -170,13 +204,14 @@ const char *_CFProcessPath(void) {
     }
 #endif
     
-    if (!__CFProcessPath && NULL != (*_NSGetArgv())[execIndex]) {
-	char buf[CFMaxPathSize] = {0};
 #if defined(__WIN32__)
-	HINSTANCE hinst = GetModuleHandle(NULL);
-	DWORD rlen = hinst ? GetModuleFileName(hinst, buf, 1028) : 0;
+    if (!__CFProcessPath) {
+        char buf[CFMaxPathSize] = {0};
+	DWORD rlen = GetModuleFileName(NULL, buf, 1028);
 	thePath = rlen ? buf : NULL;
 #else
+    if (!__CFProcessPath && NULL != (*_NSGetArgv())[execIndex]) {
+        char buf[CFMaxPathSize] = {0};
 	struct stat statbuf;
         const char *arg0 = (*_NSGetArgv())[execIndex];
         if (arg0[0] == '/') {
@@ -218,23 +253,20 @@ const char *_CFProcessPath(void) {
 	}
 
         if (thePath) {
-            // We are going to process the buffer replacing all "/./" with "/"
+            // We are going to process the buffer replacing all "/./" and "//" with "/"
             CFIndex srcIndex = 0, dstIndex = 0;
             CFIndex len = strlen(thePath);
             for (srcIndex=0; srcIndex<len; srcIndex++) {
                 thePath[dstIndex] = thePath[srcIndex];
                 dstIndex++;
-                if ((srcIndex < len-2) && (thePath[srcIndex] == '/') && (thePath[srcIndex+1] == '.') && (thePath[srcIndex+2] == '/')) {
-                    // We are at the first slash of a "/./"  Skip the "./"
-                    srcIndex+=2;
-                }
+                while (srcIndex < len-1 && thePath[srcIndex] == '/' && (thePath[srcIndex+1] == '/' || (thePath[srcIndex+1] == '.' && srcIndex < len-2 && thePath[srcIndex+2] == '/'))) srcIndex += (thePath[srcIndex+1] == '/' ? 1 : 2);
             }
             thePath[dstIndex] = 0;
         }
-#endif
         if (!thePath) {
 	    thePath = (*_NSGetArgv())[execIndex];
         }
+#endif
 	if (thePath) {
 	    int len = strlen(thePath);
 	    __CFProcessPath = CFAllocatorAllocate(alloc, len + 1, 0);
@@ -242,10 +274,11 @@ const char *_CFProcessPath(void) {
             memmove((char *)__CFProcessPath, thePath, len + 1);
 	}
 	if (__CFProcessPath) {
+            
 	    const char *p = 0;
 	    int i;
 	    for (i = 0; __CFProcessPath[i] != 0; i++){
-		if (__CFProcessPath[i] == '/')
+		if (__CFProcessPath[i] == PATH_SEP)
 		    p = __CFProcessPath + i; 
 	    }
 	    if (p != 0)
@@ -256,6 +289,18 @@ const char *_CFProcessPath(void) {
     }
     if (!__CFProcessPath) {
 	__CFProcessPath = "";
+        __CFprogname = __CFProcessPath;
+    } else {
+        const char *p = 0;
+        int i;
+        for (i = 0; __CFProcessPath[i] != 0; i++){
+            if (__CFProcessPath[i] == PATH_SEP)
+                p = __CFProcessPath + i; 
+        }
+        if (p != 0)
+            __CFprogname = p + 1;
+        else
+            __CFprogname = __CFProcessPath;
     }
     return __CFProcessPath;
 }
@@ -270,12 +315,13 @@ __private_extern__ CFStringRef _CFProcessNameString(void) {
     return __CFProcessNameString;
 }
 
-static CFURLRef __CFHomeDirectory = NULL;
 static CFStringRef __CFUserName = NULL;
+
+#if defined(__MACH__) || defined(__svr4__) || defined(__hpux__) || defined(__LINUX__) || defined(__FREEBSD__)
+static CFURLRef __CFHomeDirectory = NULL;
 static uint32_t __CFEUID = -1;
 static uint32_t __CFUID = -1;
 
-#if defined(__MACH__) || defined(__svr4__) || defined(__hpux__) || defined(__LINUX__) || defined(__FREEBSD__)
 static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd) {
     CFURLRef home = NULL;
     if (upwd && upwd->pw_dir) {
@@ -455,7 +501,6 @@ CF_EXPORT CFURLRef CFCopyHomeDirectoryURLForUser(CFStringRef uName) {
     return _CFCreateHomeDirectoryURLForUser(uName);
 }
 
-#undef PATH_LIST_SEP
 #undef CFMaxHostNameLength
 #undef CFMaxHostNameSize
 

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -306,13 +304,13 @@ static void __CFNotifyDeadMachPort(CFMachPortRef port, void *msg, CFIndex size, 
 static Boolean __CFMachPortEqual(CFTypeRef cf1, CFTypeRef cf2) {
     CFMachPortRef mp1 = (CFMachPortRef)cf1;
     CFMachPortRef mp2 = (CFMachPortRef)cf2;
-    __CFMachPortCheckForFork();
+//    __CFMachPortCheckForFork();  do not do this here
     return (mp1->_port == mp2->_port);
 }
 
 static CFHashCode __CFMachPortHash(CFTypeRef cf) {
     CFMachPortRef mp = (CFMachPortRef)cf;
-    __CFMachPortCheckForFork();
+//    __CFMachPortCheckForFork();  do not do this here -- can cause strange reentrancies 3843642
     return (CFHashCode)mp->_port;
 }
 
@@ -455,11 +453,11 @@ CFMachPortRef CFMachPortCreateWithPort(CFAllocatorRef allocator, mach_port_t por
     __CFMachPortSetValid(memory);
     memory->_callout = callout;
     if (NULL != context) {
-	memmove(&memory->_context, context, sizeof(CFMachPortContext));
+	CF_WRITE_BARRIER_MEMMOVE(&memory->_context, context, sizeof(CFMachPortContext));
 	memory->_context.info = context->retain ? (void *)context->retain(context->info) : context->info;
     }
     if (NULL == __CFAllMachPorts) {
-	__CFAllMachPorts = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, NULL, NULL);
+	__CFAllMachPorts = CFDictionaryCreateMutable(kCFAllocatorMallocZone, 0, NULL, NULL); // XXX_PCB make it GC weak.
 	_CFDictionarySetCapacity(__CFAllMachPorts, 20);
     }
     CFDictionaryAddValue(__CFAllMachPorts, (void *)port, memory);
@@ -496,7 +494,7 @@ void CFMachPortGetContext(CFMachPortRef mp, CFMachPortContext *context) {
     __CFGenericValidateType(mp, __kCFMachPortTypeID);
     CFAssert1(0 == context->version, __kCFLogAssertion, "%s(): context version not initialized to 0", __PRETTY_FUNCTION__);
     __CFMachPortCheckForFork();
-    memmove(context, &mp->_context, sizeof(CFMachPortContext));
+    CF_WRITE_BARRIER_MEMMOVE(context, &mp->_context, sizeof(CFMachPortContext));
 }
 
 void CFMachPortInvalidate(CFMachPortRef mp) {
@@ -592,6 +590,7 @@ void CFMachPortInvalidateAll(void) {
 // it was a very bad idea to call it.
 }
 
+    
 static mach_port_t __CFMachPortGetPort(void *info) {
     CFMachPortRef mp = info;
     __CFMachPortCheckForFork();
@@ -628,6 +627,10 @@ CFRunLoopSourceRef CFMachPortCreateRunLoopSource(CFAllocatorRef allocator, CFMac
     __CFGenericValidateType(mp, __kCFMachPortTypeID);
     __CFMachPortCheckForFork();
     __CFMachPortLock(mp);
+    if (!__CFMachPortIsValid(mp)) {
+        __CFMachPortUnlock(mp);
+        return NULL;
+    }
 #if 0
 #warning CF: adding ref to receive right is disabled for now -- doesnt work in 1F
     if (!__CFMachPortHasReceive(mp)) {

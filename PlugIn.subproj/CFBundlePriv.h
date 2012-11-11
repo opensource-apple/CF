@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFBundlePriv.h
-	Copyright (c) 1999-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLEPRIV__)
@@ -130,6 +128,8 @@ CFBundleRef _CFBundleGetMainBundleIfLooksLikeBundle(void);
 CF_EXPORT
 CFBundleRef _CFBundleCreateWithExecutableURLIfLooksLikeBundle(CFAllocatorRef allocator, CFURLRef url);
 
+CF_EXPORT
+CFURLRef _CFBundleCopyMainBundleExecutableURL(Boolean *looksLikeBundle);
 
 /* Functions for examining the structure of a bundle */
 
@@ -193,10 +193,16 @@ CF_EXPORT
 CFStringRef _CFBundleCopyFileTypeForFileURL(CFURLRef url);
 
 CF_EXPORT
+CFStringRef _CFBundleCopyFileTypeForFileData(CFDataRef data);
+
+CF_EXPORT
 Boolean _CFBundleGetHasChanged(CFBundleRef bundle);
 
 CF_EXPORT
 void _CFBundleFlushCaches(void);
+
+CF_EXPORT
+void _CFBundleFlushCachesForURL(CFURLRef url);
 
 CF_EXPORT
 void _CFBundleSetStringsFilesShared(CFBundleRef bundle, Boolean flag);
@@ -241,7 +247,7 @@ CF_EXPORT
 CFArrayRef _CFBundleCopyResourceURLsOfTypeForLanguage(CFBundleRef bundle, CFStringRef resourceType, CFStringRef subDirName, CFStringRef language);	// deprecated in favor of CFBundleCopyResourceURLsOfTypeForLocalization
 
 CF_EXPORT
-short _CFBundleOpenBundleResourceFork(CFBundleRef bundle);	// deprecated in favor of CFBundleOpenBundleResourceMap
+SInt16 _CFBundleOpenBundleResourceFork(CFBundleRef bundle);	// deprecated in favor of CFBundleOpenBundleResourceMap
 
 CF_EXPORT
 void _CFBundleCloseBundleResourceFork(CFBundleRef bundle);	// deprecated in favor of CFBundleCloseBundleResourceMap

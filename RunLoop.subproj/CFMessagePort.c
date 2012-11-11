@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -183,6 +181,7 @@ static Boolean __CFMessagePortNativeSetNameLocal(CFMachPortRef port, uint8_t *po
     kern_return_t ret;
     task_get_bootstrap_port(mach_task_self(), &bp);
     ret = bootstrap_register(bp, portname, CFMachPortGetPort(port));
+if (ret != KERN_SUCCESS) CFLog(0, CFSTR("CFMessagePort: bootstrap_register(): failed %d (0x%x), port = 0x%x, name = '%s'\nSee /usr/include/servers/bootstrap_defs.h for the error codes."), ret, ret, CFMachPortGetPort(port), portname);
     return (ret == KERN_SUCCESS) ? true : false;
 }
 
@@ -321,6 +320,7 @@ CFMessagePortRef CFMessagePortCreateLocal(CFAllocatorRef allocator, CFStringRef 
 	    CFRelease(name);
 	}
 	CFAllocatorDeallocate(allocator, utfname);
+CFLog(99, CFSTR("CFMessagePortCreateLocal(): failed to allocate object"));
 	return NULL;
     }
     __CFMessagePortUnsetValid(memory);
@@ -344,7 +344,9 @@ CFMessagePortRef CFMessagePortCreateLocal(CFAllocatorRef allocator, CFStringRef 
     ctx.release = NULL;
     ctx.copyDescription = NULL;
     native = CFMachPortCreate(allocator, __CFMessagePortDummyCallback, &ctx, NULL);
+if (!native) CFLog(99, CFSTR("CFMessagePortCreateLocal(): failed to allocate CFMachPortRef"));
     if (NULL != native && NULL != name && !__CFMessagePortNativeSetNameLocal(native, utfname)) {
+CFLog(99, CFSTR("CFMessagePortCreateLocal(): failed to name Mach port (%@)"), name);
 	CFMachPortInvalidate(native);
 	CFRelease(native);
 	native = NULL;

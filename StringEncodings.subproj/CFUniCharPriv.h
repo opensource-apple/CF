@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,14 +21,14 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFUniCharPriv.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined __UCHAR_PRIVATE__
 #define __UCHAR_PRIVATE__ 1
 
 #include <CoreFoundation/CFBase.h>
-#include "CFUniChar.h"
+#include <CoreFoundation/CFUniChar.h>
 
 #define kCFUniCharRecursiveDecompositionFlag	(1 << 30)
 #define kCFUniCharNonBmpFlag			(1 << 31)

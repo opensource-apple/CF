@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -64,6 +62,19 @@ static void _registerType(const void *key, const void *val, void *context) {
         if (NULL != curFactoryID) CFRelease(curFactoryID);
     }
     if (NULL != typeID) CFRelease(typeID);
+}
+
+__private_extern__ Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle) {
+    Boolean result = false;
+    CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle), factoryDict;
+    CFStringRef tempStr;
+    if (infoDict) {
+        factoryDict = CFDictionaryGetValue(infoDict, kCFPlugInFactoriesKey);
+        if (factoryDict != NULL && CFGetTypeID(factoryDict) == CFDictionaryGetTypeID()) result = true;
+        tempStr = CFDictionaryGetValue(infoDict, kCFPlugInDynamicRegistrationKey);
+        if (tempStr != NULL && CFGetTypeID(tempStr) == CFStringGetTypeID() && CFStringCompare(tempStr, CFSTR("YES"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) result = true;
+    }
+    return result;
 }
 
 __private_extern__ void _CFBundleInitPlugIn(CFBundleRef bundle) {

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -38,14 +36,17 @@
     #include <windows.h>
 #endif
 #if defined(__MACH__)
-    #include <mach-o/dyld.h>
     #include <malloc/malloc.h>
+    extern size_t malloc_good_size(size_t size);
     #include <mach/mach.h>
+    #include <dlfcn.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
 
-extern size_t malloc_good_size(size_t size);
+#if defined(__CYGWIN32__) || defined (D__CYGWIN_)
+#error CoreFoundation is currently built with the Microsoft C Runtime, which is incompatible with the Cygwin DLL.  You must either use the -mno-cygwin flag, or complete a port of CF to the Cygwin environment.
+#endif
 
 // -------- -------- -------- -------- -------- -------- -------- --------
 
@@ -244,6 +245,10 @@ static void *__CFAllocatorSystemReallocate(void *ptr, CFIndex newsize, CFOptionF
 }
 
 static void __CFAllocatorSystemDeallocate(void *ptr, void *info) {
+#if defined(DEBUG)
+    size_t size = malloc_size(ptr);
+    if (size) memset(ptr, 0xCC, size);
+#endif
     malloc_zone_free(info, ptr);
 }
 
@@ -294,6 +299,26 @@ static struct __CFAllocator __kCFAllocatorMalloc = {
     {0, NULL, NULL, NULL, NULL, (void *)malloc, (void *)realloc, (void *)free, NULL}
 };
 
+static struct __CFAllocator __kCFAllocatorMallocZone = {
+    {NULL, 0, 0x0080},
+#if defined(__MACH__)
+    __CFAllocatorCustomSize,
+    __CFAllocatorCustomMalloc,
+    __CFAllocatorCustomCalloc,
+    __CFAllocatorCustomValloc,
+    __CFAllocatorCustomFree,
+    __CFAllocatorCustomRealloc,
+    __CFAllocatorNullDestroy,
+    "kCFAllocatorMallocZone",
+    NULL,
+    NULL,
+    &__CFAllocatorZoneIntrospect,
+    NULL,
+#endif
+    NULL,	// _allocator
+    {0, NULL, NULL, NULL, NULL, __CFAllocatorSystemAllocate, __CFAllocatorSystemReallocate, __CFAllocatorSystemDeallocate, NULL}
+};
+
 static struct __CFAllocator __kCFAllocatorSystemDefault = {
     {NULL, 0, 0x0080},
 #if defined(__MACH__)
@@ -337,8 +362,11 @@ static struct __CFAllocator __kCFAllocatorNull = {
 const CFAllocatorRef kCFAllocatorDefault = NULL;
 const CFAllocatorRef kCFAllocatorSystemDefault = &__kCFAllocatorSystemDefault;
 const CFAllocatorRef kCFAllocatorMalloc = &__kCFAllocatorMalloc;
+const CFAllocatorRef kCFAllocatorMallocZone = &__kCFAllocatorMallocZone;
 const CFAllocatorRef kCFAllocatorNull = &__kCFAllocatorNull;
 const CFAllocatorRef kCFAllocatorUseContext = (CFAllocatorRef)0x0227;
+
+bool kCFUseCollectableAllocator = false;
 
 static CFStringRef __CFAllocatorCopyDescription(CFTypeRef cf) {
     CFAllocatorRef self = cf;
@@ -396,14 +424,19 @@ __private_extern__ void __CFAllocatorInitialize(void) {
     _CFRuntimeSetInstanceTypeID(&__kCFAllocatorSystemDefault, __kCFAllocatorTypeID);
     __kCFAllocatorSystemDefault._base._isa = __CFISAForTypeID(__kCFAllocatorTypeID);
 #if defined(__MACH__)
-    __kCFAllocatorSystemDefault._context.info = malloc_default_zone();
+    __kCFAllocatorSystemDefault._context.info = (CF_USING_COLLECTABLE_MEMORY ? __CFCollectableZone : malloc_default_zone());
+    memset(malloc_default_zone(), 0, 8);
 #endif
     __kCFAllocatorSystemDefault._allocator = kCFAllocatorSystemDefault;
-    memset(malloc_default_zone(), 0, 8);
 
     _CFRuntimeSetInstanceTypeID(&__kCFAllocatorMalloc, __kCFAllocatorTypeID);
     __kCFAllocatorMalloc._base._isa = __CFISAForTypeID(__kCFAllocatorTypeID);
     __kCFAllocatorMalloc._allocator = kCFAllocatorSystemDefault;
+
+    _CFRuntimeSetInstanceTypeID(&__kCFAllocatorMallocZone, __kCFAllocatorTypeID);
+    __kCFAllocatorMallocZone._base._isa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    __kCFAllocatorMallocZone._allocator = kCFAllocatorSystemDefault;
+    __kCFAllocatorMallocZone._context.info = malloc_default_zone();
 
     _CFRuntimeSetInstanceTypeID(&__kCFAllocatorNull, __kCFAllocatorTypeID);
     __kCFAllocatorNull._base._isa = __CFISAForTypeID(__kCFAllocatorTypeID);
@@ -445,16 +478,11 @@ void CFAllocatorSetDefault(CFAllocatorRef allocator) {
     }
 }
 
-CFAllocatorRef CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorContext *context) {
-    struct __CFAllocator *memory;
+static CFAllocatorRef __CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorContext *context) {
+    struct __CFAllocator *memory = NULL;
     CFAllocatorRetainCallBack retainFunc;
     CFAllocatorAllocateCallBack allocateFunc;
     void *retainedInfo;
-#if defined(DEBUG)
-    if (NULL == context->allocate) {
-	HALT;
-    }
-#endif
 #if defined(__MACH__)
     if (allocator && kCFAllocatorUseContext != allocator && allocator->_base._isa != __CFISAForTypeID(__kCFAllocatorTypeID)) {	// malloc_zone_t *
 	return NULL;	// require allocator to this function to be an allocator
@@ -471,7 +499,10 @@ CFAllocatorRef CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorContext *c
     }
     // We don't use _CFRuntimeCreateInstance()
     if (kCFAllocatorUseContext == allocator) {
-	memory = (void *)INVOKE_CALLBACK3(allocateFunc, sizeof(struct __CFAllocator), 0, retainedInfo);
+	memory = NULL;
+	if (allocateFunc) {
+	    memory = (void *)INVOKE_CALLBACK3(allocateFunc, sizeof(struct __CFAllocator), 0, retainedInfo);
+	}
 	if (NULL == memory) {
 	    return NULL;
 	}
@@ -521,9 +552,22 @@ CFAllocatorRef CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorContext *c
     return memory;
 }
 
+CFAllocatorRef CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorContext *context) {
+    CFAssert1(!CF_USING_COLLECTABLE_MEMORY, __kCFLogAssertion, "%s(): Shouldn't be called when GC is enabled!", __PRETTY_FUNCTION__);
+#if defined(DEBUG)
+    if (CF_USING_COLLECTABLE_MEMORY)
+        HALT;
+#endif
+    return __CFAllocatorCreate(allocator, context);
+}
+
+CFAllocatorRef _CFAllocatorCreateGC(CFAllocatorRef allocator, CFAllocatorContext *context) {
+    return __CFAllocatorCreate(allocator, context);
+}
+
 void *CFAllocatorAllocate(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint) {
     CFAllocatorAllocateCallBack allocateFunc;
-    void *newptr;
+    void *newptr = NULL;
     allocator = (NULL == allocator) ? __CFGetDefaultAllocator() : allocator;
 #if defined(__MACH__) && defined(DEBUG)
     if (allocator->_base._isa == __CFISAForTypeID(__kCFAllocatorTypeID)) {
@@ -538,8 +582,15 @@ void *CFAllocatorAllocate(CFAllocatorRef allocator, CFIndex size, CFOptionFlags 
 	return malloc_zone_malloc((malloc_zone_t *)allocator, size);
     }
 #endif
-    allocateFunc = __CFAllocatorGetAllocateFunction(&allocator->_context);
-    newptr = (void *)INVOKE_CALLBACK3(allocateFunc, size, hint, allocator->_context.info);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	newptr = auto_zone_allocate_object((auto_zone_t*)allocator->_context.info, size, (auto_memory_type_t)hint, true, false);
+    } else {
+	newptr = NULL;
+	allocateFunc = __CFAllocatorGetAllocateFunction(&allocator->_context);
+	if (allocateFunc) {
+		newptr = (void *)INVOKE_CALLBACK3(allocateFunc, size, hint, allocator->_context.info);
+	}
+    }
     return newptr;
 }
 
@@ -562,13 +613,20 @@ void *CFAllocatorReallocate(CFAllocatorRef allocator, void *ptr, CFIndex newsize
 	    return malloc_zone_malloc((malloc_zone_t *)allocator, newsize);
 	}
 #endif
+	newptr = NULL;
 	allocateFunc = __CFAllocatorGetAllocateFunction(&allocator->_context);
-	newptr = (void *)INVOKE_CALLBACK3(allocateFunc, newsize, hint, allocator->_context.info);
+	if (allocateFunc) {
+		newptr = (void *)INVOKE_CALLBACK3(allocateFunc, newsize, hint, allocator->_context.info);
+	}
 	return newptr;
     }
     if (NULL != ptr && 0 == newsize) {
 #if defined(__MACH__)
 	if (allocator->_base._isa != __CFISAForTypeID(__kCFAllocatorTypeID)) {	// malloc_zone_t *
+#if defined(DEBUG)
+	    size_t size = malloc_size(ptr);
+	    if (size) memset(ptr, 0xCC, size);
+#endif
 	    malloc_zone_free((malloc_zone_t *)allocator, ptr);
 	    return NULL;
 	}
@@ -603,6 +661,10 @@ void CFAllocatorDeallocate(CFAllocatorRef allocator, void *ptr) {
 #endif
 #if defined(__MACH__)
     if (allocator->_base._isa != __CFISAForTypeID(__kCFAllocatorTypeID)) {	// malloc_zone_t *
+#if defined(DEBUG)
+	size_t size = malloc_size(ptr);
+	if (size) memset(ptr, 0xCC, size);
+#endif
 	return malloc_zone_free((malloc_zone_t *)allocator, ptr);
     }
 #endif
@@ -669,6 +731,34 @@ void CFAllocatorGetContext(CFAllocatorRef allocator, CFAllocatorContext *context
     context->preferredSize = (void *)((uintptr_t)context->preferredSize & ~0x3);
 }
 
+void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint)
+{
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator))
+        return auto_zone_allocate_object((auto_zone_t*)kCFAllocatorSystemDefault->_context.info, size, (auto_memory_type_t)hint, false, false);
+    else
+        return CFAllocatorAllocate(allocator, size, hint);
+}
+
+void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void *ptr, CFIndex newsize, CFOptionFlags hint)
+{
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	if (ptr && (newsize == 0)) {
+	    return NULL; // equivalent to _CFAllocatorDeallocateGC.
+	}
+	if (ptr == NULL) {
+	    return auto_zone_allocate_object((auto_zone_t*)kCFAllocatorSystemDefault->_context.info, newsize, (auto_memory_type_t)hint, false, false); // eq. to _CFAllocator
+	}
+    }
+    // otherwise, auto_realloc() now preserves layout type and refCount.
+    return CFAllocatorReallocate(allocator, ptr, newsize, hint);
+}
+
+void _CFAllocatorDeallocateGC(CFAllocatorRef allocator, void *ptr)
+{
+    // when running GC, don't deallocate.
+    if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) CFAllocatorDeallocate(allocator, ptr);
+}
+
 // -------- -------- -------- -------- -------- -------- -------- --------
 
 #if defined(__MACH__) || defined(__LINUX__) || defined(__FREEBSD__)
@@ -679,8 +769,13 @@ __private_extern__ DWORD __CFTSDKey = 0xFFFFFFFF;
 #endif
 
 // Called for each thread as it exits
-static void __CFFinalizeThreadData(void *arg) {
+__private_extern__ void __CFFinalizeThreadData(void *arg) {
+#if defined(__MACH__) || defined(__LINUX__) || defined(__FREEBSD__)
     __CFThreadSpecificData *tsd = (__CFThreadSpecificData *)arg;
+#elif defined(__WIN32)
+    __CFThreadSpecificData *tsd = TlsGetValue(__CFTSDKey);
+    TlsSetValue(__CFTSDKey, NULL);
+#endif
     if (NULL == tsd) return; 
     if (tsd->_allocator) CFRelease(tsd->_allocator);
     if (tsd->_runLoop) CFRelease(tsd->_runLoop);
@@ -720,7 +815,14 @@ __private_extern__ void __CFBaseInitialize(void) {
 #if defined(__WIN32__)
     __CFTSDKey = TlsAlloc();
 #endif
+    //kCFUseCollectableAllocator = objc_collecting_enabled();
 }
+
+#if defined(__WIN32__)
+__private_extern__ void __CFBaseCleanup(void) {
+    TlsFree(__CFTSDKey);
+}
+#endif
 
 
 CFRange __CFRangeMake(CFIndex loc, CFIndex len) {
@@ -744,7 +846,7 @@ struct __CFNull {
 };
 
 static struct __CFNull __kCFNull = {
-    {NULL, 0, 0x0080}
+    INIT_CFRUNTIME_BASE(NULL, 0, 0x0080)
 };
 const CFNullRef kCFNull = &__kCFNull;
 
@@ -787,7 +889,7 @@ CFTypeID CFNullGetTypeID(void) {
 
 static int hasCFM = 0;
 
-void _CFRuntimeSetCFMPresent(int a) {
+void _CFRuntimeSetCFMPresent(void *addr) {
     hasCFM = 1;
 }
 
@@ -797,10 +899,12 @@ void _CFRuntimeSetCFMPresent(int a) {
 __private_extern__ void __CF_FAULT_CALLBACK(void **ptr) {
     uintptr_t p = (uintptr_t)*ptr;
     if ((0 == p) || (p & 0x1)) return;
-    if (0 == hasCFM) {
+// warning: revisit this address check in Chablis, and for 64-bit
+    if (0 == hasCFM || (0x90000000 <= p && p < 0xA0000000)) {
 	*ptr = (void *)(p | 0x1);
     } else {
-	int __known = _dyld_image_containing_address(p);
+	Dl_info info;
+	int __known = dladdr(p, &info);
 	*ptr = (void *)(p | (__known ? 0x1 : 0x3));	
     }
 }
@@ -846,7 +950,7 @@ __asm__ (
 
 // void __HALT(void);
 
-#if defined(__ppc__)
+#if defined(__ppc__) || defined(__ppc64__)
 __asm__ (
 ".text\n"
 "	.align 2\n"
@@ -861,6 +965,12 @@ __asm__ (
 #endif
 
 #if defined(__i386__)
+#if defined(_MSC_VER) || defined(__MWERKS__)
+__private_extern__ void __HALT()
+{
+    __asm int 3;
+}
+#else
 __asm__ (
 ".text\n"
 "	.align 2, 0x90\n"
@@ -872,5 +982,6 @@ __asm__ (
 "___HALT:\n"
 "	int3\n"
 );
+#endif
 #endif
 

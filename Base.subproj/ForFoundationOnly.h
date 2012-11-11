@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	ForFoundationOnly.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !CF_BUILDING_CF && !NSBUILDINGFOUNDATION
@@ -39,13 +37,28 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFDictionary.h>
 #include <CoreFoundation/CFPriv.h>
+#include <CoreFoundation/CFPropertyList.h>
 
 // NOTE: miscellaneous declarations are at the end
 
+// ---- CFRuntime material ----------------------------------------
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#include <malloc/malloc.h>
+
+CF_EXPORT
+void __CFSetupFoundationBridging(void *, void *, void *, void *);
+
+#if defined(__cplusplus)
+}
+#endif
 
 // ---- CFBundle material ----------------------------------------
 
-#include "CFBundlePriv.h"
+#include <CoreFoundation/CFBundlePriv.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -58,6 +71,9 @@ CF_EXPORT const CFStringRef _kCFBundleResourcesFileMappedKey;
 CF_EXPORT const CFStringRef _kCFBundleCFMLoadAsBundleKey;
 CF_EXPORT const CFStringRef _kCFBundleAllowMixedLocalizationsKey;
 
+CF_EXPORT CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, UInt8 version);
+
+CF_EXPORT UInt8 _CFBundleLayoutVersion(CFBundleRef bundle);
 
 CF_EXPORT CFArrayRef _CFBundleCopyLanguageSearchListInDirectory(CFAllocatorRef alloc, CFURLRef url, UInt8 *version);
 CF_EXPORT CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle);
@@ -67,7 +83,104 @@ CF_EXPORT CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle);
 #endif
 
 
+#if defined(__MACH__)
+// ---- CFPreferences material ----------------------------------------
+
+#define DEBUG_PREFERENCES_MEMORY 0
+ 
+#if DEBUG_PREFERENCES_MEMORY
+#include "../Tests/CFCountingAllocator.h"
+#endif
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+extern void _CFPreferencesPurgeDomainCache(void);
+
+typedef struct {
+    void *	(*createDomain)(CFAllocatorRef allocator, CFTypeRef context);
+    void	(*freeDomain)(CFAllocatorRef allocator, CFTypeRef context, void *domain);
+    CFTypeRef	(*fetchValue)(CFTypeRef context, void *domain, CFStringRef key); // Caller releases
+    void	(*writeValue)(CFTypeRef context, void *domain, CFStringRef key, CFTypeRef value);
+    Boolean	(*synchronize)(CFTypeRef context, void *domain);
+    void	(*getKeysAndValues)(CFAllocatorRef alloc, CFTypeRef context, void *domain, void **buf[], CFIndex *numKeyValuePairs);
+    CFDictionaryRef (*copyDomainDictionary)(CFTypeRef context, void *domain);
+    /* HACK - see comment on _CFPreferencesDomainSetIsWorldReadable(), below */
+    void	(*setIsWorldReadable)(CFTypeRef context, void *domain, Boolean isWorldReadable);
+} _CFPreferencesDomainCallBacks;
+
+CF_EXPORT CFAllocatorRef __CFPreferencesAllocator(void);
+CF_EXPORT  const _CFPreferencesDomainCallBacks __kCFVolatileDomainCallBacks;
+
+#if defined(__WIN32__)
+CF_EXPORT const _CFPreferencesDomainCallBacks __kCFWindowsRegistryDomainCallBacks;
+#else
+CF_EXPORT const _CFPreferencesDomainCallBacks __kCFXMLPropertyListDomainCallBacks;
+#endif
+
+typedef struct __CFPreferencesDomain * CFPreferencesDomainRef;
+
+CF_EXPORT CFPreferencesDomainRef _CFPreferencesDomainCreate(CFTypeRef context, const _CFPreferencesDomainCallBacks *callBacks);
+CF_EXPORT CFPreferencesDomainRef _CFPreferencesStandardDomain(CFStringRef domainName, CFStringRef userName, CFStringRef hostName);
+
+CF_EXPORT CFTypeRef _CFPreferencesDomainCreateValueForKey(CFPreferencesDomainRef domain, CFStringRef key);
+CF_EXPORT void _CFPreferencesDomainSet(CFPreferencesDomainRef domain, CFStringRef key, CFTypeRef value);
+CF_EXPORT Boolean _CFPreferencesDomainSynchronize(CFPreferencesDomainRef domain);
+
+/* If buf is NULL, no allocation occurs.  *numKeyValuePairs should be set to the current size of buf; alloc should be allocator to allocate/reallocate buf, or kCFAllocatorNull if buf is not to be (re)allocated.  No matter what happens, *numKeyValuePairs is always set to the number of pairs in the domain */
+CF_EXPORT void _CFPreferencesDomainGetKeysAndValues(CFAllocatorRef alloc, CFPreferencesDomainRef domain, void **buf[], CFIndex *numKeyValuePairs);
+
+CF_EXPORT CFArrayRef _CFPreferencesCreateDomainList(CFStringRef userName, CFStringRef hostName);
+CF_EXPORT Boolean _CFSynchronizeDomainCache(void);
+
+CF_EXPORT void _CFPreferencesDomainSetDictionary(CFPreferencesDomainRef domain, CFDictionaryRef dict);
+CF_EXPORT CFDictionaryRef _CFPreferencesDomainCopyDictionary(CFPreferencesDomainRef domain);
+CF_EXPORT CFDictionaryRef _CFPreferencesDomainDeepCopyDictionary(CFPreferencesDomainRef domain);
+CF_EXPORT Boolean _CFPreferencesDomainExists(CFStringRef domainName, CFStringRef userName, CFStringRef hostName);
+
+/* HACK - this is to work around the fact that individual domains lose the information about their user/host/app triplet at creation time.  We should find a better way to propogate this information.  REW, 1/13/00 */
+CF_EXPORT void _CFPreferencesDomainSetIsWorldReadable(CFPreferencesDomainRef domain, Boolean isWorldReadable);
+
+typedef struct {
+    CFMutableArrayRef _search;  // the search list; an array of _CFPreferencesDomains
+    CFMutableDictionaryRef _dictRep; // Mutable; a collapsed view of the search list, expressed as a single dictionary
+    CFStringRef _appName;
+} _CFApplicationPreferences;
+
+CF_EXPORT _CFApplicationPreferences *_CFStandardApplicationPreferences(CFStringRef appName);
+CF_EXPORT _CFApplicationPreferences *_CFApplicationPreferencesCreateWithUser(CFStringRef userName, CFStringRef appName);
+CF_EXPORT void _CFDeallocateApplicationPreferences(_CFApplicationPreferences *self);
+CF_EXPORT CFTypeRef _CFApplicationPreferencesCreateValueForKey(_CFApplicationPreferences *prefs, CFStringRef key);
+CF_EXPORT void _CFApplicationPreferencesSet(_CFApplicationPreferences *self, CFStringRef defaultName, CFTypeRef value);
+CF_EXPORT void _CFApplicationPreferencesRemove(_CFApplicationPreferences *self, CFStringRef defaultName);
+CF_EXPORT Boolean _CFApplicationPreferencesSynchronize(_CFApplicationPreferences *self);
+CF_EXPORT void _CFApplicationPreferencesUpdate(_CFApplicationPreferences *self); // same as updateDictRep
+CF_EXPORT CFDictionaryRef _CFApplicationPreferencesCopyRepresentation3(_CFApplicationPreferences *self, CFDictionaryRef hint, CFDictionaryRef insertion, CFPreferencesDomainRef afterDomain);
+CF_EXPORT CFDictionaryRef _CFApplicationPreferencesCopyRepresentationWithHint(_CFApplicationPreferences *self, CFDictionaryRef hint); // same as dictRep
+CF_EXPORT void _CFApplicationPreferencesSetStandardSearchList(_CFApplicationPreferences *appPreferences);
+CF_EXPORT void _CFApplicationPreferencesSetSearchList(_CFApplicationPreferences *self, CFArrayRef newSearchList);
+CF_EXPORT void _CFApplicationPreferencesSetCacheForApp(_CFApplicationPreferences *appPrefs, CFStringRef appName);
+CF_EXPORT void _CFApplicationPreferencesAddSuitePreferences(_CFApplicationPreferences *appPrefs, CFStringRef suiteName);
+CF_EXPORT void _CFApplicationPreferencesRemoveSuitePreferences(_CFApplicationPreferences *appPrefs, CFStringRef suiteName);
+
+CF_EXPORT void _CFApplicationPreferencesAddDomain(_CFApplicationPreferences *self, CFPreferencesDomainRef domain, Boolean addAtTop);
+CF_EXPORT Boolean _CFApplicationPreferencesContainsDomain(_CFApplicationPreferences *self, CFPreferencesDomainRef domain);
+CF_EXPORT void _CFApplicationPreferencesRemoveDomain(_CFApplicationPreferences *self, CFPreferencesDomainRef domain);
+
+CF_EXPORT CFTypeRef _CFApplicationPreferencesSearchDownToDomain(_CFApplicationPreferences *self, CFPreferencesDomainRef stopper, CFStringRef key);
+
+
+#if defined(__cplusplus)
+}
+#endif
+
+#endif // __MACH__
+
+
+
 // ---- CFString material ----------------------------------------
+
 
 #if defined(__cplusplus)
 extern "C" {
@@ -87,17 +200,15 @@ extern "C" {
 */
 CF_EXPORT CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLoc, CFIndex rangeLen, Boolean generatingExternalFile, CFStringEncoding encoding, char lossByte, UInt8 *buffer, CFIndex max, CFIndex *usedBufLen);
 
+CF_EXPORT CFStringRef __CFStringCreateImmutableFunnel2(CFAllocatorRef alloc, const void *bytes, CFIndex numBytes, CFStringEncoding encoding, Boolean possiblyExternalFormat, Boolean tryToReduceUnicode, Boolean hasLengthByte, Boolean hasNullByte, Boolean noCopy, CFAllocatorRef contentsDeallocator);
+
 CF_INLINE Boolean __CFStringEncodingIsSupersetOfASCII(CFStringEncoding encoding) {
     switch (encoding & 0x0000FF00) {
-        case 0x0: // MacOS Script range
-            return true;
 
         case 0x100: // Unicode range
-            if (encoding == kCFStringEncodingUnicode) return false;
+            if (encoding != kCFStringEncodingUTF8) return false;
             return true;
 
-        case 0x200: // ISO range
-            return true;
             
         case 0x600: // National standards range
             if (encoding != kCFStringEncodingASCII) return false;
@@ -106,8 +217,6 @@ CF_INLINE Boolean __CFStringEncodingIsSupersetOfASCII(CFStringEncoding encoding)
         case 0x800: // ISO 2022 range
             return false; // It's modal encoding
 
-        case 0xA00: // Misc standard range
-            return true;
 
         case 0xB00:
             if (encoding == kCFStringEncodingNonLossyASCII) return false;
@@ -120,6 +229,7 @@ CF_INLINE Boolean __CFStringEncodingIsSupersetOfASCII(CFStringEncoding encoding)
             return ((encoding & 0x0000FF00) > 0x0C00 ? false : true);
     }
 }
+
 
 /* Desperately using extern here */
 CF_EXPORT CFStringEncoding __CFDefaultEightBitStringEncoding;
@@ -205,9 +315,27 @@ CF_INLINE UniChar __CFStringGetCharacterFromInlineBufferQuick(CFStringInlineBuff
 CF_EXPORT void _CFStringAppendFormatAndArgumentsAux(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, CFDictionaryRef), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args);
 CF_EXPORT CFStringRef  _CFStringCreateWithFormatAndArgumentsAux(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, CFDictionaryRef), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments);
 
+/* For NSString (and NSAttributedString) usage, mutate with isMutable check
+*/
 enum {_CFStringErrNone = 0, _CFStringErrNotMutable = 1, _CFStringErrNilArg = 2, _CFStringErrBounds = 3};
-
+CF_EXPORT int __CFStringCheckAndReplace(CFMutableStringRef str, CFRange range, CFStringRef replacement);
 CF_EXPORT Boolean __CFStringNoteErrors(void);		// Should string errors raise?
+
+/* For NSString usage, guarantees that the contents can be extracted as 8-bit bytes in the __CFStringGetEightBitStringEncoding().
+*/
+CF_EXPORT Boolean __CFStringIsEightBit(CFStringRef str);
+
+/* For NSCFString usage, these do range check (where applicable) but don't check for ObjC dispatch
+*/
+CF_EXPORT int _CFStringCheckAndGetCharacterAtIndex(CFStringRef str, CFIndex idx, UniChar *ch);
+CF_EXPORT int _CFStringCheckAndGetCharacters(CFStringRef str, CFRange range, UniChar *buffer);
+CF_EXPORT CFIndex _CFStringGetLength2(CFStringRef str);
+CF_EXPORT CFHashCode __CFStringHash(CFTypeRef cf);
+CF_EXPORT CFHashCode CFStringHashISOLatin1CString(const uint8_t *bytes, CFIndex len);
+CF_EXPORT CFHashCode CFStringHashCString(const uint8_t *bytes, CFIndex len);
+CF_EXPORT CFHashCode CFStringHashCharacters(const UniChar *characters, CFIndex len);
+CF_EXPORT CFHashCode CFStringHashNSString(CFStringRef str);
+
 
 #if defined(__cplusplus)
 }
@@ -252,6 +380,17 @@ typedef struct {
     uint64_t	_offsetTableOffset;
 } CFBinaryPlistTrailer;
 
+extern bool __CFBinaryPlistGetTopLevelInfo(const uint8_t *databytes, uint64_t datalen, uint8_t *marker, uint64_t *offset, CFBinaryPlistTrailer *trailer);
+extern bool __CFBinaryPlistGetOffsetForValueFromArray(const uint8_t *databytes, uint64_t datalen, uint64_t startOffset, const CFBinaryPlistTrailer *trailer, CFIndex idx, uint64_t *offset);
+extern bool __CFBinaryPlistGetOffsetForValueFromDictionary(const uint8_t *databytes, uint64_t datalen, uint64_t startOffset, const CFBinaryPlistTrailer *trailer, CFTypeRef key, uint64_t *koffset, uint64_t *voffset);
+extern bool __CFBinaryPlistCreateObject(const uint8_t *databytes, uint64_t datalen, uint64_t startOffset, const CFBinaryPlistTrailer *trailer, CFAllocatorRef allocator, CFOptionFlags mutabilityOption, CFMutableDictionaryRef objects, CFPropertyListRef *plist);
+extern CFIndex __CFBinaryPlistWriteToStream(CFPropertyListRef plist, CFTypeRef stream);
+
+
+// ---- Used by property list parsing in Foundation
+
+extern CFTypeRef _CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xmlData, CFOptionFlags option, CFStringRef *errorString, Boolean allowNewTypes, CFPropertyListFormat *format);
+
 
 // ---- Miscellaneous material ----------------------------------------
 
@@ -265,13 +404,31 @@ extern "C" {
 
 CF_EXPORT CFTypeID CFTypeGetTypeID(void);
 
+CF_EXPORT CFTypeRef _CFRetainGC(CFTypeRef cf);
+CF_EXPORT void _CFReleaseGC(CFTypeRef cf);
+
 CF_EXPORT void _CFArraySetCapacity(CFMutableArrayRef array, CFIndex cap);
 CF_EXPORT void _CFBagSetCapacity(CFMutableBagRef bag, CFIndex cap);
 CF_EXPORT void _CFDictionarySetCapacity(CFMutableDictionaryRef dict, CFIndex cap);
 CF_EXPORT void _CFSetSetCapacity(CFMutableSetRef set, CFIndex cap);
 
+CF_EXPORT void CFCharacterSetCompact(CFMutableCharacterSetRef theSet);
+CF_EXPORT void CFCharacterSetFast(CFMutableCharacterSetRef theSet);
+
+CF_EXPORT const void *_CFArrayCheckAndGetValueAtIndex(CFArrayRef array, CFIndex idx);
 CF_EXPORT void _CFArrayReplaceValues(CFMutableArrayRef array, CFRange range, const void **newValues, CFIndex newCount);
 
+
+/* Enumeration
+ Call CFStartSearchPathEnumeration() once, then call
+ CFGetNextSearchPathEnumeration() one or more times with the returned state.
+ The return value of CFGetNextSearchPathEnumeration() should be used as
+ the state next time around.
+ When CFGetNextSearchPathEnumeration() returns 0, you're done.
+*/
+typedef CFIndex CFSearchPathEnumerationState;
+CF_EXPORT CFSearchPathEnumerationState __CFStartSearchPathEnumeration(CFSearchPathDirectory dir, CFSearchPathDomainMask domainMask);
+CF_EXPORT CFSearchPathEnumerationState __CFGetNextSearchPathEnumeration(CFSearchPathEnumerationState state, UInt8 *path, CFIndex pathSize);
 
 /* For use by NSNumber and CFNumber.
   Hashing algorithm for CFNumber:
@@ -291,14 +448,27 @@ CF_INLINE CFHashCode _CFHashDouble(double d) {
     return (CFHashCode)(fmod(dInt, (double)0xFFFFFFFF) + ((d - dInt) * 0xFFFFFFFF));
 }
 
+CF_EXPORT CFURLRef _CFURLAlloc(CFAllocatorRef allocator);
+CF_EXPORT void _CFURLInitWithString(CFURLRef url, CFStringRef string, CFURLRef baseURL);
+CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path);
+CF_EXPORT Boolean _CFStringIsLegalURLString(CFStringRef string);
+CF_EXPORT void *__CFURLReservedPtr(CFURLRef  url);
+CF_EXPORT void __CFURLSetReservedPtr(CFURLRef  url, void *ptr);
 
 typedef void (*CFRunLoopPerformCallBack)(void *info);
-
+CF_EXPORT void _CFRunLoopPerformEnqueue(CFRunLoopRef rl, CFStringRef mode, CFRunLoopPerformCallBack callout, void *info);
+CF_EXPORT Boolean _CFRunLoopFinished(CFRunLoopRef rl, CFStringRef mode);
 
 #if defined(__MACH__)
-#include <mach/mach_time.h>
+    #if !defined(__CFReadTSR)
+    #include <mach/mach_time.h>
+    #define __CFReadTSR() mach_absolute_time()
+    #endif
+#elif defined(__WIN32__)
 CF_INLINE UInt64 __CFReadTSR(void) {
-    return mach_absolute_time();
+    LARGE_INTEGER freq;
+    QueryPerformanceCounter(&freq);
+    return freq.QuadPart;
 }
 #else
 CF_INLINE UInt64 __CFReadTSR(void) {
@@ -313,7 +483,7 @@ CF_INLINE UInt64 __CFReadTSR(void) {
     __asm__ volatile("rdtsc" : : : "eax", "edx");
     __asm__ volatile("movl %%eax,%0" : "=m" (now.word[0]) : : "eax");
     __asm__ volatile("movl %%edx,%0" : "=m" (now.word[1]) : : "edx");
-#elif defined(__ppc__)
+#elif defined(__ppc__) || defined(__ppc64__)
     /* Read from PowerPC 64-bit time base register. The increment */
     /* rate of the time base is implementation-dependent, but is */
     /* 1/4th the bus clock cycle on 603/604/750 processors. */
@@ -324,7 +494,7 @@ CF_INLINE UInt64 __CFReadTSR(void) {
 	__asm__ volatile("mftbu %0" : "=r" (t3));
     } while (now.word[0] != t3);
 #else
-// ??? Do not know how to read a time stamp register on this architecture
+#error Do not know how to read a time stamp register on this architecture
     now.time64 = (uint64_t)0;
 #endif
     return now.time64;

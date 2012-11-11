@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -76,6 +74,21 @@ enum {		/* Bits 5-4 (value), 3-2 (key) */
     __kCFDictionaryHasCustomCallBacks = 3	/* callbacks are at end of header */
 };
 
+// Under GC, we fudge the key/value memory in two ways
+// First, if we had null callbacks or null for both retain/release, we use unscanned memory
+// This means that if people were doing addValue:[xxx new] and never removing, well, that doesn't work
+//
+// Second, if we notice standard retain/release implementations we substitute scanned memory
+// and zero out the retain/release callbacks.  This is fine, but when copying we need to restore them
+
+enum {
+    __kCFDictionaryRestoreKeys =       (1 << 0),
+    __kCFDictionaryRestoreValues =     (1 << 1),
+    __kCFDictionaryRestoreStringKeys = (1 << 2),
+    __kCFDictionaryWeakKeys =          (1 << 3),
+    __kCFDictionaryWeakValues =        (1 << 4)
+};
+
 struct __CFDictionary {
     CFRuntimeBase _base;
     CFIndex _count;		/* number of values */
@@ -84,6 +97,7 @@ struct __CFDictionary {
     uintptr_t _marker;
     void *_context;		/* private */
     CFIndex _deletes;
+    CFOptionFlags _xflags;      /* bits for GC */
     const void **_keys;		/* can be NULL if not allocated yet */
     const void **_values;	/* can be NULL if not allocated yet */
 };
@@ -182,29 +196,14 @@ void _CFDictionarySetKVOBit(CFDictionaryRef dict, CFIndex bit) {
     __CFBitfieldSetValue(((CFRuntimeBase *)dict)->_info, 6, 6, (bit & 0x1));
 }
 
-#if !defined(__MACH__)
+CF_INLINE bool _CFDictionaryIsSplit(CFDictionaryRef dict) {
+    return ((dict->_xflags & (__kCFDictionaryWeakKeys|__kCFDictionaryWeakValues)) != 0);
+}
 
-#define CF_OBJC_KVO_WILLCHANGE(obj, sel, a1)
-#define CF_OBJC_KVO_DIDCHANGE(obj, sel, a1)
 
-#else
+#define CF_OBJC_KVO_WILLCHANGE(obj, sel)
+#define CF_OBJC_KVO_DIDCHANGE(obj, sel)
 
-static SEL __CF_KVO_WillChangeSelector = 0;
-static SEL __CF_KVO_DidChangeSelector = 0;
-
-#define CF_OBJC_KVO_WILLCHANGE(obj, key) \
-	if (__CFBitfieldGetValue(((const CFRuntimeBase *)dict)->_info, 6, 6)) \
-	{void (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	if (!__CF_KVO_WillChangeSelector) __CF_KVO_WillChangeSelector = __CFGetObjCSelector("willChangeValueForKey:"); \
-	func((const void *)(obj), __CF_KVO_WillChangeSelector, (key));}
-
-#define CF_OBJC_KVO_DIDCHANGE(obj, key) \
-	if (__CFBitfieldGetValue(((const CFRuntimeBase *)dict)->_info, 6, 6)) \
-	{void (*func)(const void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-	if (!__CF_KVO_DidChangeSelector) __CF_KVO_DidChangeSelector = __CFGetObjCSelector("didChangeValueForKey:"); \
-	func((const void *)(obj), __CF_KVO_DidChangeSelector, (key));}
-
-#endif
 
 
 static CFIndex __CFDictionaryFindBuckets1a(CFDictionaryRef dict, const void *key) {
@@ -250,7 +249,7 @@ static CFIndex __CFDictionaryFindBuckets1b(CFDictionaryRef dict, const void *key
 	    return kCFNotFound;
 	} else if (~marker == currKey) {	/* deleted */
 	    /* do nothing */
-	} else if (currKey == (uintptr_t)key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void*))cb->equal, currKey, key, dict->_context))) {
+	} else if (currKey == (uintptr_t)key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void*))cb->equal, (void *)currKey, key, dict->_context))) {
 	    return probe;
 	}
 	probe = probe + probeskip;
@@ -279,18 +278,16 @@ static void __CFDictionaryFindBuckets2(CFDictionaryRef dict, const void *key, CF
     for (;;) {
 	uintptr_t currKey = (uintptr_t)keys[probe];
 	if (marker == currKey) {		/* empty */
-	    if (kCFNotFound == *nomatch) *nomatch = probe;
+	    if (nomatch) *nomatch = probe;
 	    return;
 	} else if (~marker == currKey) {	/* deleted */
-	    if (kCFNotFound == *nomatch) *nomatch = probe;
-	    if (kCFNotFound != *match) {
-		return;
+	    if (nomatch) {
+		*nomatch = probe;
+		nomatch = NULL;
 	    }
-	} else if (kCFNotFound == *match && (currKey == (uintptr_t)key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void*))cb->equal, currKey, key, dict->_context)))) {
+	} else if (currKey == (uintptr_t)key || (cb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void*))cb->equal, (void *)currKey, key, dict->_context))) {
 	    *match = probe;
-	    if (kCFNotFound != *nomatch) {
-		return;
-	    }
+	    return;
 	}
 	probe = probe + probeskip;
 	// This alternative to probe % buckets assumes that
@@ -355,7 +352,7 @@ static bool __CFDictionaryEqual(CFTypeRef cf1, CFTypeRef cf2) {
 	if (dict1->_marker != (uintptr_t)keys[idx] && ~dict1->_marker != (uintptr_t)keys[idx]) {
 	    const void *value;
 	    if (!CFDictionaryGetValueIfPresent(dict2, keys[idx], &value)) return false;
-	    if (dict1->_values[idx] != value && vcb1->equal && !INVOKE_CALLBACK3((Boolean (*)(void *, void *, void*))vcb1->equal, dict1->_values[idx], value, dict1->_context)) {
+	    if (dict1->_values[idx] != value && vcb1->equal && !INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void*))vcb1->equal, dict1->_values[idx], value, dict1->_context)) {
 		return false;
 	    }
 	}
@@ -424,19 +421,60 @@ static CFStringRef __CFDictionaryCopyDescription(CFTypeRef cf) {
 static void __CFDictionaryDeallocate(CFTypeRef cf) {
     CFMutableDictionaryRef dict = (CFMutableDictionaryRef)cf;
     CFAllocatorRef allocator = __CFGetAllocator(dict);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        const CFDictionaryKeyCallBacks *kcb = __CFDictionaryGetKeyCallBacks(dict);
+        const CFDictionaryValueCallBacks *vcb = __CFDictionaryGetValueCallBacks(dict);
+        if (kcb->retain == NULL && kcb->release == NULL && vcb->retain == NULL && vcb->release == NULL)
+            return; // XXX_PCB keep dictionary intact during finalization.
+    }
     if (__CFDictionaryGetType(dict) == __kCFDictionaryImmutable) {
         __CFBitfieldSetValue(((CFRuntimeBase *)dict)->_info, 1, 0, __kCFDictionaryFixedMutable);
     }
-    CFDictionaryRemoveAllValues(dict);
-    if (__CFDictionaryGetType(dict) == __kCFDictionaryMutable && dict->_keys) {
-	CFAllocatorDeallocate(allocator, dict->_keys);
+
+    const CFDictionaryKeyCallBacks *cb = __CFDictionaryGetKeyCallBacks(dict);
+    const CFDictionaryValueCallBacks *vcb = __CFDictionaryGetValueCallBacks(dict);
+    if (vcb->release || cb->release) {
+	const void **keys = dict->_keys;
+	CFIndex idx, nbuckets = dict->_bucketsNum;
+	for (idx = 0; idx < nbuckets; idx++) {
+	    if (dict->_marker != (uintptr_t)keys[idx] && ~dict->_marker != (uintptr_t)keys[idx]) {
+		const void *oldkey = keys[idx];
+		if (vcb->release) {
+		    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), allocator, dict->_values[idx], dict->_context);
+		}
+		if (cb->release) {
+		    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))cb->release), allocator, oldkey, dict->_context);
+		}
+	    }
+	}
     }
+
+    if (__CFDictionaryGetType(dict) == __kCFDictionaryMutable && dict->_keys) {
+        _CFAllocatorDeallocateGC(allocator, dict->_keys);
+        if (_CFDictionaryIsSplit(dict)) {   // iff GC, split allocations
+            _CFAllocatorDeallocateGC(allocator, dict->_values);
+        }
+        dict->_keys = NULL;
+        dict->_values = NULL;
+    }
+}
+
+/*
+ * When running under GC, we suss up dictionaries with standard string copy to hold
+ * onto everything, including the copies of incoming keys, in strong memory without retain counts.
+ * This is the routine that makes that copy.
+ * Not for inputs of constant strings we'll get a constant string back, and so the result
+ * is not guaranteed to be from the auto zone, hence the call to CFRelease since it will figure
+ * out where the refcount really is.
+ */
+static CFStringRef _CFStringCreateCopyCollected(CFAllocatorRef allocator, CFStringRef theString) {
+    return CFMakeCollectable(CFStringCreateCopy(NULL, theString));
 }
 
 static CFTypeID __kCFDictionaryTypeID = _kCFRuntimeNotATypeID;
 
 static const CFRuntimeClass __CFDictionaryClass = {
-    0,
+    _kCFRuntimeScannedObject,
     "CFDictionary",
     NULL,	// init
     NULL,	// copy
@@ -455,14 +493,53 @@ CFTypeID CFDictionaryGetTypeID(void) {
     return __kCFDictionaryTypeID;
 }
 
-static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t flags, CFIndex capacity, const CFDictionaryKeyCallBacks *callBacks, const CFDictionaryValueCallBacks *valueCallBacks) {
+static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t flags, CFIndex capacity, const CFDictionaryKeyCallBacks *keyCallBacks, const CFDictionaryValueCallBacks *valueCallBacks) {
     struct __CFDictionary *memory;
     uint32_t size;
     CFIndex idx;
     __CFBitfieldSetValue(flags, 31, 2, 0);
-    if (__CFDictionaryKeyCallBacksMatchNull(callBacks)) {
+    CFDictionaryKeyCallBacks nonRetainingKeyCallbacks;
+    CFDictionaryValueCallBacks nonRetainingValueCallbacks;
+    CFOptionFlags xflags = 0;
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        // preserve NULL for key or value CB, otherwise fix up.
+        if (!keyCallBacks || (keyCallBacks->retain == NULL && keyCallBacks->release == NULL)) {
+	    xflags = __kCFDictionaryWeakKeys;
+	}
+        else {
+	    if (keyCallBacks->retain == __CFTypeCollectionRetain && keyCallBacks->release == __CFTypeCollectionRelease) {
+                // copy everything
+                nonRetainingKeyCallbacks = *keyCallBacks;
+                nonRetainingKeyCallbacks.retain = NULL;
+                nonRetainingKeyCallbacks.release = NULL;
+                keyCallBacks = &nonRetainingKeyCallbacks;
+		xflags = __kCFDictionaryRestoreKeys;
+            }
+	    else if (keyCallBacks->retain == CFStringCreateCopy && keyCallBacks->release == __CFTypeCollectionRelease) {
+                // copy everything
+                nonRetainingKeyCallbacks = *keyCallBacks;
+                nonRetainingKeyCallbacks.retain = (void *)_CFStringCreateCopyCollected;   // XXX fix with better cast
+                nonRetainingKeyCallbacks.release = NULL;
+                keyCallBacks = &nonRetainingKeyCallbacks;
+		xflags = (__kCFDictionaryRestoreKeys | __kCFDictionaryRestoreStringKeys);
+            }
+        }
+	if (!valueCallBacks || (valueCallBacks->retain == NULL && valueCallBacks->release == NULL)) {
+	    xflags |= __kCFDictionaryWeakValues;
+	}
+        else {
+            if (valueCallBacks->retain == __CFTypeCollectionRetain && valueCallBacks->release == __CFTypeCollectionRelease) {
+                nonRetainingValueCallbacks = *valueCallBacks;
+                nonRetainingValueCallbacks.retain = NULL;
+                nonRetainingValueCallbacks.release = NULL;
+                valueCallBacks = &nonRetainingValueCallbacks;
+		xflags |= __kCFDictionaryRestoreValues;
+            }
+        }
+    }
+    if (__CFDictionaryKeyCallBacksMatchNull(keyCallBacks)) {
 	__CFBitfieldSetValue(flags, 3, 2, __kCFDictionaryHasNullCallBacks);
-    } else if (__CFDictionaryKeyCallBacksMatchCFType(callBacks)) {
+    } else if (__CFDictionaryKeyCallBacksMatchCFType(keyCallBacks)) {
 	__CFBitfieldSetValue(flags, 3, 2, __kCFDictionaryHasCFTypeCallBacks);
     } else {
 	__CFBitfieldSetValue(flags, 3, 2, __kCFDictionaryHasCustomCallBacks);
@@ -478,10 +555,10 @@ static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t fla
     switch (__CFBitfieldGetValue(flags, 1, 0)) {
     case __kCFDictionaryImmutable:
     case __kCFDictionaryFixedMutable:
-	size += 2 * __CFDictionaryNumBucketsForCapacity(capacity) * sizeof(const void *);
-	break;
+        size += 2 * __CFDictionaryNumBucketsForCapacity(capacity) * sizeof(const void *);
+        break;
     case __kCFDictionaryMutable:
-	break;
+        break;
     }
     memory = (struct __CFDictionary *)_CFRuntimeCreateInstance(allocator, __kCFDictionaryTypeID, size, NULL);
     if (NULL == memory) {
@@ -492,9 +569,15 @@ static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t fla
     memory->_marker = (uintptr_t)0xa1b1c1d3;
     memory->_context = NULL;
     memory->_deletes = 0;
+    memory->_xflags = xflags;
     switch (__CFBitfieldGetValue(flags, 1, 0)) {
     case __kCFDictionaryImmutable:
-	if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFDictionary (immutable)");
+        // GC note: we can't support weak part of mixed weak/strong in fixed case, we treat it as strong XXX blaine
+        if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)
+                && (xflags & (__kCFDictionaryWeakKeys|__kCFDictionaryWeakValues)) == (__kCFDictionaryWeakKeys|__kCFDictionaryWeakValues)) { // if both weak, don't scan
+            auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_OBJECT_UNSCANNED);
+        }
+        if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFDictionary (immutable)");
 	memory->_capacity = capacity;	/* Don't round up capacity */
 	memory->_bucketsNum = __CFDictionaryNumBucketsForCapacity(memory->_capacity);
 	memory->_keys = (const void **)((uint8_t *)memory + __CFDictionaryGetSizeOfType(flags));
@@ -504,6 +587,11 @@ static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t fla
 	}
 	break;
     case __kCFDictionaryFixedMutable:
+	// GC note: we can't support weak part of mixed weak/strong in fixed case, we treat it as strong XXX blaine
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)
+		&& (xflags & (__kCFDictionaryWeakKeys|__kCFDictionaryWeakValues)) == (__kCFDictionaryWeakKeys|__kCFDictionaryWeakValues)) { // if both weak, don't scan
+	    auto_zone_set_layout_type(__CFCollectableZone, memory, AUTO_OBJECT_UNSCANNED);
+	}
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFDictionary (mutable-fixed)");
 	memory->_capacity = capacity;	/* Don't round up capacity */
 	memory->_bucketsNum = __CFDictionaryNumBucketsForCapacity(memory->_capacity);
@@ -522,8 +610,8 @@ static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t fla
 	break;
     }
     if (__kCFDictionaryHasCustomCallBacks == __CFBitfieldGetValue(flags, 3, 2)) {
-	const CFDictionaryKeyCallBacks *cb = __CFDictionaryGetKeyCallBacks((CFDictionaryRef)memory);
-	*(CFDictionaryKeyCallBacks *)cb = *callBacks;
+	CFDictionaryKeyCallBacks *cb = (CFDictionaryKeyCallBacks *)__CFDictionaryGetKeyCallBacks((CFDictionaryRef)memory);
+	*cb = *keyCallBacks;
 	FAULT_CALLBACK((void **)&(cb->retain));
 	FAULT_CALLBACK((void **)&(cb->release));
 	FAULT_CALLBACK((void **)&(cb->copyDescription));
@@ -531,8 +619,8 @@ static CFDictionaryRef __CFDictionaryInit(CFAllocatorRef allocator, uint32_t fla
 	FAULT_CALLBACK((void **)&(cb->hash));
     }
     if (__kCFDictionaryHasCustomCallBacks == __CFBitfieldGetValue(flags, 5, 4)) {
-	const CFDictionaryValueCallBacks *vcb = __CFDictionaryGetValueCallBacks((CFDictionaryRef)memory);
-	*(CFDictionaryValueCallBacks *)vcb = *valueCallBacks;
+	CFDictionaryValueCallBacks *vcb = (CFDictionaryValueCallBacks *)__CFDictionaryGetValueCallBacks((CFDictionaryRef)memory);
+	*vcb = *valueCallBacks;
 	FAULT_CALLBACK((void **)&(vcb->retain));
 	FAULT_CALLBACK((void **)&(vcb->release));
 	FAULT_CALLBACK((void **)&(vcb->copyDescription));
@@ -549,6 +637,7 @@ CFDictionaryRef CFDictionaryCreate(CFAllocatorRef allocator, const void **keys, 
     result = __CFDictionaryInit(allocator, __kCFDictionaryImmutable, numValues, keyCallBacks, valueCallBacks);
     flags = __CFBitfieldGetValue(((const CFRuntimeBase *)result)->_info, 1, 0);
     if (flags == __kCFDictionaryImmutable) {
+	// tweak flags so that we can add our immutable values
         __CFBitfieldSetValue(((CFRuntimeBase *)result)->_info, 1, 0, __kCFDictionaryFixedMutable);
     }
     for (idx = 0; idx < numValues; idx++) {
@@ -565,8 +654,12 @@ CFMutableDictionaryRef CFDictionaryCreateMutable(CFAllocatorRef allocator, CFInd
 
 static void __CFDictionaryGrow(CFMutableDictionaryRef dict, CFIndex numNewValues);
 
+// This creates a dictionary which is for CFTypes or NSObjects, with an ownership transfer -- 
+// the dictionary does not take a retain, and the caller does not need to release the inserted objects.
+// The incoming objects must also be collectable if allocated out of a collectable allocator.
 CFDictionaryRef _CFDictionaryCreate_ex(CFAllocatorRef allocator, bool mutable, const void **keys, const void **values, CFIndex numValues) {
     CFDictionaryRef result;
+    void *bucketsBase;
     uint32_t flags;
     CFIndex idx;
     result = __CFDictionaryInit(allocator, mutable ? __kCFDictionaryMutable : __kCFDictionaryImmutable, numValues, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -579,20 +672,26 @@ CFDictionaryRef _CFDictionaryCreate_ex(CFAllocatorRef allocator, bool mutable, c
 	    __CFDictionaryGrow((CFMutableDictionaryRef)result, numValues);
 	}
     }
+    // GC:  since kCFTypeDictionaryKeyCallBacks & kCFTypeDictionaryValueCallBacks are used, the keys
+    // and values will be allocated contiguously.
+    bool collectableContainer = CF_IS_COLLECTABLE_ALLOCATOR(allocator);
+    bucketsBase = (collectableContainer ? auto_zone_base_pointer(__CFCollectableZone, result->_keys) : NULL);
     for (idx = 0; idx < numValues; idx++) {
 	CFIndex match, nomatch;
 	const void *newKey;
 	__CFDictionaryFindBuckets2(result, keys[idx], &match, &nomatch);
 	if (kCFNotFound != match) {
-	    CFRelease(result->_values[match]);
-	    result->_values[match] = values[idx];
+	    if (!collectableContainer) CFRelease(result->_values[match]);
+	    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bucketsBase, result->_values[match], values[idx]);
+	    // GC: generation(_values) <= generation(values), but added for completeness.
 	} else {
 	    newKey = keys[idx];
 	    if (result->_marker == (uintptr_t)newKey || ~result->_marker == (uintptr_t)newKey) {
 		__CFDictionaryFindNewMarker(result);
 	    }
-	    result->_keys[nomatch] = newKey;
-	    result->_values[nomatch] = values[idx];
+	    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bucketsBase, result->_keys[nomatch], newKey);
+	    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, bucketsBase, result->_values[nomatch], values[idx]);
+	    // GC: generation(_keys/_values) <= generation(keys/values), but added for completeness.
 	    ((CFMutableDictionaryRef)result)->_count++;
 	}
     }
@@ -607,16 +706,38 @@ CFDictionaryRef CFDictionaryCreateCopy(CFAllocatorRef allocator, CFDictionaryRef
     CFIndex numValues = CFDictionaryGetCount(dict);
     const void **list, *buffer[256];
     const void **vlist, *vbuffer[256];
-    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (list != buffer && __CFOASafe) __CFSetLastAllocationEventName(list, "CFDictionary (temp)");
-    vlist = (numValues <= 256) ? vbuffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    vlist = (numValues <= 256) ? vbuffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (vlist != vbuffer && __CFOASafe) __CFSetLastAllocationEventName(vlist, "CFDictionary (temp)");
     CFDictionaryGetKeysAndValues(dict, list, vlist);
-    cb = CF_IS_OBJC(__kCFDictionaryTypeID, dict) ? &kCFTypeDictionaryKeyCallBacks : __CFDictionaryGetKeyCallBacks(dict);
-    vcb = CF_IS_OBJC(__kCFDictionaryTypeID, dict) ? &kCFTypeDictionaryValueCallBacks : __CFDictionaryGetValueCallBacks(dict);
+    CFDictionaryKeyCallBacks patchedKeyCB;
+    CFDictionaryValueCallBacks patchedValueCB;
+    if (CF_IS_OBJC(__kCFDictionaryTypeID, dict)) {
+	cb = &kCFTypeDictionaryKeyCallBacks;
+	vcb = &kCFTypeDictionaryValueCallBacks;
+    }
+    else {
+	cb = __CFDictionaryGetKeyCallBacks(dict);
+	vcb = __CFDictionaryGetValueCallBacks(dict);
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	    if (dict->_xflags & __kCFDictionaryRestoreKeys) {
+		patchedKeyCB = *cb;    // copy
+		cb = &patchedKeyCB;    // reset to copy
+		patchedKeyCB.retain = (dict->_xflags & __kCFDictionaryRestoreStringKeys) ? CFStringCreateCopy : __CFTypeCollectionRetain;
+		patchedKeyCB.release = __CFTypeCollectionRelease;
+	    }
+	    if (dict->_xflags & __kCFDictionaryRestoreValues) {
+		patchedValueCB = *vcb;    // copy
+		vcb = &patchedValueCB;    // reset to copy
+		patchedValueCB.retain = __CFTypeCollectionRetain;
+		patchedValueCB.release = __CFTypeCollectionRelease;
+	    }
+	}
+    }
     result = CFDictionaryCreate(allocator, list, vlist, numValues, cb, vcb);
-    if (list != buffer) CFAllocatorDeallocate(allocator, list);
-    if (vlist != vbuffer) CFAllocatorDeallocate(allocator, vlist);
+    if (list != buffer) CFAllocatorDeallocate(allocator, list); // GC OK
+    if (vlist != vbuffer) CFAllocatorDeallocate(allocator, vlist); // GC OK
     return result;
 }
 
@@ -628,26 +749,51 @@ CFMutableDictionaryRef CFDictionaryCreateMutableCopy(CFAllocatorRef allocator, C
     const void **list, *buffer[256];
     const void **vlist, *vbuffer[256];
     CFAssert3(0 == capacity || numValues <= capacity, __kCFLogAssertion, "%s(): for fixed-mutable dicts, capacity (%d) must be greater than or equal to initial number of values (%d)", __PRETTY_FUNCTION__, capacity, numValues);
-    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    list = (numValues <= 256) ? buffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (list != buffer && __CFOASafe) __CFSetLastAllocationEventName(list, "CFDictionary (temp)");
-    vlist = (numValues <= 256) ? vbuffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0);
+    vlist = (numValues <= 256) ? vbuffer : CFAllocatorAllocate(allocator, numValues * sizeof(void *), 0); // XXX_PCB GC OK
     if (vlist != vbuffer && __CFOASafe) __CFSetLastAllocationEventName(vlist, "CFDictionary (temp)");
     CFDictionaryGetKeysAndValues(dict, list, vlist);
-    cb = CF_IS_OBJC(__kCFDictionaryTypeID, dict) ? &kCFTypeDictionaryKeyCallBacks : __CFDictionaryGetKeyCallBacks(dict);
-    vcb = CF_IS_OBJC(__kCFDictionaryTypeID, dict) ? &kCFTypeDictionaryValueCallBacks : __CFDictionaryGetValueCallBacks(dict);
+    CFDictionaryKeyCallBacks patchedKeyCB;
+    CFDictionaryValueCallBacks patchedValueCB;
+    if (CF_IS_OBJC(__kCFDictionaryTypeID, dict)) {
+	cb = &kCFTypeDictionaryKeyCallBacks;
+	vcb = &kCFTypeDictionaryValueCallBacks;
+    }
+    else {
+	cb = __CFDictionaryGetKeyCallBacks(dict);
+	vcb = __CFDictionaryGetValueCallBacks(dict);
+	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+	    if (dict->_xflags & __kCFDictionaryRestoreKeys) {
+		patchedKeyCB = *cb;    // copy
+		cb = &patchedKeyCB;    // reset to copy
+		patchedKeyCB.retain = (dict->_xflags & __kCFDictionaryRestoreStringKeys) ? CFStringCreateCopy : __CFTypeCollectionRetain;
+		patchedKeyCB.release = __CFTypeCollectionRelease;
+	    }
+	    if (dict->_xflags & __kCFDictionaryRestoreValues) {
+		patchedValueCB = *vcb;    // copy
+		vcb = &patchedValueCB;    // reset to copy
+		patchedValueCB.retain = __CFTypeCollectionRetain;
+		patchedValueCB.release = __CFTypeCollectionRelease;
+	    }
+	}
+    }
     result = CFDictionaryCreateMutable(allocator, capacity, cb, vcb);
     if (0 == capacity) _CFDictionarySetCapacity(result, numValues);
     for (idx = 0; idx < numValues; idx++) {
 	CFDictionaryAddValue(result, list[idx], vlist[idx]);
     }
-    if (list != buffer) CFAllocatorDeallocate(allocator, list);
-    if (vlist != vbuffer) CFAllocatorDeallocate(allocator, vlist);
+    if (list != buffer) CFAllocatorDeallocate(allocator, list); // XXX_PCB GC OK
+    if (vlist != vbuffer) CFAllocatorDeallocate(allocator, vlist); // XXX_PCB GC OK
     return result;
 }
 
+
+
 // Used by NSMapTables and KVO
 void _CFDictionarySetContext(CFDictionaryRef dict, void *context) {
-    ((struct __CFDictionary *)dict)->_context = context;
+    CFAllocatorRef allocator = CFGetAllocator(dict);
+    CF_WRITE_BARRIER_BASE_ASSIGN(allocator, dict, dict->_context, context);
 }
 
 void *_CFDictionaryGetContext(CFDictionaryRef dict) {
@@ -685,7 +831,7 @@ CFIndex CFDictionaryGetCountOfValue(CFDictionaryRef dict, const void *value) {
     vcb = __CFDictionaryGetValueCallBacks(dict);
     for (idx = 0; idx < nbuckets; idx++) {
 	if (dict->_marker != (uintptr_t)keys[idx] && ~dict->_marker != (uintptr_t)keys[idx]) {
-	    if ((dict->_values[idx] == value) || (vcb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void*))vcb->equal, dict->_values[idx], value, dict->_context))) {
+	    if ((dict->_values[idx] == value) || (vcb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void*))vcb->equal, dict->_values[idx], value, dict->_context))) {
 		cnt++;
 	    }
 	}
@@ -718,7 +864,7 @@ Boolean CFDictionaryContainsValue(CFDictionaryRef dict, const void *value) {
     vcb = __CFDictionaryGetValueCallBacks(dict);
     for (idx = 0; idx < nbuckets; idx++) {
 	if (dict->_marker != (uintptr_t)keys[idx] && ~dict->_marker != (uintptr_t)keys[idx]) {
-	    if ((dict->_values[idx] == value) || (vcb->equal && INVOKE_CALLBACK3((Boolean (*)(void *, void *, void*))vcb->equal, dict->_values[idx], value, dict->_context))) {
+	    if ((dict->_values[idx] == value) || (vcb->equal && INVOKE_CALLBACK3((Boolean (*)(const void *, const void *, void*))vcb->equal, dict->_values[idx], value, dict->_context))) {
 		return true;
 	    }
 	}
@@ -749,7 +895,7 @@ Boolean CFDictionaryGetValueIfPresent(CFDictionaryRef dict, const void *key, con
     } else {
 	match = __CFDictionaryFindBuckets1b(dict, key);
     }
-    return (kCFNotFound != match ? ((value ? *value = dict->_values[match] : NULL), true) : false);
+    return (kCFNotFound != match ? ((value ? __CFObjCStrongAssign(dict->_values[match], value) : NULL), true) : false);
 }
 
 bool CFDictionaryGetKeyIfPresent(CFDictionaryRef dict, const void *key, const void **actualkey) {
@@ -762,13 +908,18 @@ bool CFDictionaryGetKeyIfPresent(CFDictionaryRef dict, const void *key, const vo
     } else {
 	match = __CFDictionaryFindBuckets1b(dict, key);
     }
-    return (kCFNotFound != match ? ((actualkey ? *actualkey = dict->_keys[match] : NULL), true) : false);
+    return (kCFNotFound != match ? ((actualkey ? __CFObjCStrongAssign(dict->_keys[match], actualkey) : NULL), true) : false);
 }
 
 void CFDictionaryGetKeysAndValues(CFDictionaryRef dict, const void **keys, const void **values) {
     CFIndex idx, cnt, nbuckets;
     CF_OBJC_FUNCDISPATCH2(__kCFDictionaryTypeID, void, dict, "getObjects:andKeys:", (void * *)values, (void * *)keys);
     __CFGenericValidateType(dict, __kCFDictionaryTypeID);
+    if (CF_USING_COLLECTABLE_MEMORY) {
+	// GC: speculatively issue a write-barrier on the copied to buffers (3743553).
+	__CFObjCWriteBarrierRange(keys, dict->_count * sizeof(void *));
+	__CFObjCWriteBarrierRange(values, dict->_count * sizeof(void *));
+    }
     nbuckets = dict->_bucketsNum;
     for (idx = 0; idx < nbuckets; idx++) {
 	if (dict->_marker != (uintptr_t)dict->_keys[idx] && ~dict->_marker != (uintptr_t)dict->_keys[idx]) {
@@ -802,28 +953,50 @@ static void __CFDictionaryGrow(CFMutableDictionaryRef dict, CFIndex numNewValues
     const void **oldvalues = dict->_values;
     CFIndex idx, oldnbuckets = dict->_bucketsNum;
     CFIndex oldCount = dict->_count;
+    CFAllocatorRef allocator = __CFGetAllocator(dict), keysAllocator, valuesAllocator;
+    void *keysBase, *valuesBase;
     dict->_capacity = __CFDictionaryRoundUpCapacity(oldCount + numNewValues);
     dict->_bucketsNum = __CFDictionaryNumBucketsForCapacity(dict->_capacity);
     dict->_deletes = 0;
-    dict->_keys = CFAllocatorAllocate(__CFGetAllocator(dict), 2 * dict->_bucketsNum * sizeof(const void *), 0);
-    dict->_values = (const void **)(dict->_keys + dict->_bucketsNum);
-    if (NULL == dict->_keys) HALT;
+    if (_CFDictionaryIsSplit(dict)) {   // iff GC, use split memory sometimes unscanned memory
+	unsigned weakOrStrong = (dict->_xflags & __kCFDictionaryWeakKeys) ? AUTO_MEMORY_UNSCANNED : AUTO_MEMORY_SCANNED;
+	void *mem = _CFAllocatorAllocateGC(allocator, dict->_bucketsNum * sizeof(const void *), weakOrStrong);
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, dict, dict->_keys, mem);
+        keysAllocator = (dict->_xflags & __kCFDictionaryWeakKeys) ? kCFAllocatorNull : allocator;  // GC: avoids write-barrier in weak case.
+        keysBase = mem;
+	
+        weakOrStrong = (dict->_xflags & __kCFDictionaryWeakValues) ? AUTO_MEMORY_UNSCANNED : AUTO_MEMORY_SCANNED;
+	mem = _CFAllocatorAllocateGC(allocator, dict->_bucketsNum * sizeof(const void *), weakOrStrong);
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, dict, dict->_values, mem);
+        valuesAllocator = (dict->_xflags & __kCFDictionaryWeakValues) ? kCFAllocatorNull : allocator; // GC: avoids write-barrier in weak case.
+        valuesBase = mem;
+    } else {
+        CF_WRITE_BARRIER_BASE_ASSIGN(allocator, dict, dict->_keys, _CFAllocatorAllocateGC(allocator, 2 * dict->_bucketsNum * sizeof(const void *), AUTO_MEMORY_SCANNED));
+        dict->_values = (const void **)(dict->_keys + dict->_bucketsNum);
+        keysAllocator = valuesAllocator = allocator;
+        keysBase = valuesBase = dict->_keys;
+    }
+    if (NULL == dict->_keys || NULL == dict->_values) HALT;
     if (__CFOASafe) __CFSetLastAllocationEventName(dict->_keys, "CFDictionary (store)");
     for (idx = dict->_bucketsNum; idx--;) {
-	dict->_keys[idx] = (const void *)dict->_marker;
+        dict->_keys[idx] = (const void *)dict->_marker;
+        dict->_values[idx] = 0;
     }
     if (NULL == oldkeys) return;
     for (idx = 0; idx < oldnbuckets; idx++) {
-	if (dict->_marker != (uintptr_t)oldkeys[idx] && ~dict->_marker != (uintptr_t)oldkeys[idx]) {
-	    CFIndex match, nomatch;
-	    __CFDictionaryFindBuckets2(dict, oldkeys[idx], &match, &nomatch);
-	    CFAssert3(kCFNotFound == match, __kCFLogAssertion, "%s(): two values (%p, %p) now hash to the same slot; mutable value changed while in table or hash value is not immutable", __PRETTY_FUNCTION__, oldkeys[idx], dict->_keys[match]);
-	    dict->_keys[nomatch] = oldkeys[idx];
-	    dict->_values[nomatch] = oldvalues[idx];
-	}
+        if (dict->_marker != (uintptr_t)oldkeys[idx] && ~dict->_marker != (uintptr_t)oldkeys[idx]) {
+            CFIndex match, nomatch;
+            __CFDictionaryFindBuckets2(dict, oldkeys[idx], &match, &nomatch);
+            CFAssert3(kCFNotFound == match, __kCFLogAssertion, "%s(): two values (%p, %p) now hash to the same slot; mutable value changed while in table or hash value is not immutable", __PRETTY_FUNCTION__, oldkeys[idx], dict->_keys[match]);
+            if (kCFNotFound != nomatch) {
+                CF_WRITE_BARRIER_BASE_ASSIGN(keysAllocator, keysBase, dict->_keys[nomatch], oldkeys[idx]);
+                CF_WRITE_BARRIER_BASE_ASSIGN(valuesAllocator, valuesBase, dict->_values[nomatch], oldvalues[idx]);
+            }
+        }
     }
     CFAssert1(dict->_count == oldCount, __kCFLogAssertion, "%s(): dict count differs after rehashing; error", __PRETTY_FUNCTION__);
-    CFAllocatorDeallocate(__CFGetAllocator(dict), oldkeys);
+    _CFAllocatorDeallocateGC(allocator, oldkeys);
+    if (_CFDictionaryIsSplit(dict)) _CFAllocatorDeallocateGC(allocator, oldvalues);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
@@ -837,10 +1010,6 @@ void _CFDictionarySetCapacity(CFMutableDictionaryRef dict, CFIndex cap) {
     __CFDictionaryGrow(dict, cap - dict->_count);
 }
 
-// This function is for Foundation's benefit; no one else should use it.
-bool _CFDictionaryIsMutable(CFDictionaryRef dict) {
-    return (__CFDictionaryGetType(dict) != __kCFDictionaryImmutable);
-}
 
 void CFDictionaryAddValue(CFMutableDictionaryRef dict, const void *key, const void *value) {
     CFIndex match, nomatch;
@@ -865,15 +1034,18 @@ void CFDictionaryAddValue(CFMutableDictionaryRef dict, const void *key, const vo
     __CFDictionaryFindBuckets2(dict, key, &match, &nomatch);
     if (kCFNotFound != match) {
     } else {
+        CFAllocatorRef allocator = __CFGetAllocator(dict);
+        CFAllocatorRef keysAllocator = (dict->_xflags & __kCFDictionaryWeakKeys) ? kCFAllocatorNull : allocator;
+        CFAllocatorRef valuesAllocator = (dict->_xflags & __kCFDictionaryWeakValues) ? kCFAllocatorNull : allocator;
 	cb = __CFDictionaryGetKeyCallBacks(dict);
 	vcb = __CFDictionaryGetValueCallBacks(dict);
 	if (cb->retain) {
-	    newKey = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), __CFGetAllocator(dict), key, dict->_context);
+	    newKey = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), allocator, key, dict->_context);
 	} else {
 	    newKey = key;
 	}
 	if (vcb->retain) {
-	    newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), __CFGetAllocator(dict), value, dict->_context);
+	    newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), allocator, value, dict->_context);
 	} else {
 	    newValue = value;
 	}
@@ -881,8 +1053,8 @@ void CFDictionaryAddValue(CFMutableDictionaryRef dict, const void *key, const vo
 	    __CFDictionaryFindNewMarker(dict);
 	}
 	CF_OBJC_KVO_WILLCHANGE(dict, key);
-	dict->_keys[nomatch] = newKey;
-	dict->_values[nomatch] = newValue;
+	CF_WRITE_BARRIER_ASSIGN(keysAllocator, dict->_keys[nomatch], newKey);
+	CF_WRITE_BARRIER_ASSIGN(valuesAllocator, dict->_values[nomatch], newValue);
 	dict->_count++;
 	CF_OBJC_KVO_DIDCHANGE(dict, key);
     }
@@ -892,6 +1064,7 @@ void CFDictionaryReplaceValue(CFMutableDictionaryRef dict, const void *key, cons
     CFIndex match;
     const CFDictionaryValueCallBacks *vcb;
     const void *newValue;
+    CFAllocatorRef allocator, valuesAllocator;
     CF_OBJC_FUNCDISPATCH2(__kCFDictionaryTypeID, void, dict, "_replaceObject:forKey:", value, key);
     __CFGenericValidateType(dict, __kCFDictionaryTypeID);
     switch (__CFDictionaryGetType(dict)) {
@@ -910,16 +1083,18 @@ void CFDictionaryReplaceValue(CFMutableDictionaryRef dict, const void *key, cons
     }
     if (kCFNotFound == match) return;
     vcb = __CFDictionaryGetValueCallBacks(dict);
+    allocator = __CFGetAllocator(dict);
+    valuesAllocator = (dict->_xflags & __kCFDictionaryWeakValues) ? kCFAllocatorNull : allocator;
     if (vcb->retain) {
-	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), __CFGetAllocator(dict), value, dict->_context);
+	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), allocator, value, dict->_context);
     } else {
 	newValue = value;
     }
     CF_OBJC_KVO_WILLCHANGE(dict, key);
     if (vcb->release) {
-	INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), __CFGetAllocator(dict), dict->_values[match], dict->_context);
+	INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), allocator, dict->_values[match], dict->_context);
     }
-    dict->_values[match] = newValue;
+    CF_WRITE_BARRIER_ASSIGN(valuesAllocator, dict->_values[match], newValue);
     CF_OBJC_KVO_DIDCHANGE(dict, key);
 }
 
@@ -928,6 +1103,7 @@ void CFDictionarySetValue(CFMutableDictionaryRef dict, const void *key, const vo
     const CFDictionaryKeyCallBacks *cb;
     const CFDictionaryValueCallBacks *vcb;
     const void *newKey, *newValue;
+    CFAllocatorRef allocator, keysAllocator, valuesAllocator;
     CF_OBJC_FUNCDISPATCH2(__kCFDictionaryTypeID, void, dict, "setObject:forKey:", value, key);
     __CFGenericValidateType(dict, __kCFDictionaryTypeID);
     switch (__CFDictionaryGetType(dict)) {
@@ -944,23 +1120,26 @@ void CFDictionarySetValue(CFMutableDictionaryRef dict, const void *key, const vo
     }
     __CFDictionaryFindBuckets2(dict, key, &match, &nomatch);
     vcb = __CFDictionaryGetValueCallBacks(dict);
+    allocator = __CFGetAllocator(dict);
+    keysAllocator = (dict->_xflags & __kCFDictionaryWeakKeys) ? kCFAllocatorNull : allocator;
+    valuesAllocator = (dict->_xflags & __kCFDictionaryWeakValues) ? kCFAllocatorNull : allocator;
     if (vcb->retain) {
-	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), __CFGetAllocator(dict), value, dict->_context);
+	newValue = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))vcb->retain), allocator, value, dict->_context);
     } else {
 	newValue = value;
     }
     if (kCFNotFound != match) {
 	CF_OBJC_KVO_WILLCHANGE(dict, key);
 	if (vcb->release) {
-	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), __CFGetAllocator(dict), dict->_values[match], dict->_context);
+	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), allocator, dict->_values[match], dict->_context);
 	}
-	dict->_values[match] = newValue;
+	CF_WRITE_BARRIER_ASSIGN(valuesAllocator, dict->_values[match], newValue);
 	CF_OBJC_KVO_DIDCHANGE(dict, key);
     } else {
 	CFAssert3(__kCFDictionaryFixedMutable != __CFDictionaryGetType(dict) || dict->_count < dict->_capacity, __kCFLogAssertion, "%s(): capacity exceeded on fixed-capacity dict %p (capacity = %d)", __PRETTY_FUNCTION__, dict, dict->_capacity);
 	cb = __CFDictionaryGetKeyCallBacks(dict);
 	if (cb->retain) {
-	    newKey = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), __CFGetAllocator(dict), key, dict->_context);
+	    newKey = (void *)INVOKE_CALLBACK3(((const void *(*)(CFAllocatorRef, const void *, void *))cb->retain), allocator, key, dict->_context);
 	} else {
 	    newKey = key;
 	}
@@ -968,8 +1147,8 @@ void CFDictionarySetValue(CFMutableDictionaryRef dict, const void *key, const vo
 	    __CFDictionaryFindNewMarker(dict);
 	}
 	CF_OBJC_KVO_WILLCHANGE(dict, key);
-	dict->_keys[nomatch] = newKey;
-	dict->_values[nomatch] = newValue;
+	CF_WRITE_BARRIER_ASSIGN(keysAllocator, dict->_keys[nomatch], newKey);
+	CF_WRITE_BARRIER_ASSIGN(valuesAllocator, dict->_values[nomatch], newValue);
 	dict->_count++;
 	CF_OBJC_KVO_DIDCHANGE(dict, key);
     }
@@ -1000,11 +1179,13 @@ void CFDictionaryRemoveValue(CFMutableDictionaryRef dict, const void *key) {
 	cb = __CFDictionaryGetKeyCallBacks(dict);
 	vcb = __CFDictionaryGetValueCallBacks(dict);
 	const void *oldkey = dict->_keys[match];
+	CFAllocatorRef allocator = CFGetAllocator(dict);
 	CF_OBJC_KVO_WILLCHANGE(dict, oldkey);
 	if (vcb->release) {
-	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), __CFGetAllocator(dict), dict->_values[match], dict->_context);
+	    INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), allocator, dict->_values[match], dict->_context);
 	}
         dict->_keys[match] = (const void *)~dict->_marker;
+	dict->_values[match] = 0;
 	dict->_count--;
 	CF_OBJC_KVO_DIDCHANGE(dict, oldkey);
 	if (cb->release) {
@@ -1070,6 +1251,7 @@ void CFDictionaryRemoveAllValues(CFMutableDictionaryRef dict) {
 		INVOKE_CALLBACK3(((void (*)(CFAllocatorRef, const void *, void *))vcb->release), allocator, dict->_values[idx], dict->_context);
 	    }
 	    keys[idx] = (const void *)~dict->_marker;
+	    dict->_values[idx] = 0;
 	    dict->_count--;
 	    CF_OBJC_KVO_DIDCHANGE(dict, oldkey);
 	    if (cb->release) {
@@ -1077,8 +1259,10 @@ void CFDictionaryRemoveAllValues(CFMutableDictionaryRef dict) {
 	    }
 	}
     }
+    // XXX need memset here
     for (idx = 0; idx < nbuckets; idx++) {
 	keys[idx] = (const void *)dict->_marker;
+	dict->_values[idx] = 0;
     }
     dict->_count = 0;
     dict->_deletes = 0;

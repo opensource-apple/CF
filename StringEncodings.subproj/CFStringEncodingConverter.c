@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -31,7 +29,7 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFDictionary.h>
 #include "CFUniChar.h"
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include "CFUnicodeDecomposition.h"
 #include "CFStringEncodingConverterExt.h"
 #include "CFStringEncodingConverterPriv.h"
@@ -564,7 +562,9 @@ CF_INLINE _CFConverterEntry *__CFStringEncodingConverterGetEntry(UInt32 encoding
         case kCFStringEncodingUTF8:
             return &__CFConverterEntryUTF8;
 
-        default: return NULL;
+        default: {
+            return NULL;
+        }
     }
 }
 
@@ -914,7 +914,7 @@ __private_extern__ const char **CFStringEncodingCanonicalCharsetNames(UInt32 enc
 __private_extern__ UInt32 CFStringEncodingGetScriptCodeForEncoding(CFStringEncoding encoding) {
     _CFConverterEntry *entry = __CFStringEncodingConverterGetEntry(encoding);
 
-    return (entry ? entry->scriptCode : (encoding == kCFStringEncodingUnicode ? kCFStringEncodingUnicode : (encoding < 0xFF ? encoding : kCFStringEncodingInvalidId)));
+    return (entry ? entry->scriptCode : ((encoding & 0x0FFF) == kCFStringEncodingUnicode ? kCFStringEncodingUnicode : (encoding < 0xFF ? encoding : kCFStringEncodingInvalidId)));
 }
 
 __private_extern__ UInt32 CFStringEncodingCharLengthForBytes(UInt32 encoding, UInt32 flags, const uint8_t *bytes, UInt32 numBytes) {
@@ -967,9 +967,17 @@ static const UInt32 __CFBuiltinEncodings[] = {
     kCFStringEncodingNextStepLatin,
     kCFStringEncodingASCII,
     kCFStringEncodingUTF8,
-    /* These two are available only in CFString-level */
-    kCFStringEncodingUnicode,
+    /* These seven are available only in CFString-level */
     kCFStringEncodingNonLossyASCII,
+
+    kCFStringEncodingUTF16,
+    kCFStringEncodingUTF16BE,
+    kCFStringEncodingUTF16LE,
+
+    kCFStringEncodingUTF32,
+    kCFStringEncodingUTF32BE,
+    kCFStringEncodingUTF32LE,
+
     kCFStringEncodingInvalidId,
 };
 

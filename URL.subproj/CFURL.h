@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFURL.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURL__)
@@ -91,6 +89,7 @@ CFURLRef CFURLCreateWithString(CFAllocatorRef allocator, CFStringRef URLString, 
 /* final URL's path, and if the relative portion contains only */
 /* resource specifier pieces (query, parameters, and fragment), then */
 /* the last path component of the base URL will not be deleted  */
+CF_EXPORT
 CFURLRef CFURLCreateAbsoluteURLWithBytes(CFAllocatorRef alloc, const UInt8 *relativeURLBytes, CFIndex length, CFStringEncoding encoding, CFURLRef baseURL, Boolean useCompatibilityMode) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
 #endif
 
@@ -291,6 +290,7 @@ CFURLRef CFURLCreateCopyDeletingPathExtension(CFAllocatorRef allocator, CFURLRef
 /* computed and returned.  The returned bytes are the original bytes */ 
 /* from which the URL was created; if the URL was created from a */
 /* string, the bytes will be the bytes of the string encoded via UTF-8  */
+CF_EXPORT
 CFIndex CFURLGetBytes(CFURLRef url, UInt8 *buffer, CFIndex bufferLength) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
 
 typedef enum {
@@ -372,6 +372,7 @@ parameter           (47, 6)             (46, 8)
 query               (54, 5)             (53, 7)
 fragment            (60, 8)             (59, 9)
 */
+CF_EXPORT
 CFRange CFURLGetByteRangeForComponent(CFURLRef url, CFURLComponentType component, CFRange *rangeIncludingSeparators) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
 #endif
 

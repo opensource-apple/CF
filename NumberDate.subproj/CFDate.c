@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -53,86 +51,43 @@ struct __CFDate {
     CFAbsoluteTime _time;	/* immutable */
 };
 
-#if defined(__MACH__)
+#if defined(__WIN32__)
+// We should export this as SPI or API to clients - 3514284
+CFAbsoluteTime _CFAbsoluteTimeFromFileTime(const FILETIME *ft) {
+    CFAbsoluteTime ret = (CFTimeInterval)ft->dwHighDateTime * 429.49672960;
+    ret += (CFTimeInterval)ft->dwLowDateTime / 10000000.0;
+    ret -= (11644473600.0 + kCFAbsoluteTimeIntervalSince1970);
+    /* seconds between 1601 and 1970, 1970 and 2001 */
+    return ret;
+}
+#endif
+
+#if defined(__MACH__) || defined(__WIN32__)
 static double __CFTSRRate = 0.0;
-static CFAbsoluteTime __CFBootAbsoluteTime = 0.0;
-static CFTimeInterval __CFLastSyncOffset = -1.0E+20;
+static double __CF1_TSRRate = 0.0;
 
 __private_extern__ int64_t __CFTimeIntervalToTSR(CFTimeInterval ti) {
     return (int64_t)(ti * __CFTSRRate);
 }
 
 __private_extern__ CFTimeInterval __CFTSRToTimeInterval(int64_t tsr) {
-    return (CFTimeInterval)((double)tsr / __CFTSRRate);
-}
-
-__private_extern__ int64_t __CFAbsoluteTimeToTSR(CFAbsoluteTime at) {
-    CFTimeInterval delta = __CFReadTSR() / __CFTSRRate;
-    if (__CFLastSyncOffset + 0.01 < delta) {
-	struct timeval tv;
-	/* 0.01 seconds is arbitrarily chosen, but keeps the error under
-	0.00001 seconds generally; we need a number which is large enough
-	to cut down on the number of gettimeofday() calls, but small
-	enough that radical changes to the calendar clock are noticed
-	reasonably quickly. */
-	gettimeofday(&tv, NULL);
-	/* hope we don't context-switch here */
-	delta = __CFReadTSR() / __CFTSRRate;
-	__CFLastSyncOffset = delta;
-	CFAbsoluteTime newBoot = ((double)tv.tv_sec - kCFAbsoluteTimeIntervalSince1970) + 1.0E-6 * (double)tv.tv_usec - delta;
-	if (0.4 < fabs(newBoot - __CFBootAbsoluteTime)) {
-	    /* 0.4 arbitrarily chosen to keep the reported absolute time too
-	     * the 'actual' value, but not update __CFBootAbsoluteTime with
-	     * small changes to keep it from jittering. */
-	    __CFBootAbsoluteTime = newBoot;
-	}
-    }
-    return (at - __CFBootAbsoluteTime) * __CFTSRRate;
-}
-
-__private_extern__ CFAbsoluteTime __CFTSRToAbsoluteTime(int64_t tsr) {
-    CFTimeInterval delta = __CFReadTSR() / __CFTSRRate;
-    if (__CFLastSyncOffset + 0.01 < delta) {
-	struct timeval tv;
-	/* 0.01 seconds is arbitrarily chosen, but keeps the error under
-	0.00001 seconds generally; we need a number which is large enough
-	to cut down on the number of gettimeofday() calls, but small
-	enough that radical changes to the calendar clock are noticed
-	reasonably quickly. */
-	gettimeofday(&tv, NULL);
-	/* hope we don't context-switch here */
-	delta = __CFReadTSR() / __CFTSRRate;
-	__CFLastSyncOffset = delta;
-	CFAbsoluteTime newBoot = ((double)tv.tv_sec - kCFAbsoluteTimeIntervalSince1970) + 1.0E-6 * (double)tv.tv_usec - delta;
-	if (0.4 < fabs(newBoot - __CFBootAbsoluteTime)) {
-	    /* 0.4 arbitrarily chosen to keep the reported absolute time too
-	     * the 'actual' value, but not update __CFBootAbsoluteTime with
-	     * small changes to keep it from jittering. */
-	    __CFBootAbsoluteTime = newBoot;
-	}
-    }
-    return __CFBootAbsoluteTime + (tsr / __CFTSRRate);
+    return (CFTimeInterval)((double)tsr * __CF1_TSRRate);
 }
 #endif
 
 CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
     CFAbsoluteTime ret;
-#if defined(__WIN32__)
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    ret = (CFTimeInterval)ft.dwHighDateTime * 429.49672960;
-    ret += (CFTimeInterval)ft.dwLowDateTime / 10000000.0;
-    ret -= (11644473600.0 + kCFAbsoluteTimeIntervalSince1970);
-	 /* seconds between 1601 and 1970, 1970 and 2001 */
-#endif
-#if defined(__MACH__)
-    ret = __CFTSRToAbsoluteTime(__CFReadTSR());
-#endif
-#if defined(__svr4__) || defined(__hpux__) || defined(__LINUX__)
+#if defined(__MACH__) || defined(__svr4__) || defined(__hpux__) || defined(__LINUX__)
     struct timeval tv;
     gettimeofday(&tv, NULL);
     ret = (CFTimeInterval)tv.tv_sec - kCFAbsoluteTimeIntervalSince1970;
     ret += (1.0E-6 * (CFTimeInterval)tv.tv_usec);
+#elif defined(__WIN32__)
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ret = _CFAbsoluteTimeFromFileTime(&ft);
+#else
+#error CFAbsoluteTimeGetCurrent unimplemented for this platform
 #endif
     return ret;
 }
@@ -173,6 +128,15 @@ __private_extern__ void __CFDateInitialize(void) {
     struct mach_timebase_info info;
     mach_timebase_info(&info);
     __CFTSRRate = (1.0E9 / (double)info.numer) * (double)info.denom;
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
+#endif
+#if defined(__WIN32__)
+    LARGE_INTEGER freq;
+    if (!QueryPerformanceFrequency(&freq)) {
+        HALT;
+    }
+    __CFTSRRate = freq.QuadPart;
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
 #endif
     __kCFDateTypeID = _CFRuntimeRegisterClass(&__CFDateClass);
 }

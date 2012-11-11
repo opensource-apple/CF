@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFPriv.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 /*
@@ -38,7 +36,10 @@
 #include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFURL.h>
-#if defined(__MACH__)
+#include <CoreFoundation/CFBundlePriv.h>
+
+
+#if defined(__MACH__) || defined(__WIN32__)
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFMachPort.h>
 #include <CoreFoundation/CFSocket.h>
@@ -50,9 +51,11 @@ extern "C" {
 
 CF_EXPORT intptr_t _CFDoOperation(intptr_t code, intptr_t subcode1, intptr_t subcode2);
 
-CF_EXPORT void _CFRuntimeSetCFMPresent(int a);
+CF_EXPORT void _CFRuntimeSetCFMPresent(void *a);
 
 CF_EXPORT const char *_CFProcessPath(void);
+CF_EXPORT const char **_CFGetProcessPath(void);
+CF_EXPORT const char **_CFGetProgname(void);
 
 
 #if defined(__MACH__)
@@ -72,6 +75,10 @@ CF_EXPORT CFPropertyListRef _CFURLCopyPropertyListRepresentation(CFURLRef url);
 CF_EXPORT CFURLRef _CFURLCreateFromPropertyListRepresentation(CFAllocatorRef alloc, CFPropertyListRef pListRepresentation);
 #endif /* __MACH__ */
 
+CF_EXPORT void CFPreferencesFlushCaches(void);
+
+CF_EXPORT CFTimeInterval _CFTimeZoneGetDSTOffset(CFTimeZoneRef tz, CFAbsoluteTime at);
+CF_EXPORT CFAbsoluteTime _CFTimeZoneGetNextDSTSwitch(CFTimeZoneRef tz, CFAbsoluteTime at);
 
 #if !defined(__WIN32__)
 struct FSSpec;
@@ -194,7 +201,7 @@ CF_EXPORT const CFStringRef kCFHTTPURLStatusCode;
 CF_EXPORT const CFStringRef kCFHTTPURLStatusLine;
 
 
-/* System Version file access - the results of these calls are cached, and should be fast after the first call */
+/* System Version file access */
 CF_EXPORT CFStringRef CFCopySystemVersionString(void);			// Human-readable string containing both marketing and build version, should be API'd
 CF_EXPORT CFDictionaryRef _CFCopySystemVersionDictionary(void);
 CF_EXPORT CFDictionaryRef _CFCopyServerVersionDictionary(void);
@@ -216,6 +223,10 @@ typedef enum {
 
 CF_EXPORT CFRange CFStringGetRangeOfCharacterClusterAtIndex(CFStringRef string, CFIndex charIndex, CFStringCharacterClusterType type);
 
+enum {
+    kCFCompareDiacriticsInsensitive = (1 << 28),
+    kCFCompareWidthInsensitive = (1 << 29),
+};
 
 /* CFStringEncoding SPI */
 /* When set, CF encoding conversion engine keeps ASCII compatibility. (i.e. ASCII backslash <-> Unicode backslash in MacJapanese */

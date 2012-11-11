@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -29,37 +27,8 @@
 
 #include <CoreFoundation/CFUUID.h>
 #include "CFInternal.h"
-
-/* uuid_t already defined in RPCDCE.H (WIN32 header)
- * (Aleksey Dukhnyakov)
- */
-#if defined(__WIN32__)
-#define UUID_T_DEFINED 1
-#endif
-
-#if !defined(UUID_T_DEFINED)
-#define UUID_T_DEFINED 1
  
-/*    uuid
- *
- *        Universal Unique ID. Note this definition will result is a 16-byte
- *    structure regardless what platform it is on.
- */
-
-struct uuid_t {
-    unsigned long        time_low;
-    unsigned short        time_mid;
-    unsigned short        time_hi_and_version;
-    unsigned char        clock_seq_hi_and_reserved;
-    unsigned char        clock_seq_low;
-    unsigned char        node[6];
-};
-
-typedef struct uuid_t uuid_t;
-
-#endif
-
-extern unsigned long _CFGenerateUUID(uuid_t *uuid);
+extern uint32_t _CFGenerateUUID(uint8_t *uuid_bytes);
 
 static CFMutableDictionaryRef _uniquedUUIDs = NULL;
 static CFSpinLock_t CFUUIDGlobalDataLock = 0;
@@ -87,7 +56,8 @@ static void __CFUUIDAddUniqueUUID(CFUUIDRef uuid) {
     __CFSpinLock(&CFUUIDGlobalDataLock);
     if (_uniquedUUIDs == NULL) {
         /* Allocate table from default allocator */
-        _uniquedUUIDs = CFDictionaryCreateMutable(NULL, 0, &__CFUUIDBytesDictionaryKeyCallBacks, &__CFnonRetainedUUIDDictionaryValueCallBacks);
+        // XXX_PCB these need to weakly hold the UUIDs, otherwise, they will never be collected.
+        _uniquedUUIDs = CFDictionaryCreateMutable(kCFAllocatorMallocZone, 0, &__CFUUIDBytesDictionaryKeyCallBacks, &__CFnonRetainedUUIDDictionaryValueCallBacks);
     }
     CFDictionarySetValue(_uniquedUUIDs, &(uuid->_bytes), uuid);
     __CFSpinUnlock(&CFUUIDGlobalDataLock);
@@ -172,10 +142,10 @@ static CFUUIDRef __CFUUIDCreateWithBytesPrimitive(CFAllocatorRef allocator, CFUU
 CFUUIDRef CFUUIDCreate(CFAllocatorRef alloc) {
     /* Create a new bytes struct and then call the primitive. */
     CFUUIDBytes bytes;
-    unsigned long retval = 0;
+    uint32_t retval = 0;
     
     __CFSpinLock(&CFUUIDGlobalDataLock);
-    retval = _CFGenerateUUID((uuid_t *)&bytes);
+    retval = _CFGenerateUUID((uint8_t *)&bytes);
     __CFSpinUnlock(&CFUUIDGlobalDataLock);
 
     return (retval == 0) ? __CFUUIDCreateWithBytesPrimitive(alloc, bytes, false) : NULL;

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -78,7 +76,9 @@ struct __CFUserNotification {
     CFOptionFlags _responseFlags;
     CFStringRef _sessionID;
     CFDictionaryRef _responseDictionary;
+#if defined(__MACH__)
     CFMachPortRef _machPort;
+#endif
     CFUserNotificationCallBack _callout;
 };
 
@@ -108,19 +108,9 @@ static CFStringRef __CFUserNotificationCopyDescription(CFTypeRef cf) {
 #define NOTIFICATION_PORT_NAME_SUFFIX ".session."
 #define MESSAGE_TIMEOUT 100
 
-static void __CFUserNotificationDeallocate(CFTypeRef cf) {
-    CFUserNotificationRef userNotification = (CFUserNotificationRef)cf;
-    if (userNotification->_machPort) {
-        CFMachPortInvalidate(userNotification->_machPort);
-        CFRelease(userNotification->_machPort);
-    } else if (MACH_PORT_NULL != userNotification->_replyPort) {
-        mach_port_destroy(mach_task_self(), userNotification->_replyPort);
-    }
-    if (userNotification->_sessionID) CFRelease(userNotification->_sessionID);
-    if (userNotification->_responseDictionary) CFRelease(userNotification->_responseDictionary);
-}
-
 #endif /* __MACH__ */
+
+static void __CFUserNotificationDeallocate(CFTypeRef cf);
 
 static const CFRuntimeClass __CFUserNotificationClass = {
     0,
@@ -143,6 +133,18 @@ CFTypeID CFUserNotificationGetTypeID(void) {
 }
 
 #if defined(__MACH__)
+
+static void __CFUserNotificationDeallocate(CFTypeRef cf) {
+    CFUserNotificationRef userNotification = (CFUserNotificationRef)cf;
+    if (userNotification->_machPort) {
+        CFMachPortInvalidate(userNotification->_machPort);
+        CFRelease(userNotification->_machPort);
+    } else if (MACH_PORT_NULL != userNotification->_replyPort) {
+        mach_port_destroy(mach_task_self(), userNotification->_replyPort);
+    }
+    if (userNotification->_sessionID) CFRelease(userNotification->_sessionID);
+    if (userNotification->_responseDictionary) CFRelease(userNotification->_responseDictionary);
+}
 
 static void _CFUserNotificationAddToDictionary(const void *key, const void *value, void *context) {
     if (CFGetTypeID(key) == CFStringGetTypeID()) CFDictionarySetValue((CFMutableDictionaryRef)context, key, value);
@@ -298,10 +300,12 @@ static void _CFUserNotificationMachPortCallBack(CFMachPortRef port, void *m, CFI
     CFUserNotificationRef userNotification = (CFUserNotificationRef)info;
     mach_msg_base_t *msg = (mach_msg_base_t *)m;
     CFOptionFlags responseFlags = msg->header.msgh_id;
-    CFDataRef responseData = CFDataCreate(NULL, (uint8_t *)msg + sizeof(mach_msg_base_t), msg->header.msgh_size - sizeof(mach_msg_base_t));
-    if (responseData) {
-        userNotification->_responseDictionary = CFPropertyListCreateFromXMLData(NULL, responseData, kCFPropertyListImmutable, NULL);
-        CFRelease(responseData);
+    if (msg->header.msgh_size > sizeof(mach_msg_base_t)) {
+        CFDataRef responseData = CFDataCreate(NULL, (uint8_t *)msg + sizeof(mach_msg_base_t), msg->header.msgh_size - sizeof(mach_msg_base_t));
+        if (responseData) {
+            userNotification->_responseDictionary = CFPropertyListCreateFromXMLData(NULL, responseData, kCFPropertyListImmutable, NULL);
+            CFRelease(responseData);
+        }
     }
     CFMachPortInvalidate(userNotification->_machPort);
     CFRelease(userNotification->_machPort);
@@ -331,10 +335,12 @@ SInt32 CFUserNotificationReceiveResponse(CFUserNotificationRef userNotification,
             }
             if (ERR_SUCCESS == retval) {
                 if (responseFlags) *responseFlags = msg->header.msgh_id;
-                responseData = CFDataCreate(NULL, (uint8_t *)msg + sizeof(mach_msg_base_t), msg->header.msgh_size - sizeof(mach_msg_base_t));
-                if (responseData) {
-                    userNotification->_responseDictionary = CFPropertyListCreateFromXMLData(NULL, responseData, kCFPropertyListImmutable, NULL);
-                    CFRelease(responseData);
+                if (msg->header.msgh_size > sizeof(mach_msg_base_t)) {
+                    responseData = CFDataCreate(NULL, (uint8_t *)msg + sizeof(mach_msg_base_t), msg->header.msgh_size - sizeof(mach_msg_base_t));
+                    if (responseData) {
+                        userNotification->_responseDictionary = CFPropertyListCreateFromXMLData(NULL, responseData, kCFPropertyListImmutable, NULL);
+                        CFRelease(responseData);
+                    }
                 }
                 if (userNotification->_machPort) {
                     CFMachPortInvalidate(userNotification->_machPort);

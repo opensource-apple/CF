@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFBundle.h
-	Copyright (c) 1999-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1999-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE__)
@@ -54,8 +52,7 @@ const CFStringRef kCFBundleIdentifierKey;
     /* The bundle identifier (for CFBundleGetBundleWithIdentifier()) */
 CF_EXPORT
 const CFStringRef kCFBundleVersionKey;
-    /* The version number of the bundle.  Clients should use CFBundleGetVersionNumber() instead of accessing this key directly
-since that function will properly convert a version number in string format into its interger representation. */
+    /* The version number of the bundle.  For Mac OS 9 style version numbers (for example "2.5.3d5"), clients can use CFBundleGetVersionNumber() instead of accessing this key directly since that function will properly convert the version string into its compact integer representation. */
 CF_EXPORT
 const CFStringRef kCFBundleDevelopmentRegionKey;
     /* The name of the development language of the bundle. */

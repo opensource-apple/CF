@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,33 +26,14 @@
 */
 
 #include <string.h>
-#if KERNEL
-#include <stdlib.h>
-#include "CFUnicodeDecomposition.h"
-#include "CFUniCharNonBaseData.h"
-#include "CFUniCharDecompData.h"
-#include "CFUniCharCombiningPriorityData.h"
-#else KERNEL
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFCharacterSet.h>
-#include "CFUniChar.h"
-#include "CFUnicodeDecomposition.h"
+#include <CoreFoundation/CFUniChar.h>
+#include <CoreFoundation/CFUnicodeDecomposition.h>
 #include "CFInternal.h"
 #include "CFUniCharPriv.h"
-#endif KERNEL
 
 // Canonical Decomposition
-#if KERNEL
-static const uint32_t __CFUniCharDecompositionTableLength = (sizeof(__CFUniCharDecompositionTable) / (sizeof(uint32_t) * 2));
-// The kernel version of __CFUniCharIsDecomposableCharacter doesn't have exception ranges
-#define __CFUniCharIsDecomposableCharacterWithFlag(character,isHFSPlus) (__CFUniCharIsDecomposableCharacter(character))
-
-uint8_t **CFUniCharCombiningPriorityTable = __CFUniCharCombiningPriorityTable;
-uint8_t **CFUniCharCombiningPriorityExtraTable = __CFUniCharCombiningPriorityExtraTable;
-uint8_t CFUniCharNumberOfPlanesForCombiningPriority = sizeof(__CFUniCharCombiningPriorityTable) / sizeof(*__CFUniCharCombiningPriorityTable);
-uint8_t **CFUniCharNonBaseBitmap = __CFUniCharNonBaseBitmap;
-uint8_t CFUniCharNumberOfPlanesForNonBaseBitmap = sizeof(__CFUniCharNonBaseBitmap) / sizeof(*__CFUniCharNonBaseBitmap);
-#else KERNEL
 static UTF32Char *__CFUniCharDecompositionTable = NULL;
 static uint32_t __CFUniCharDecompositionTableLength = 0;
 static UTF32Char *__CFUniCharMultipleDecompositionTable = NULL;
@@ -127,7 +106,6 @@ CF_INLINE bool __CFUniCharIsDecomposableCharacterWithFlag(UTF32Char character, b
 CF_INLINE bool __CFUniCharIsNonBaseCharacter(UTF32Char character) {
     return CFUniCharIsMemberOfBitmap(character, (character < 0x10000 ? __CFUniCharNonBaseBitmapForBMP : CFUniCharGetBitmapPtrForPlane(kCFUniCharNonBaseCharacterSet, ((character >> 16) & 0xFF))));
 }
-#endif KERNEL
 
 typedef struct {
     uint32_t _key;
@@ -151,11 +129,7 @@ static uint32_t __CFUniCharGetMappedValue(const __CFUniCharDecomposeMappings *th
     return 0;
 }
 
-#if KERNEL
-#define __CFUniCharGetCombiningPropertyForCharacter(character) __CFUniCharGetCombiningPriority(character)
-#else KERNEL
 #define __CFUniCharGetCombiningPropertyForCharacter(character) CFUniCharGetCombiningPropertyForCharacter(character, (((character) >> 16) < __CFUniCharCombiningPriorityTableNumPlane ? __CFUniCharCombiningPriorityTable[(character) >> 16] : NULL))
-#endif KERNEL
 
 static void __CFUniCharPrioritySort(UTF32Char *characters, uint32_t length) {
     uint32_t p1, p2;
@@ -163,7 +137,6 @@ static void __CFUniCharPrioritySort(UTF32Char *characters, uint32_t length) {
     bool changes = true;
     UTF32Char *end = characters + length;
 
-#if !KERNEL
     if (NULL == __CFUniCharCombiningPriorityTable) {
         __CFSpinLock(&__CFUniCharDecompositionTableLock);
         if (NULL == __CFUniCharCombiningPriorityTable) {
@@ -176,7 +149,6 @@ static void __CFUniCharPrioritySort(UTF32Char *characters, uint32_t length) {
         }
         __CFSpinUnlock(&__CFUniCharDecompositionTableLock);
     }
-#endif !KERNEL
 
     if (length < 2) return;
 
@@ -199,35 +171,11 @@ static uint32_t __CFUniCharRecursivelyDecomposeCharacter(UTF32Char character, UT
     uint32_t value = __CFUniCharGetMappedValue((const __CFUniCharDecomposeMappings *)__CFUniCharDecompositionTable, __CFUniCharDecompositionTableLength, character);
     uint32_t length = CFUniCharConvertFlagToCount(value);
     UTF32Char firstChar = value & 0xFFFFFF;
-#if KERNEL
-    const UTF32Char *mappings = (kCFUniCharNonBmpFlag & value ? (length == 1 ? &firstChar : __CFUniCharNonBMPMultipleDecompositionTable + firstChar) : NULL);
-    UTF16Char theChar = (UTF16Char)firstChar;
-    const UTF16Char *bmpMappings = (mappings ? NULL : (length == 1 ? &theChar : __CFUniCharMultipleDecompositionTable + firstChar));
-#else KERNEL
     UTF32Char *mappings = (length > 1 ? __CFUniCharMultipleDecompositionTable + firstChar : &firstChar);
-#endif KERNEL
     uint32_t usedLength = 0;
 
     if (maxBufferLength < length) return 0;
 
-#if KERNEL
-    if (bmpMappings) {
-        if (value & kCFUniCharRecursiveDecompositionFlag) {
-            usedLength = __CFUniCharRecursivelyDecomposeCharacter((UTF32Char)*bmpMappings, convertedChars, maxBufferLength - length);
-
-            --length; // Decrement for the first char
-            if (!usedLength || usedLength + length > maxBufferLength) return 0;
-            ++bmpMappings;
-            convertedChars += usedLength;
-        }
-
-        usedLength += length;
-
-        while (length--) *(convertedChars++) = *(bmpMappings++);
-
-        return usedLength;
-    }
-#endif KERNEL
     if (value & kCFUniCharRecursiveDecompositionFlag) {
         usedLength = __CFUniCharRecursivelyDecomposeCharacter(*mappings, convertedChars, maxBufferLength - length);
 
@@ -255,9 +203,7 @@ static uint32_t __CFUniCharRecursivelyDecomposeCharacter(UTF32Char character, UT
 #define HANGUL_NCOUNT (HANGUL_VCOUNT * HANGUL_TCOUNT)
 
 uint32_t CFUniCharDecomposeCharacter(UTF32Char character, UTF32Char *convertedChars, uint32_t maxBufferLength) {
-#if !KERNEL
     if (NULL == __CFUniCharDecompositionTable) __CFUniCharLoadDecompositionTable();
-#endif !KERNEL
     if (character >= HANGUL_SBASE && character <= (HANGUL_SBASE + HANGUL_SCOUNT)) {
         uint32_t length;
 
@@ -276,11 +222,6 @@ uint32_t CFUniCharDecomposeCharacter(UTF32Char character, UTF32Char *convertedCh
     }
 }
 
-#if KERNEL
-#define CFAllocatorAllocate(a,size,flag)	malloc((size))
-#define CFAllocatorDeallocate(a,ptr)		free((ptr))
-#endif KERNEL
-
 #define MAX_BUFFER_LENGTH (32)
 bool CFUniCharDecompose(const UTF16Char *src, uint32_t length, uint32_t *consumedLength, void *dst, uint32_t maxLength, uint32_t *filledLength, bool needToReorder, uint32_t dstFormat, bool isHFSPlus) {
     uint32_t usedLength = 0;
@@ -293,9 +234,7 @@ bool CFUniCharDecompose(const UTF16Char *src, uint32_t length, uint32_t *consume
     bool isDecomp = false;
     bool isNonBase = false;
 
-#if !KERNEL
     if (NULL == __CFUniCharDecompositionTable) __CFUniCharLoadDecompositionTable();
-#endif !KERNEL
 
     while (length > 0) {
         currentChar = *(src++);
@@ -504,8 +443,6 @@ bool CFUniCharDecompose(const UTF16Char *src, uint32_t length, uint32_t *consume
     return true;
 }
 
-#if !KERNEL
-
 #define MAX_COMP_DECOMP_LEN (32)
 
 static uint32_t __CFUniCharRecursivelyCompatibilityDecomposeCharacter(UTF32Char character, UTF32Char *convertedChars) {
@@ -578,4 +515,3 @@ __private_extern__ uint32_t CFUniCharCompatibilityDecompose(UTF32Char *converted
 CF_EXPORT void CFUniCharPrioritySort(UTF32Char *characters, uint32_t length) {
     __CFUniCharPrioritySort(characters, length);
 }
-#endif !KERNEL

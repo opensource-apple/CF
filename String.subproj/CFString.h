@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFString.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRING__)
@@ -129,6 +127,16 @@ typedef enum {
     kCFStringEncodingUnicode = 0x0100, /* kTextEncodingUnicodeDefault  + kTextEncodingDefaultFormat (aka kUnicode16BitFormat) */
     kCFStringEncodingUTF8 = 0x08000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF8Format */
     kCFStringEncodingNonLossyASCII = 0x0BFF /* 7bit Unicode variants used by Cocoa & Java */
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_4
+    ,
+    kCFStringEncodingUTF16 = 0x0100, /* kTextEncodingUnicodeDefault + kUnicodeUTF16Format (alias of kCFStringEncodingUnicode) */
+    kCFStringEncodingUTF16BE = 0x10000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF16BEFormat */
+    kCFStringEncodingUTF16LE = 0x14000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF16LEFormat */
+
+    kCFStringEncodingUTF32 = 0x0c000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF32Format */
+    kCFStringEncodingUTF32BE = 0x18000100, /* kTextEncodingUnicodeDefault + kUnicodeUTF32BEFormat */
+    kCFStringEncodingUTF32LE = 0x1c000100 /* kTextEncodingUnicodeDefault + kUnicodeUTF32LEFormat */
+#endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_4 */
 } CFStringBuiltInEncodings;
 
 /* CFString type ID */
@@ -249,6 +257,7 @@ UniChar CFStringGetCharacterAtIndex(CFStringRef theString, CFIndex idx);
 CF_EXPORT
 void CFStringGetCharacters(CFStringRef theString, CFRange range, UniChar *buffer);
 
+
 /*** Conversion to other encodings ***/
 
 /* These two convert into the provided buffer; they return false if conversion isn't possible
@@ -330,6 +339,25 @@ CFStringEncoding CFStringGetSystemEncoding(void);		/* The default encoding for t
 
 CF_EXPORT
 CFIndex CFStringGetMaximumSizeForEncoding(CFIndex length, CFStringEncoding encoding);	/* Max bytes a string of specified length (in UniChars) will take up if encoded */
+
+
+/*** FileSystem path conversion functions ***/
+
+/* Extract the contents of the string as a NULL-terminated 8-bit string appropriate for passing to POSIX APIs.  The string is zero-terminated. false will be returned if the conversion results don't fit into the buffer.  Use CFStringGetMaximumSizeOfFileSystemRepresentation() if you want to make sure the buffer is of sufficient length.
+*/
+CF_EXPORT
+Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CFIndex maxBufLen) AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+
+/* Get the upper bound on the number of bytes required to hold the file system representation for the string. This result is returned quickly as a very rough approximation, and could be much larger than the actual space required. The result includes space for the zero termination. If you are allocating a buffer for long-term keeping, it's recommended that you reallocate it smaller (to be the right size) after calling CFStringGetFileSystemRepresentation(). 
+*/
+CF_EXPORT
+CFIndex CFStringGetMaximumSizeOfFileSystemRepresentation(CFStringRef string) AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+
+/* Create a CFString from the specified zero-terminated POSIX file system representation.  If the conversion fails (possible due to bytes in the buffer not being a valid sequence of bytes for the appropriate character encoding), NULL is returned.
+*/
+CF_EXPORT
+CFStringRef CFStringCreateWithFileSystemRepresentation(CFAllocatorRef alloc, const char *buffer) AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+
 
 /*** Comparison functions. ***/
 
@@ -448,6 +476,7 @@ CF_EXPORT Boolean CFStringFindCharacterFromSet(CFStringRef theString, CFCharacte
 CF_EXPORT
 void CFStringGetLineBounds(CFStringRef theString, CFRange range, CFIndex *lineBeginIndex, CFIndex *lineEndIndex, CFIndex *contentsEndIndex); 
 
+
 /*** Exploding and joining strings with a separator string ***/
 
 CF_EXPORT
@@ -456,6 +485,7 @@ CFStringRef CFStringCreateByCombiningStrings(CFAllocatorRef alloc, CFArrayRef th
 CF_EXPORT
 CFArrayRef CFStringCreateArrayBySeparatingStrings(CFAllocatorRef alloc, CFStringRef theString, CFStringRef separatorString);	/* No separators in the string returns array with that string; string == sep returns two empty strings */
 
+
 /*** Parsing non-localized numbers from strings ***/
 
 CF_EXPORT
@@ -463,6 +493,7 @@ SInt32 CFStringGetIntValue(CFStringRef str);		/* Skips whitespace; returns 0 on 
 
 CF_EXPORT
 double CFStringGetDoubleValue(CFStringRef str);	/* Skips whitespace; returns 0.0 on error */
+
 
 /*** MutableString functions ***/
 
@@ -592,6 +623,31 @@ typedef enum {
 CF_EXPORT void CFStringNormalize(CFMutableStringRef theString, CFStringNormalizationForm theForm);
 #endif
 
+/* Perform string transliteration.  The transformation represented by transform (see below for the full list of transforms supported) is applied to the given range of string, modifying it in place. Only the specified range will be modified, but the transform may look at portions of the string outside that range for context. NULL range pointer causes the whole string to be transformed. On return, range is modified to reflect the new range corresponding to the original range. reverse indicates that the inverse transform should be used instead, if it exists. If the transform is successful, true is returned; if unsuccessful, false. Reasons for the transform being unsuccessful include an invalid transform identifier, or attempting to reverse an irreversible transform.
+*/
+Boolean CFStringTransform(CFMutableStringRef string, CFRange *range, CFStringRef transform, Boolean reverse) AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+
+/* Transform identifiers for CFStringTransform()
+*/
+CF_EXPORT const CFStringRef kCFStringTransformStripCombiningMarks AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformToLatin AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformFullwidthHalfwidth AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinKatakana AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinHiragana AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformHiraganaKatakana AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformMandarinLatin AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinHangul AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinArabic AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinHebrew AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinThai AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinCyrillic AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformLatinGreek AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformToXMLHex AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+CF_EXPORT const CFStringRef kCFStringTransformToUnicodeName AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER;
+
+
+/*** General encoding related functionality ***/
+
 /* This returns availability of the encoding on the system
 */
 CF_EXPORT
@@ -637,6 +693,8 @@ CFStringRef  CFStringConvertEncodingToIANACharSetName(CFStringEncoding encoding)
 /*	kCFStringEncodingISO_2022_JP -> kCFStringEncodingMacJapanese */
 CF_EXPORT
 CFStringEncoding CFStringGetMostCompatibleMacStringEncoding(CFStringEncoding encoding);
+
+
 
 /* The next two functions allow fast access to the contents of a string, 
    assuming you are doing sequential or localized accesses. To use, call
@@ -690,6 +748,9 @@ CF_INLINE UniChar CFStringGetCharacterFromInlineBuffer(CFStringInlineBuffer *buf
     (((idx) < 0 || (idx) >= (buf)->rangeToBuffer.length) ? 0 : ((buf)->directBuffer ? (buf)->directBuffer[(idx) + (buf)->rangeToBuffer.location] : CFStringGetCharacterAtIndex((buf)->theString, (idx) + (buf)->rangeToBuffer.location)))
 
 #endif /* CF_INLINE */
+
+
+
 
 
 /* Rest of the stuff in this file is private and should not be used directly

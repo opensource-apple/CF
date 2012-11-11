@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,39 +25,27 @@
  *  CoreFoundation
  *
  *  Created by aki on Wed Oct 03 2001.
- *  Copyright (c) 2001-2003, Apple Inc. All rights reserved.
+ *  Copyright (c) 2001-2005, Apple Inc. All rights reserved.
  *
  */
 
 #if !defined(__COREFOUNDATION_CFUNICODEDECOMPOSITION__)
 #define __COREFOUNDATION_CFUNICODEDECOMPOSITION__ 1
 
-#if !defined(KERNEL)
-#define KERNEL 0
-#endif
-
-#if KERNEL
-#include "CFKernelTypes.h"
-#else // KERNEL
-#include "CFUniChar.h"
-#endif /* KERNEL */
+#include <CoreFoundation/CFUniChar.h>
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if !KERNEL
 CF_INLINE bool CFUniCharIsDecomposableCharacter(UTF32Char character, bool isHFSPlusCanonical) {
     if (isHFSPlusCanonical && !isHFSPlusCanonical) return false;	// hack to get rid of "unused" warning
     if (character < 0x80) return false;
     return CFUniCharIsMemberOf(character, kCFUniCharHFSPlusDecomposableCharacterSet);
 }
-#endif /* !KERNEL */
 
 CF_EXPORT uint32_t CFUniCharDecomposeCharacter(UTF32Char character, UTF32Char *convertedChars, uint32_t maxBufferLength);
-#if !KERNEL
 CF_EXPORT uint32_t CFUniCharCompatibilityDecompose(UTF32Char *convertedChars, uint32_t length, uint32_t maxBufferLength);
-#endif /* !KERNEL */
 
 CF_EXPORT bool CFUniCharDecompose(const UTF16Char *src, uint32_t length, uint32_t *consumedLength, void *dst, uint32_t maxLength, uint32_t *filledLength, bool needToReorder, uint32_t dstFormat, bool isHFSPlus);
 

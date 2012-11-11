@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,18 +25,14 @@
  *  CoreFoundation
  *
  *  Created by aki on Wed Oct 03 2001.
- *  Copyright (c) 2001-2003, Apple Inc. All rights reserved.
+ *  Copyright (c) 2001-2005, Apple Inc. All rights reserved.
  *
  */
 
 #if !defined(__COREFOUNDATION_CFUNICODEPRECOMPOSITION__)
 #define __COREFOUNDATION_CFUNICODEPRECOMPOSITION__ 1
 
-#if KERNEL
-#include "CFKernelTypes.h"
-#else // KERNEL
-#include "CFUniChar.h"
-#endif /* KERNEL */
+#include <CoreFoundation/CFUniChar.h>
 
 #if defined(__cplusplus)
 extern "C" {

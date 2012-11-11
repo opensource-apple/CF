@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -41,7 +39,7 @@ CFData read/write routines
 #include <string.h>
 
 #if defined(__WIN32__)
-#include <winsock.h>
+#include <winsock2.h>
 #include <io.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -53,76 +51,21 @@ CFData read/write routines
 #undef BOOLEAN
 #undef timeval
 #else
+#include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #endif
 
 #if defined(__MACH__)
 
-#include <mach-o/dyld.h>
-
-extern char *getenv(const char *name);
-
-static void *__CFLoadCFNetwork(void) {
-    static const void *image = NULL;
-    if (NULL == image) {
-        // OS 10.3 change to NSAddImage options here:
-        // a) Use NSADDIMAGE_OPTION_WITH_SEARCHING to support setting common DYLD_ environment variables
-        // including DYLD_IMAGE_SUFFIX and DYLD_LIBRARY_PATH.
-        // b) Use NSADDIMAGE_OPTION_MATCH_FILENAME_BY_INSTALLNAME to fix a nasty problem where two copies of
-        // a given framework are loaded into the same address space (See bug # 3060641).
-        image = ((void*)NSAddImage("/System/Library/Frameworks/CoreServices.framework/Frameworks/CFNetwork.framework/CFNetwork", NSADDIMAGE_OPTION_WITH_SEARCHING | NSADDIMAGE_OPTION_MATCH_FILENAME_BY_INSTALLNAME));
-    }
-    return (void *)image;
-}
-
-static Boolean __CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef A, CFURLRef B, CFDataRef *C, CFDictionaryRef *D, CFArrayRef E, SInt32 *F) {
-    static Boolean (*dyfunc)(CFAllocatorRef, CFURLRef, CFDataRef *, CFDictionaryRef *, CFArrayRef, SInt32 *) = NULL;
-    if (NULL == dyfunc) {
-	void *image = __CFLoadCFNetwork();
-        dyfunc = NSAddressOfSymbol(NSLookupSymbolInImage(image, "__CFURLCreateDataAndPropertiesFromResource", NSLOOKUPSYMBOLINIMAGE_OPTION_BIND));
-    }
-    if (dyfunc) {
-        return dyfunc(A, B, C, D, E, F);
-    } else {
-        if (C) *C = NULL;
-        if (D) *D = NULL;
-        if (F) *F = kCFURLUnknownSchemeError;
-        return false;
-    }
-}
-
-static Boolean __CFURLWriteDataAndPropertiesToResource(CFURLRef A, CFDataRef B, CFDictionaryRef C, SInt32 *D) {
-    static Boolean (*dyfunc)(CFURLRef, CFDataRef, CFDictionaryRef, SInt32 *) = NULL;
-    if (NULL == dyfunc) {
-	void *image = __CFLoadCFNetwork();
-        dyfunc = NSAddressOfSymbol(NSLookupSymbolInImage(image, "__CFURLWriteDataAndPropertiesToResource", NSLOOKUPSYMBOLINIMAGE_OPTION_BIND));
-    }
-    if (dyfunc) {
-        return dyfunc(A, B, C, D);
-    } else {
-        if (D) *D = kCFURLUnknownSchemeError;
-        return false;
-    }
-}
-
-static Boolean __CFURLDestroyResource(CFURLRef A, SInt32 *B) {
-    static Boolean (*dyfunc)(CFURLRef, SInt32 *) = NULL;
-    if (NULL == dyfunc) {
-	void *image = __CFLoadCFNetwork();
-        dyfunc = NSAddressOfSymbol(NSLookupSymbolInImage(image, "__CFURLDestroyResource", NSLOOKUPSYMBOLINIMAGE_OPTION_BIND));
-    }
-    if (dyfunc) {
-        return dyfunc(A, B);
-    } else {
-        if (B) *B = kCFURLUnknownSchemeError;
-        return false;
-    }
-}
+DEFINE_WEAK_CFNETWORK_FUNC(Boolean, _CFURLCreateDataAndPropertiesFromResource, (CFAllocatorRef A, CFURLRef B, CFDataRef *C, CFDictionaryRef *D, CFArrayRef E, SInt32 *F), (A, B, C, D, E, F), false)
+DEFINE_WEAK_CFNETWORK_FUNC(Boolean, _CFURLWriteDataAndPropertiesToResource, (CFURLRef A, CFDataRef B, CFDictionaryRef C, SInt32 *D), (A, B, C, D), false)
+DEFINE_WEAK_CFNETWORK_FUNC(Boolean, _CFURLDestroyResource, (CFURLRef A, SInt32 *B), (A, B), false)
 
 #endif
             
@@ -293,7 +236,7 @@ static Boolean _CFFileURLWritePropertiesToResource(CFURLRef url, CFDictionaryRef
                 CFNumberGetValue(modeNum, kCFNumberSInt32Type, &mode);
             } else {
 #if defined(__WIN32__)
-                const unsigned short *modePtr = (const unsigned short *)CFDataGetBytePtr((CFDataRef)value);
+                const uint16_t *modePtr = (const uint16_t *)CFDataGetBytePtr((CFDataRef)value);
 #else
                 const mode_t *modePtr = (const mode_t *)CFDataGetBytePtr((CFDataRef)value);
 #endif
@@ -323,7 +266,8 @@ static Boolean _CFFileURLCreateDataAndPropertiesFromResource(CFAllocatorRef allo
         Boolean releaseAlloc = false;
         
         if (alloc == NULL) {
-            // We need a real allocator to pass to _CFReadBytesFromFile
+            // We need a real allocator to pass to _CFReadBytesFromFile so that the CFDataRef we create with
+			//	CFDataCreateWithBytesNoCopy() can free up the object _CFReadBytesFromFile() returns.
             alloc = CFRetain(__CFGetDefaultAllocator());
             releaseAlloc = true;
         }
@@ -365,7 +309,12 @@ Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef 
             result = _CFFileURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, desiredProperties, fetchedProperties, errorCode);
         } else {
 #if defined(__MACH__)
-            result = __CFURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, fetchedProperties, desiredProperties, errorCode);
+            result = __CFNetwork__CFURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, fetchedProperties, desiredProperties, errorCode);
+	    if (!result) {
+		if (fetchedData) *fetchedData = NULL;
+		if (fetchedProperties) *fetchedProperties = NULL;
+		if (errorCode) *errorCode = kCFURLUnknownSchemeError;
+	    }
 #else
             if (fetchedData) *fetchedData = NULL;
             if (fetchedProperties) *fetchedProperties = NULL;
@@ -431,7 +380,11 @@ Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef data, CFDi
     } else {
         CFRelease(scheme);
 #if defined(__MACH__)
-        return __CFURLWriteDataAndPropertiesToResource(url, data, propertyDict, errorCode);
+        Boolean result = __CFNetwork__CFURLWriteDataAndPropertiesToResource(url, data, propertyDict, errorCode);
+	if (!result) {
+	    if (errorCode) *errorCode = kCFURLUnknownSchemeError;
+	}
+	return result;
 #else
         if (errorCode) *errorCode = kCFURLUnknownSchemeError;
         return false;
@@ -473,7 +426,11 @@ Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) {
     } else {
         CFRelease(scheme);
 #if defined(__MACH__)
-        return __CFURLDestroyResource(url, errorCode);
+        Boolean result = __CFNetwork__CFURLDestroyResource(url, errorCode);
+	if (!result) {
+	    if (errorCode) *errorCode = kCFURLUnknownSchemeError;
+	}
+	return result;
 #else
         if (errorCode) *errorCode = kCFURLUnknownSchemeError;
         return false;

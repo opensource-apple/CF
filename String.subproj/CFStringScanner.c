@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -258,7 +256,9 @@ __private_extern__ Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFDic
 	ch = __CFStringGetCharacterFromInlineBufferAux(buf, *indexPtr + numChars);
     } while (true);
     charPtr[numChars] = 0;	// Null byte for strtod
-    result = strtod(charPtr, &endCharPtr);
+
+    result = strtod_l(charPtr, &endCharPtr, NULL);
+
     if (tmpAlloc) CFAllocatorDeallocate(tmpAlloc, charPtr);
     if (charPtr == endCharPtr) return false;
     *indexPtr += (endCharPtr - charPtr);

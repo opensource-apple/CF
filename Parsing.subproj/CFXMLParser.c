@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,8 +26,8 @@
 */
 
 #include <CoreFoundation/CFXMLParser.h>
-#include <CoreFoundation/CFNumber.h>
 #include "CFXMLInputStream.h"
+#include <CoreFoundation/CFNumber.h>
 #include "CFUniChar.h" 
 #include "CFInternal.h"
 
@@ -260,6 +258,14 @@ CFXMLParserRef CFXMLParserCreate(CFAllocatorRef allocator, CFDataRef xmlData, CF
     return __CFXMLParserInit(allocator, dataSource, parseOptions, xmlData, versionOfNodes, callBacks, context);
 }
 
+CFXMLParserRef CFXMLParserCreateWithDataFromURL(CFAllocatorRef allocator, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex versionOfNodes, CFXMLParserCallBacks *callBacks, CFXMLParserContext *context) {
+    CFAssert1(dataSource == NULL || CFGetTypeID(dataSource) == CFURLGetTypeID(), __kCFLogAssertion, "%s(): dataSource is not a valid CFURL", __PRETTY_FUNCTION__);
+    CFAssert1(callBacks != NULL && callBacks->createXMLStructure != NULL && callBacks->addChild != NULL && callBacks->endXMLStructure != NULL, __kCFLogAssertion, "%s(): callbacks createXMLStructure, addChild, and endXMLStructure must all be non-NULL", __PRETTY_FUNCTION__);
+    CFAssert2(versionOfNodes <= 1, __kCFLogAssertion, "%s(): version number %d is higher than supported by CFXMLParser", __PRETTY_FUNCTION__, versionOfNodes);
+    CFAssert1(versionOfNodes != 0, __kCFLogAssertion, "%s(): version number 0 is no longer supported by CFXMLParser", __PRETTY_FUNCTION__);
+
+    return __CFXMLParserInit(allocator, dataSource, parseOptions, NULL, versionOfNodes, callBacks, context);
+}
 
 Boolean CFXMLParserParse(CFXMLParserRef parser) {
     CFXMLDocumentInfo docData;
@@ -1792,8 +1798,32 @@ static void _XMLTreeEndXMLStructure(CFXMLParserRef parser, void *xmlType, void *
         CFRelease((CFXMLTreeRef)xmlType);
 }
 
+CFXMLTreeRef CFXMLTreeCreateWithDataFromURL(CFAllocatorRef allocator, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex version) {
+    CFXMLParserRef parser;
+    CFXMLParserCallBacks callbacks;
+    CFXMLTreeRef result;
 
-CFXMLTreeRef CFXMLTreeCreateFromData(CFAllocatorRef allocator, CFDataRef xmlData, CFURLRef dataSource, UInt32 parseOptions, CFIndex parserVersion) {
+    CFAssert1(dataSource == NULL || CFGetTypeID(dataSource) == CFURLGetTypeID(), __kCFLogAssertion, "%s(): dataSource is not a valid CFURL", __PRETTY_FUNCTION__);
+
+    callbacks.createXMLStructure = _XMLTreeCreateXMLStructure;
+    callbacks.addChild = _XMLTreeAddChild;
+    callbacks.endXMLStructure = _XMLTreeEndXMLStructure;
+    callbacks.resolveExternalEntity = NULL;
+    callbacks.handleError = NULL;
+    parser = CFXMLParserCreateWithDataFromURL(allocator, dataSource, parseOptions, version, &callbacks, NULL);
+
+    if (CFXMLParserParse(parser)) {
+        result = (CFXMLTreeRef)CFXMLParserGetDocument(parser);
+    } else {
+        result = (CFXMLTreeRef)CFXMLParserGetDocument(parser);
+        if (result) CFRelease(result);
+        result = NULL;
+    }
+    CFRelease(parser);
+    return result;
+}
+
+CFXMLTreeRef CFXMLTreeCreateFromData(CFAllocatorRef allocator, CFDataRef xmlData, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex parserVersion) {
     return CFXMLTreeCreateFromDataWithError(allocator, xmlData, dataSource, parseOptions, parserVersion, NULL);
 }
 
@@ -1909,6 +1939,13 @@ CFStringRef CFXMLCreateStringByEscapingEntities(CFAllocatorRef allocator, CFStri
             mark = idx + 1;
         }
     }
+    // Copy the remainder to the output string before returning.
+    CFStringRef remainder = CFStringCreateWithSubstring(allocator, string, CFRangeMake(mark, idx - mark));
+    if (NULL != remainder) {
+        CFStringAppend(newString, remainder);
+        CFRelease(remainder);
+    }
+    
     CFRelease(startChars);
     return newString;
 }

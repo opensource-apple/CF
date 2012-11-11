@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFXMLParser.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFXMLPARSER__)
@@ -186,6 +184,10 @@ CFTypeID CFXMLParserGetTypeID(void);
 CF_EXPORT
 CFXMLParserRef CFXMLParserCreate(CFAllocatorRef allocator, CFDataRef xmlData, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex versionOfNodes, CFXMLParserCallBacks *callBacks, CFXMLParserContext *context);
 
+/* Arguments as above, except that the data to be parsed is loaded directly 
+   from dataSource.  dataSource may not be NULL.  */
+CF_EXPORT
+CFXMLParserRef CFXMLParserCreateWithDataFromURL(CFAllocatorRef allocator, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex versionOfNodes, CFXMLParserCallBacks *callBacks, CFXMLParserContext *context);
 
 CF_EXPORT
 void CFXMLParserGetContext(CFXMLParserRef parser, CFXMLParserContext *context);
@@ -246,6 +248,9 @@ CFXMLTreeRef CFXMLTreeCreateFromData(CFAllocatorRef allocator, CFDataRef xmlData
 CF_EXPORT
 CFXMLTreeRef CFXMLTreeCreateFromDataWithError(CFAllocatorRef allocator, CFDataRef xmlData, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex versionOfNodes, CFDictionaryRef *errorDict) AVAILABLE_MAC_OS_X_VERSION_10_3_AND_LATER;
 
+/* Loads the data to be parsed directly from dataSource.  Arguments as above. */
+CF_EXPORT
+CFXMLTreeRef CFXMLTreeCreateWithDataFromURL(CFAllocatorRef allocator, CFURLRef dataSource, CFOptionFlags parseOptions, CFIndex versionOfNodes);
 
 /* Generate the XMLData (ready to be written to whatever permanent storage is to be
    used) from an CFXMLTree.  Will NOT regenerate entity references (except those

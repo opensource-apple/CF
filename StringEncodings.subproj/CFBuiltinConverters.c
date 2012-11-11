@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -100,7 +98,7 @@ static Boolean __CFFromASCII(UInt32 flags, uint8_t byte, UniChar *character) {
 }
 
 
-__private_extern__ CFStringEncodingConverter __CFConverterASCII = {
+__private_extern__ const CFStringEncodingConverter __CFConverterASCII = {
     __CFToASCII, __CFFromASCII, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, NULL, NULL,
 };
@@ -136,7 +134,7 @@ static UInt32 __CFToISOLatin1Precompose(UInt32 flags, const UniChar *character, 
     }
 }
 
-__private_extern__ CFStringEncodingConverter __CFConverterISOLatin1 = {
+__private_extern__ const CFStringEncodingConverter __CFConverterISOLatin1 = {
     __CFToISOLatin1, __CFFromISOLatin1, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToISOLatin1Precompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -433,7 +431,7 @@ static UInt32 __CFToMacRomanPrecompose(UInt32 flags, const UniChar *character, U
     }
 }
 
-__private_extern__ CFStringEncodingConverter __CFConverterMacRoman = {
+__private_extern__ const CFStringEncodingConverter __CFConverterMacRoman = {
     __CFToMacRoman, __CFFromMacRoman, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToMacRomanPrecompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -478,7 +476,7 @@ static Boolean __CFToWinLatin1(UInt32 flags, UniChar character, uint8_t *byte) {
     return CFStringEncodingUnicodeTo8BitEncoding(cp1252_from_uni, NUM_1252_FROM_UNI, character, byte);
 }
 
-static const unsigned short cp1252_to_uni[32] = {
+static const uint16_t cp1252_to_uni[32] = {
     0x20AC, //  EURO SIGN
     0xFFFD, //  NOT USED
     0x201A, //  SINGLE LOW-9 QUOTATION MARK
@@ -531,7 +529,7 @@ static UInt32 __CFToWinLatin1Precompose(UInt32 flags, const UniChar *character, 
     }
 }
 
-__private_extern__ CFStringEncodingConverter __CFConverterWinLatin1 = {
+__private_extern__ const CFStringEncodingConverter __CFConverterWinLatin1 = {
     __CFToWinLatin1, __CFFromWinLatin1, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToWinLatin1Precompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -829,7 +827,7 @@ static UInt32 __CFToNextStepLatinPrecompose(UInt32 flags, const UniChar *charact
     }
 }
 
-__private_extern__ CFStringEncodingConverter __CFConverterNextStepLatin = {
+__private_extern__ const CFStringEncodingConverter __CFConverterNextStepLatin = {
     __CFToNextStepLatin, __CFFromNextStepLatin, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToNextStepLatinPrecompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -966,7 +964,7 @@ static UInt32 __CFToUTF8(UInt32 flags, const UniChar *characters, UInt32 numChar
             }
     
             if (!(bytesWritten = (maxByteLen ? __CFToUTF8Core(ch, bytes, endBytes - bytes) : __CFUTF8BytesToWriteForCharacter(ch)))) {
-                --characters;
+                characters -= (ch < 0x10000 ? 1 : 2);
                 break;
             }
             bytes += bytesWritten;
@@ -989,25 +987,147 @@ static UInt32 __CFToUTF8(UInt32 flags, const UniChar *characters, UInt32 numChar
  */
 
 CF_INLINE bool __CFIsLegalUTF8(const uint8_t *source, int length) {
-	uint8_t a;
-	const uint8_t *srcptr = source+length;
-	switch (length) {
-	default: return false;
-		/* Everything else falls through when "true"... */
-	case 4: if ((a = (*--srcptr)) < 0x80 || a > 0xBF) return false;
-	case 3: if ((a = (*--srcptr)) < 0x80 || a > 0xBF) return false;
-	case 2: if ((a = (*--srcptr)) > 0xBF) return false;
-		switch (*source) {
-		    /* no fall-through in this inner switch */
-		    case 0xE0: if (a < 0xA0) return false; break;
-		    case 0xF0: if (a < 0x90) return false; break;
-		    case 0xF4: if (a > 0x8F) return false; break;
-		    default:  if (a < 0x80) return false;
-		}
-    	case 1: if (*source >= 0x80 && *source < 0xC2) return false;
-		if (*source > 0xF4) return false;
+    if (length > 4) return false;
+
+    const uint8_t *srcptr = source+length;
+    uint8_t head = *source;
+
+    while (--srcptr > source) if ((*srcptr & 0xC0) != 0x80) return false;
+
+    if (((head >= 0x80) && (head < 0xC2)) || (head > 0xF4)) return false;
+
+    if (((head == 0xE0) && (*(source + 1) < 0xA0)) || ((head == 0xED) && (*(source + 1) > 0x9F)) || ((head == 0xF0) && (*(source + 1) < 0x90)) || ((head == 0xF4) && (*(source + 1) > 0x8F))) return false;
+    return true;
+}
+
+/* This version of the routine returns the length of the sequence,
+   or 0 on illegal sequence.  This version is correct according to
+   the Unicode 4.0 spec. */
+#define ISLEGALUTF8_FAST 0
+static CFIndex __CFIsLegalUTF8_2(const uint8_t *source, CFIndex maxBytes) {
+    if (maxBytes < 1) return 0;
+    uint8_t first = source[0];
+    if (first <= 0x7F) return 1;
+    if (first < 0xC2) return 0;
+    if (maxBytes < 2) return 0;
+    if (first <= 0xDF) {
+#if ISLEGALUTF8_FAST
+	if ((source[1] & 0xC0) == 0x80) return 2;
+#else
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0xBF) return 2;
+#endif
+	return 0;
+    }
+    if (maxBytes < 3) return 0;
+#if ISLEGALUTF8_FAST
+    if (first <= 0xEF) {
+	uint32_t value = (first << 24) | ((*(const uint16_t *)((const uint8_t *)source + 1)) << 8);
+	uint32_t masked1 = (value & 0xFFF0C000);
+
+	// 0b 11100000 101{0,1}xxxx 10xxxxxx (0xE0)
+	if (masked1 == 0xE0A08000) return 3;
+	if (masked1 == 0xE0B08000) return 3;
+
+	// 0b 11101101 100{0,1}xxxx 10xxxxxx (0xED)
+	if (masked1 == 0xED808000) return 3;
+	if (masked1 == 0xED908000) return 3;
+
+	// 0b 1110{0001 - 1100} 10xxxxxx 10xxxxxx (0xE1 - 0xEC)
+	// 0b 1110{1110 - 1111} 10xxxxxx 10xxxxxx (0xEE - 0xEF)
+	if ((value & 0x00C0C000) == 0x00808000) return 3;
+
+	return 0;
+    }
+#else
+    if (first == 0xE0) {
+	if (source[1] < 0xA0 /* NOTE */) return 0;
+	if (source[1] <= 0xBF) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) return 3;
 	}
-	return true;
+	return 0;
+    }
+    if (first <= 0xEC) {
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0xBF) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) return 3;
+	}
+	return 0;
+    }
+    if (first == 0xED) {
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0x9F /* NOTE */) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) return 3;
+	}
+	return 0;
+    }
+    if (first <= 0xEF) {
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0xBF) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) return 3;
+	}
+	return 0;
+    }
+#endif
+    if (maxBytes < 4) return 0;
+#if ISLEGALUTF8_FAST
+    if (first <= 0xF4) {
+	uint32_t value = *(const uint32_t *)source;
+	uint32_t masked1 = (value & 0xFFF0C0C0);
+
+	// 0b 11110000 10{01,10,11}xxxx 10xxxxxx 10xxxxxx (0xF0)
+	if (masked1 == 0xF0908080) return 4;
+	if (masked1 == 0xF0A08080) return 4;
+	if (masked1 == 0xF0B08080) return 4;
+
+	// 0b 11110100 1000xxxx 10xxxxxx 10xxxxxx (0xF4)
+	if (masked1 == 0xF4808080) return 4;
+
+	// 0b 111100{01,10,11} 10xxxxxx 10xxxxxx 10xxxxxx (0xF1 - 0xF3)
+	if ((value & 0x00C0C0C0) == 0x00808080) return 4;
+
+	return 0;
+    }
+#else
+    if (first == 0xF0) {
+	if (source[1] < 0x90 /* NOTE */) return 0;
+	if (source[1] <= 0xBF) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) {
+		if (source[3] < 0x80) return 0;
+		if (source[3] <= 0xBF) return 4;
+	    }
+	}
+	return 0;
+    }
+    if (first <= 0xF3) {
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0xBF) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) {
+		if (source[3] < 0x80) return 0;
+		if (source[3] <= 0xBF) return 4;
+	    }
+	}
+	return 0;
+    }
+    if (first == 0xF4) {
+	if (source[1] < 0x80) return 0;
+	if (source[1] <= 0x8F /* NOTE */) {
+	    if (source[2] < 0x80) return 0;
+	    if (source[2] <= 0xBF) {
+		if (source[3] < 0x80) return 0;
+		if (source[3] <= 0xBF) return 4;
+	    }
+	}
+	return 0;
+    }
+#endif
+    return 0;
 }
 
 static UInt32 __CFFromUTF8(UInt32 flags, const uint8_t *bytes, UInt32 numBytes, UniChar *characters, UInt32 maxCharLen, UInt32 *usedCharLen) {
@@ -1031,7 +1151,7 @@ static UInt32 __CFFromUTF8(UInt32 flags, const uint8_t *bytes, UInt32 numBytes, 
         /* Do this check whether lenient or strict */
         // We need to allow 0xA9 (copyright in MacRoman and Unicode) not to break existing apps
         // Will use a flag passed in from upper layers to switch restriction mode for this case in the next release
-        if ((strictUTF8 && !__CFIsLegalUTF8(source, extraBytesToRead + 1)) || (extraBytesToRead > 3)) {
+        if ((extraBytesToRead > 3) || (strictUTF8 && !__CFIsLegalUTF8(source, extraBytesToRead + 1))) {
             if ((*source == 0xA9) || (flags & kCFStringEncodingAllowLossyConversion)) {
                 numBytes += extraBytesToRead;
                 ++source;
@@ -1142,7 +1262,7 @@ static UInt32 __CFFromUTF8Len(UInt32 flags, const uint8_t *source, UInt32 numByt
         /* Do this check whether lenient or strict */
         // We need to allow 0xA9 (copyright in MacRoman and Unicode) not to break existing apps
         // Will use a flag passed in from upper layers to switch restriction mode for this case in the next release
-        if ((strictUTF8 && !__CFIsLegalUTF8(source, extraBytesToRead + 1)) || (extraBytesToRead > 3)) {
+        if ((extraBytesToRead > 3) || (strictUTF8 && !__CFIsLegalUTF8(source, extraBytesToRead + 1))) {
             if ((*source == 0xA9) || (flags & kCFStringEncodingAllowLossyConversion)) {
                 numBytes += extraBytesToRead;
                 ++source;
@@ -1191,7 +1311,7 @@ static UInt32 __CFFromUTF8Len(UInt32 flags, const uint8_t *source, UInt32 numByt
     return theUsedCharLen;
 }
 
-__private_extern__ CFStringEncodingConverter __CFConverterUTF8 = {
-    __CFToUTF8, __CFFromUTF8, 6, 2, kCFStringEncodingConverterStandard,
+__private_extern__ const CFStringEncodingConverter __CFConverterUTF8 = {
+    __CFToUTF8, __CFFromUTF8, 3, 2, kCFStringEncodingConverterStandard,
     __CFToUTF8Len, __CFFromUTF8Len, NULL, NULL, NULL, NULL,
 };

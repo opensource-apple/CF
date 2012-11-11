@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,12 +21,14 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFUniChar.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFUNICHAR__)
 #define __COREFOUNDATION_CFUNICHAR__ 1
 
+
+#include <CoreFoundation/CFByteOrder.h>
 #include <CoreFoundation/CFBase.h>
 
 #if defined(__cplusplus)
@@ -161,9 +161,11 @@ CF_INLINE uint8_t CFUniCharGetBidiPropertyForCharacter(UTF16Char character, cons
     if (bitmap) {
         uint8_t value = bitmap[(character >> 8)];
 
-        if (value != kCFUniCharBiDiPropertyL) {
+        if (value > kCFUniCharBiDiPropertyPDF) {
             bitmap = bitmap + 256 + ((value - kCFUniCharBiDiPropertyPDF - 1) * 256);
             return bitmap[character % 256];
+        } else {
+            return value;
         }
     }
     return kCFUniCharBiDiPropertyL;
@@ -186,6 +188,77 @@ CF_EXPORT uint32_t CFUniCharGetNumberOfPlanesForUnicodePropertyData(uint32_t pro
 CF_EXPORT uint32_t CFUniCharGetUnicodeProperty(UTF32Char character, uint32_t propertyType);
 
 CF_EXPORT bool CFUniCharFillDestinationBuffer(const UTF32Char *src, uint32_t srcLength, void **dst, uint32_t dstLength, uint32_t *filledLength, uint32_t dstFormat);
+
+// UTF32 support
+
+CF_INLINE bool CFUniCharToUTF32(const UTF16Char *src, CFIndex length, UTF32Char *dst, bool allowLossy, bool isBigEndien) {
+    const UTF16Char *limit = src + length;
+    UTF32Char character;
+
+    while (src < limit) {
+        character = *(src++);
+
+        if (CFUniCharIsSurrogateHighCharacter(character)) {
+            if ((src < limit) && CFUniCharIsSurrogateLowCharacter(*src)) {
+                character = CFUniCharGetLongCharacterForSurrogatePair(character, *(src++));
+            } else {
+                if (!allowLossy) return false;
+                character = 0xFFFD; // replacement character
+            }
+        } else if (CFUniCharIsSurrogateLowCharacter(character)) {
+            if (!allowLossy) return false;
+            character = 0xFFFD; // replacement character
+        }
+
+        *(dst++) = (isBigEndien ? CFSwapInt32HostToBig(character) : CFSwapInt32HostToLittle(character));
+    }
+
+    return true;
+}
+
+CF_INLINE bool CFUniCharFromUTF32(const UTF32Char *src, CFIndex length, UTF16Char *dst, bool allowLossy, bool isBigEndien) {
+    const UTF32Char *limit = src + length;
+    UTF32Char character;
+
+    while (src < limit) {
+        character = (isBigEndien ? CFSwapInt32BigToHost(*(src++)) : CFSwapInt32LittleToHost(*(src++)));
+
+        if (character < 0xFFFF) { // BMP
+            if (allowLossy) {
+                if (CFUniCharIsSurrogateHighCharacter(character)) {
+                    UTF32Char otherCharacter = 0xFFFD; // replacement character
+
+                    if (src < limit) {
+                        otherCharacter = (isBigEndien ? CFSwapInt32BigToHost(*src) : CFSwapInt32LittleToHost(*src));
+
+                        
+                        if ((otherCharacter < 0x10000) && CFUniCharIsSurrogateLowCharacter(otherCharacter)) {
+                            *(dst++) = character; ++src;
+                        } else {
+                            otherCharacter = 0xFFFD; // replacement character
+                        }
+                    }
+
+                    character = otherCharacter;
+                } else if (CFUniCharIsSurrogateLowCharacter(character)) {
+                    character = 0xFFFD; // replacement character
+                }
+            } else {
+                if (CFUniCharIsSurrogateHighCharacter(character) || CFUniCharIsSurrogateLowCharacter(character)) return false;
+            }
+        } else if (character < 0x110000) { // non-BMP
+            character -= 0x10000;
+            *(dst++) = (UTF16Char)((character >> 10) + 0xD800UL);
+            character = (UTF16Char)((character & 0x3FF) + 0xDC00UL);
+        } else {
+            if (!allowLossy) return false;
+            character = 0xFFFD; // replacement character
+        }
+
+        *(dst++) = character;
+    }
+    return true;
+}
 
 #if defined(__cplusplus)
 }

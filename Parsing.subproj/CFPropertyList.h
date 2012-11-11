@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFPropertyList.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFPROPERTYLIST__)
@@ -32,6 +30,7 @@
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFData.h>
 #include <CoreFoundation/CFString.h>
+#include <CoreFoundation/CFStream.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -92,6 +91,31 @@ Boolean CFPropertyListIsValid(CFPropertyListRef plist, CFPropertyListFormat form
  * keys are strings. The debugging library version spits out some messages
  * to be helpful. The plist structure which is to be allowed is given by
  * the format parameter. */
+
+CF_EXPORT
+CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStreamRef stream, CFPropertyListFormat format, CFStringRef *errorString);
+
+/* Writes the bytes of a plist serialization out to the stream.  The
+ * stream must be opened and configured -- the function simply writes
+ * a bunch of bytes to the stream. The output plist format can be chosen.
+ * Leaves the stream open, but note that reading a plist expects the
+ * reading stream to end wherever the writing ended, so that the
+ * end of the plist data can be identified. Returns the number of bytes
+ * written, or 0 on error. Error messages are not currently localized, but
+ * may be in the future, so they are not suitable for comparison. */
+
+CF_EXPORT
+CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex streamLength, CFOptionFlags mutabilityOption, CFPropertyListFormat *format, CFStringRef *errorString);
+
+/* Same as current function CFPropertyListCreateFromXMLData()
+ * but takes a stream instead of data, and works on any plist file format.
+ * CFPropertyListCreateFromXMLData() also works on any plist file format.
+ * The stream must be open and configured -- the function simply reads a bunch
+ * of bytes from it starting at the current location in the stream, to the END
+ * of the stream, which is expected to be the end of the plist, or up to the
+ * number of bytes given by the length parameter if it is not 0. Error messages
+ * are not currently localized, but may be in the future, so they are not
+ * suitable for comparison. */
 
 #endif
 

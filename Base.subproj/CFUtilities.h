@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,7 +21,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*	CFUtilities.h
-	Copyright (c) 1998-2003, Apple, Inc. All rights reserved.
+	Copyright (c) 1998-2005, Apple, Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFUTILITIES__)
@@ -35,37 +33,50 @@
 extern "C" {
 #endif
 
+/*
+Only hits in Panther sources on this file:
+./DisplayServices/O3Manager/O3Master.m:#import <CoreFoundation/CFUtilities.h>
+./HIServices/CoreDrag.subproj/DragManager.c:#include <CoreFoundation/CFUtilities.h>
+./HIToolbox/Menus/Source/MenuEvents.cp:#include <CoreFoundation/CFUtilities.h>
+./WebBrowser/BugReportController.m:#import <CoreFoundation/CFUtilities.h>
+
+
+lore% grep '\(CFLog2\|CFMergeSortArray\|CFQSortArray\|CFLibraryVersion\|primaryVersion\|secondaryVersion\|tertiaryVersion\|CFGetExecutableLinkedLibraryVersion\|CFGetExecutingLibraryVersion\|CFSystemVersion\|_CFExecutableLinkedOnOrAfter\)' ./DisplayServices/O3Manager/O3Master.m ./HIServices/CoreDrag.subproj/DragManager.c ./HIToolbox/Menus/Source/MenuEvents.cp ./WebBrowser/BugReportController.m
+
+./DisplayServices/O3Manager/O3Master.m:                 if (!_CFExecutableLinkedOnOrAfter(CFSystemVersionJaguar)) 
+./HIServices/CoreDrag.subproj/DragManager.c:                    if( _CFExecutableLinkedOnOrAfter( CFSystemVersionJaguar ) && (info->remoteAllowableActions == kCoreDragActionNothing) )
+./HIToolbox/Menus/Source/MenuEvents.cp: if ( _CFExecutableLinkedOnOrAfter( CFSystemVersionPanther ) )
+
+
+... Other than CF, Foundation, and AppKit of course.
+
+*/
+
+
+
 CF_EXPORT uint32_t CFLog2(uint64_t x);
 
 CF_EXPORT void CFMergeSortArray(void *list, CFIndex count, CFIndex elementSize, CFComparatorFunction comparator, void *context);
 CF_EXPORT void CFQSortArray(void *list, CFIndex count, CFIndex elementSize, CFComparatorFunction comparator, void *context);
 
-#if defined(__MACH__)
-typedef struct {
-    uint16_t	primaryVersion;
-    uint8_t	secondaryVersion;
-    uint8_t	tertiaryVersion;
-} CFLibraryVersion;
-
-CF_EXPORT CFLibraryVersion CFGetExecutableLinkedLibraryVersion(CFStringRef libraryName);
-CF_EXPORT CFLibraryVersion CFGetExecutingLibraryVersion(CFStringRef libraryName);
-
 /* _CFExecutableLinkedOnOrAfter(releaseVersionName) will return YES if the current executable seems to be linked on or after the specified release. Example: If you specify CFSystemVersionPuma (10.1), you will get back true for executables linked on Puma or Jaguar(10.2), but false for those linked on Cheetah (10.0) or any of its software updates (10.0.x). You will also get back false for any app whose version info could not be figured out.
     This function caches its results, so no need to cache at call sites.
+
+  Note that for non-MACH this function always returns true.
 */
 typedef enum {
     CFSystemVersionCheetah = 0,		/* 10.0 */
     CFSystemVersionPuma = 1,		/* 10.1 */
-    CFSystemVersionJaguar = 2,		/* 10.2? TBD */
-    CFSystemVersionPanther = 3,		/* Post-Jaguar */
+    CFSystemVersionJaguar = 2,		/* 10.2 */
+    CFSystemVersionPanther = 3,		/* 10.3 */
     CFSystemVersionPinot = 3,		/* Deprecated name for Panther */
-    CFSystemVersionMerlot = 4,		/* Post-Panther */
+    CFSystemVersionTiger = 4,		/* 10.4 */
+    CFSystemVersionMerlot = 4,		/* Deprecated name for Tiger */
+    CFSystemVersionChablis = 5,		/* Post-Tiger */
     CFSystemVersionMax			/* This should bump up when new entries are added */
 } CFSystemVersion;
 
 CF_EXPORT Boolean _CFExecutableLinkedOnOrAfter(CFSystemVersion version);
-    
-#endif /* __MACH__ */
 
 
 #if defined(__cplusplus)

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -27,25 +25,32 @@
 	Responsibility: Christopher Kane
 */
 
+#define ENABLE_ZOMBIES 1
+
 #include "CFRuntime.h"
 #include "CFInternal.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #if defined(__MACH__)
+#include <dlfcn.h>
 #include <monitor.h>
-#include <mach-o/dyld.h>
 #include <crt_externs.h>
+#include <objc/objc-auto.h>
+#include <objc/objc-runtime.h>
 #else
-#define __is_threaded (1)
 #endif
-
-extern size_t malloc_size(const void *ptr);
-extern int __setonlyClocaleconv(int val);
 
 #if defined(__MACH__)
 extern void __CFRecordAllocationEvent(int eventnum, void *ptr, int size, int data, const char *classname);
 #else 
 #define __CFRecordAllocationEvent(a, b, c, d, e)
+#endif
+
+#if defined(__MACH__)
+extern BOOL objc_isAuto(id object);
+extern void* objc_assign_ivar_address_CF(void *value, void *base, void **slot);
+extern void* objc_assign_strongCast_CF(void* value, void **slot);
 #endif
 
 enum {
@@ -63,6 +68,8 @@ __kCFReleaseEvent = 29
 CF_INLINE size_t malloc_size(void *memblock) {
     return _msize(memblock);
 }
+#else
+#include <malloc/malloc.h>
 #endif
 
 #if defined(__MACH__)
@@ -73,13 +80,11 @@ void __CFOAInitialize(void) {
     static void (*dyfunc)(void) = (void *)0xFFFFFFFF;
     if (NULL == getenv("OAKeepAllocationStatistics")) return;
     if ((void *)0xFFFFFFFF == dyfunc) {
-        dyfunc = NULL;
-        if (NSIsSymbolNameDefined("__OAInitialize"))
-            dyfunc = (void *)NSAddressOfSymbol(NSLookupAndBindSymbol("__OAInitialize"));
+	dyfunc = dlsym(RTLD_DEFAULT, "_OAInitialize");
     }
     if (NULL != dyfunc) {
-        dyfunc();
-        __CFOASafe = true;
+	dyfunc();
+	__CFOASafe = true;
     }
 }
 
@@ -87,12 +92,10 @@ void __CFRecordAllocationEvent(int eventnum, void *ptr, int size, int data, cons
     static void (*dyfunc)(int, void *, int, int, const char *) = (void *)0xFFFFFFFF;
     if (!__CFOASafe) return;
     if ((void *)0xFFFFFFFF == dyfunc) {
-        dyfunc = NULL;
-        if (NSIsSymbolNameDefined("__OARecordAllocationEvent"))
-            dyfunc = (void *)NSAddressOfSymbol(NSLookupAndBindSymbol("__OARecordAllocationEvent"));
+	dyfunc = dlsym(RTLD_DEFAULT, "_OARecordAllocationEvent");
     }
     if (NULL != dyfunc) {
-        dyfunc(eventnum, ptr, size, data, classname);
+	dyfunc(eventnum, ptr, size, data, classname);
     }
 }
 
@@ -100,12 +103,10 @@ void __CFSetLastAllocationEventName(void *ptr, const char *classname) {
     static void (*dyfunc)(void *, const char *) = (void *)0xFFFFFFFF;
     if (!__CFOASafe) return;
     if ((void *)0xFFFFFFFF == dyfunc) {
-        dyfunc = NULL;
-        if (NSIsSymbolNameDefined("__OASetLastAllocationEventName"))
-            dyfunc = (void *)NSAddressOfSymbol(NSLookupAndBindSymbol("__OASetLastAllocationEventName"));
+	dyfunc = dlsym(RTLD_DEFAULT, "_OASetLastAllocationEventName");
     }
     if (NULL != dyfunc) {
-        dyfunc(ptr, classname);
+	dyfunc(ptr, classname);
     }
 }
 #endif
@@ -148,10 +149,31 @@ static int32_t __CFRuntimeClassTableCount = 0;
 
 #if defined(__MACH__)
 
-__private_extern__ SEL (*__CFGetObjCSelector)(const char *) = NULL;
+#if !defined(__ppc__)
 __private_extern__ void * (*__CFSendObjCMsg)(const void *, SEL, ...) = NULL;
+#endif
 
-__private_extern__ struct objc_class *__CFRuntimeObjCClassTable[__CFMaxRuntimeTypes] = {NULL};
+__private_extern__ malloc_zone_t *__CFCollectableZone = NULL;
+
+static bool objc_isCollectable_nope(void* obj) { return false; }
+bool (*__CFObjCIsCollectable)(void *) = NULL;
+
+static const void* objc_AssignIvar_none(const void *value, void *base, const void **slot) { return (*slot = value); }
+const void* (*__CFObjCAssignIvar)(const void *value, const void *base, const void **slot) = objc_AssignIvar_none;
+
+static const void* objc_StrongAssign_none(const void *value, const void **slot) { return (*slot = value); }
+const void* (*__CFObjCStrongAssign)(const void *value, const void **slot) = objc_StrongAssign_none;
+
+void* (*__CFObjCMemmoveCollectable)(void *dst, const void *, unsigned) = memmove;
+
+// GC: to be moved to objc if necessary.
+static void objc_WriteBarrierRange_none(void *ptr, unsigned size) {}
+static void objc_WriteBarrierRange_auto(void *ptr, unsigned size) { auto_zone_write_barrier_range(__CFCollectableZone, ptr, size); }
+void (*__CFObjCWriteBarrierRange)(void *, unsigned) = objc_WriteBarrierRange_none;
+
+// Temporarily disabled __private_extern__ 
+#warning Ali, be sure to reexamine this
+struct objc_class *__CFRuntimeObjCClassTable[__CFMaxRuntimeTypes] = {NULL};
 
 #endif
 
@@ -160,8 +182,6 @@ int __CFConstantStringClassReference[10] = {0};
 
 #if defined(__MACH__)
 static struct objc_class __CFNSTypeClass = {{0, 0}, NULL, {0, 0, 0, 0, 0, 0, 0}};
-#else
-static void *__CFNSTypeClass[10] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 #endif
 
 //static CFSpinLock_t __CFRuntimeLock = 0;
@@ -177,6 +197,17 @@ CFTypeID _CFRuntimeRegisterClass(const CFRuntimeClass * const cls) {
     return __CFRuntimeClassTableCount - 1;
 }
 
+void _CFRuntimeInitializeClassForBridging(CFTypeID typeID) {
+    __CFRuntimeObjCClassTable[typeID] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
+}
+
+Boolean _CFRuntimeSetupBridging(CFTypeID typeID, struct objc_class *mainClass, struct objc_class *subClass) {
+    void *isa = __CFISAForTypeID(typeID);
+    memmove(isa, subClass, sizeof(struct objc_class));
+    class_poseAs(isa, mainClass);
+    return true;
+}
+
 const CFRuntimeClass * _CFRuntimeGetClassWithTypeID(CFTypeID typeID) {
     return __CFRuntimeClassTable[typeID];
 }
@@ -186,7 +217,7 @@ void _CFRuntimeUnregisterClassWithTypeID(CFTypeID typeID) {
 }
 
 
-#if defined(DEBUG)
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
 
 /* CFZombieLevel levels:
  *	bit 0: scribble deallocated CF object memory
@@ -229,10 +260,19 @@ static void __CFZombifyDeallocatedMemory(void *cf) {
 
 #endif /* DEBUG */
 
+// XXX_PCB:  use the class version field as a bitmask, to allow classes to opt-in for GC scanning.
+
+CF_INLINE CFOptionFlags CF_GET_COLLECTABLE_MEMORY_TYPE(const CFRuntimeClass *cls)
+{
+    return (cls->version & _kCFRuntimeScannedObject) ? AUTO_OBJECT_SCANNED : AUTO_OBJECT_UNSCANNED;
+}
+
 CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, uint32_t extraBytes, unsigned char *category) {
     CFRuntimeBase *memory;
     Boolean usesSystemDefaultAllocator;
     int32_t size;
+
+    CFAssert1(typeID != _kCFRuntimeNotATypeID, __kCFLogAssertion, "%s(): Uninitialized type id", __PRETTY_FUNCTION__);
 
     if (NULL == __CFRuntimeClassTable[typeID]) {
 	return NULL;
@@ -241,19 +281,23 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, ui
     usesSystemDefaultAllocator = (allocator == kCFAllocatorSystemDefault);
     extraBytes = (extraBytes + (sizeof(void *) - 1)) & ~(sizeof(void *) - 1);
     size = sizeof(CFRuntimeBase) + extraBytes + (usesSystemDefaultAllocator ? 0 : sizeof(CFAllocatorRef));
-    memory = CFAllocatorAllocate(allocator, size, 0);
+    // CFType version 0 objects are unscanned by default since they don't have write-barriers and hard retain their innards
+    // CFType version 1 objects are scanned and use hand coded write-barriers to store collectable storage within
+    memory = CFAllocatorAllocate(allocator, size, CF_GET_COLLECTABLE_MEMORY_TYPE(__CFRuntimeClassTable[typeID]));
     if (NULL == memory) {
 	return NULL;
     }
-#if defined(DEBUG)
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
     __CFZombifyAllocatedMemory((void *)memory);
 #endif
     if (__CFOASafe && category) {
-        __CFSetLastAllocationEventName(memory, category);
+	__CFSetLastAllocationEventName(memory, category);
     } else if (__CFOASafe) {
-        __CFSetLastAllocationEventName(memory, __CFRuntimeClassTable[typeID]->className);
+	__CFSetLastAllocationEventName(memory, __CFRuntimeClassTable[typeID]->className);
     }
     if (!usesSystemDefaultAllocator) {
+        // add space to hold allocator ref for non-standard allocators.
+        // (this screws up 8 byte alignment but seems to work)
 	*(CFAllocatorRef *)((char *)memory) = CFRetain(allocator);
 	memory = (CFRuntimeBase *)((char *)memory + sizeof(CFAllocatorRef));
     }
@@ -307,19 +351,19 @@ __private_extern__ void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, co
 
 CF_INLINE int CFTYPE_IS_OBJC(const void *obj) {
     CFTypeID typeID = __CFGenericTypeID_inline(obj);
-    return CF_IS_OBJC(typeID, obj) && __CFSendObjCMsg;
+    return CF_IS_OBJC(typeID, obj);
 }
 
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) \
 	if (CFTYPE_IS_OBJC(obj)) \
-        {rettype (*func)(void *, SEL) = (void *)__CFSendObjCMsg; \
-        static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
-        return func((void *)obj, s);}
+	{rettype (*func)(void *, SEL) = (void *)__CFSendObjCMsg; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((void *)obj, s);}
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) \
 	if (CFTYPE_IS_OBJC(obj)) \
-        {rettype (*func)(void *, SEL, ...) = (void *)__CFSendObjCMsg; \
-        static SEL s = NULL; if (!s) s = __CFGetObjCSelector(sel); \
-        return func((void *)obj, s, (a1));}
+	{rettype (*func)(void *, SEL, ...) = (void *)__CFSendObjCMsg; \
+	static SEL s = NULL; if (!s) s = sel_registerName(sel); \
+	return func((void *)obj, s, (a1));}
 
 #endif
 
@@ -348,108 +392,34 @@ extern int _CFDictionaryDecrementValue(CFMutableDictionaryRef dict, const void *
 
 // Bit 31 (highest bit) in second word of cf instance indicates external ref count
 
+extern void _CFRelease(CFTypeRef cf);
+extern CFTypeRef _CFRetain(CFTypeRef cf);
+extern CFHashCode _CFHash(CFTypeRef cf);
+
 CFTypeRef CFRetain(CFTypeRef cf) {
-    CFIndex lowBits = 0;
-    bool is_threaded = __is_threaded; 
-#if defined(DEBUG)
-    if (NULL == cf) HALT;
-#endif
+    // always honor CFRetain's with a hard reference
+    if (CF_IS_COLLECTABLE(cf)) {
+        auto_zone_retain(__CFCollectableZone, (void*)cf);
+        return cf;
+    }
+    // XXX_PCB some Objc objects aren't really reference counted, perhaps they should be able to make that distinction?
     CFTYPE_OBJC_FUNCDISPATCH0(CFTypeRef, cf, "retain");
     __CFGenericAssertIsCF(cf);
-    if (is_threaded) __CFSpinLock(&__CFGlobalRetainLock);
-    lowBits = ((CFRuntimeBase *)cf)->_rc;
-    if (0 == lowBits) {	// Constant CFTypeRef
-	if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	return cf;
-    }
-    lowBits++;
-    if ((lowBits & 0x07fff) == 0) {
-	// Roll over another bit to the external ref count
-	_CFDictionaryIncrementValue(__CFRuntimeExternRefCountTable, DISGUISE(cf));
-	lowBits = 0x8000; // Bit 16 indicates external ref count
-    }
-    ((CFRuntimeBase *)cf)->_rc = lowBits;
-    if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-    if (__CFOASafe) {
-	uint64_t compositeRC;
-	compositeRC = (lowBits & 0x7fff) + ((uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf)) << 15);
-	if (compositeRC > (uint64_t)0x7fffffff) compositeRC = (uint64_t)0x7fffffff;
-	__CFRecordAllocationEvent(__kCFRetainEvent, (void *)cf, 0, compositeRC, NULL);
-    }
-    return cf;
+    return _CFRetain(cf);
 }
 
 __private_extern__ void __CFAllocatorDeallocate(CFTypeRef cf);
 
 void CFRelease(CFTypeRef cf) {
-    CFIndex lowBits = 0;
-    bool is_threaded = __is_threaded;
-#if defined(DEBUG)
-    if (NULL == cf) HALT;
-#endif
+    // make sure we get rid of the hard reference if called
+    if (CF_IS_COLLECTABLE(cf)) {
+        auto_zone_release(__CFCollectableZone, (void*)cf);
+        return;
+    }
+    // XXX_PCB some objects aren't really reference counted.
     CFTYPE_OBJC_FUNCDISPATCH0(void, cf, "release");
     __CFGenericAssertIsCF(cf);
-    if (is_threaded) __CFSpinLock(&__CFGlobalRetainLock);
-    lowBits = ((CFRuntimeBase *)cf)->_rc;
-    if (0 == lowBits) {	// Constant CFTypeRef
-	if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	return;
-    }
-    if (1 == lowBits) {
-        if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	if (__CFOASafe) __CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
-	if (__kCFAllocatorTypeID_CONST == __CFGenericTypeID_inline(cf)) {
-#if defined(DEBUG)
-	    __CFZombifyDeallocatedMemory((void *)cf);
-	    if (!(__CFZombieLevel & (1 << 4))) {
-		__CFAllocatorDeallocate((void *)cf);
-	    }
-#else
-	    __CFAllocatorDeallocate((void *)cf);
-#endif
-	} else {
-	    CFAllocatorRef allocator;
-	    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->finalize) {
-		__CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->finalize(cf);
-	    }
-	    if (__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 7, 7)) {
-		allocator = kCFAllocatorSystemDefault;
-	    } else {
-		allocator = CFGetAllocator(cf);
-		(intptr_t)cf -= sizeof(CFAllocatorRef);
-	    }
-#if defined(DEBUG)
-	    __CFZombifyDeallocatedMemory((void *)cf);
-	    if (!(__CFZombieLevel & (1 << 4))) {
-		CFAllocatorDeallocate(allocator, (void *)cf);
-	    }
-#else
-	    CFAllocatorDeallocate(allocator, (void *)cf);
-#endif
-	    if (kCFAllocatorSystemDefault != allocator) {
-		CFRelease(allocator);
-	    }
-	}
-    } else {
-	if (0x8000 == lowBits) {
-	    // Time to remove a bit from the external ref count
-	    if (0 == _CFDictionaryDecrementValue(__CFRuntimeExternRefCountTable, DISGUISE(cf))) {
-		lowBits = 0x07fff;
-	    } else {
-		lowBits = 0x0ffff;
-	    }
- 	} else {
-	    lowBits--;
-	}
-	((CFRuntimeBase *)cf)->_rc = lowBits;
-        if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	if (__CFOASafe) {
-	    uint64_t compositeRC;
-	    compositeRC = (lowBits & 0x7fff) + ((uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf)) << 15);
-	    if (compositeRC > (uint64_t)0x7fffffff) compositeRC = (uint64_t)0x7fffffff;
-	    __CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, compositeRC, NULL);
-	}
-    }
+    _CFRelease(cf);
 }
 
 static uint64_t __CFGetFullRetainCount(CFTypeRef cf) {
@@ -457,13 +427,35 @@ static uint64_t __CFGetFullRetainCount(CFTypeRef cf) {
     uint64_t highBits = 0, compositeRC;
     lowBits = ((CFRuntimeBase *)cf)->_rc;
     if (0 == lowBits) {
-	return (uint64_t)0x00FFFFFFFFFFFFFFULL;
+        return (uint64_t)0x00ffffffffffffffULL;
     }
     if ((lowBits & 0x08000) != 0) {
-        highBits = (uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf));
+	highBits = (uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf));
     }
     compositeRC = (lowBits & 0x7fff) + (highBits << 15);
     return compositeRC;
+}
+
+CFTypeRef _CFRetainGC(CFTypeRef cf)
+{
+#if defined(DEBUG)
+    if (CF_USING_COLLECTABLE_MEMORY && !CF_IS_COLLECTABLE(cf)) {
+        fprintf(stderr, "non-auto object %p passed to _CFRetainGC.\n", cf);
+        HALT;
+    }
+#endif
+    return CF_USING_COLLECTABLE_MEMORY ? cf : CFRetain(cf);
+}
+
+void _CFReleaseGC(CFTypeRef cf)
+{
+#if defined(DEBUG)
+    if (CF_USING_COLLECTABLE_MEMORY && !CF_IS_COLLECTABLE(cf)) {
+        fprintf(stderr, "non-auto object %p passed to _CFReleaseGC.\n", cf);
+        HALT;
+    }
+#endif
+    if (!CF_USING_COLLECTABLE_MEMORY) CFRelease(cf);
 }
 
 CFIndex CFGetRetainCount(CFTypeRef cf) {
@@ -472,11 +464,34 @@ CFIndex CFGetRetainCount(CFTypeRef cf) {
 #if defined(DEBUG)
     if (NULL == cf) HALT;
 #endif
+    if (CF_IS_COLLECTABLE(cf)) {
+        return auto_zone_retain_count(__CFCollectableZone, cf);
+    }
     CFTYPE_OBJC_FUNCDISPATCH0(CFIndex, cf, "retainCount");
     __CFGenericAssertIsCF(cf);
     rc = __CFGetFullRetainCount(cf);
     result = (rc < (uint64_t)0x7FFFFFFF) ? (CFIndex)rc : (CFIndex)0x7FFFFFFF;
     return result;
+}
+
+CFTypeRef CFMakeCollectable(CFTypeRef cf)
+{
+    if (!cf) return NULL;
+    if (CF_USING_COLLECTABLE_MEMORY) {
+#if defined(DEBUG)
+        CFAllocatorRef allocator = CFGetAllocator(cf);
+        if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+            CFLog(0, CFSTR("object %p with non-GC allocator %p passed to CFMakeCollected."), cf, allocator);
+            HALT;
+        }
+#endif
+        if (CFGetRetainCount(cf) == 0) {
+            CFLog(0, CFSTR("object %p with 0 retain-count passed to CFMakeCollected."), cf);
+            return cf;
+        }
+        CFRelease(cf);
+    }
+    return cf;
 }
 
 Boolean CFEqual(CFTypeRef cf1, CFTypeRef cf2) {
@@ -497,15 +512,9 @@ Boolean CFEqual(CFTypeRef cf1, CFTypeRef cf2) {
 }
 
 CFHashCode CFHash(CFTypeRef cf) {
-#if defined(DEBUG)
-    if (NULL == cf) HALT;
-#endif
     CFTYPE_OBJC_FUNCDISPATCH0(CFHashCode, cf, "hash");
     __CFGenericAssertIsCF(cf);
-    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->hash) {
-	return __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->hash(cf);
-    }
-    return (CFHashCode)cf;
+    return _CFHash(cf);
 }
 
 // definition: produces a normally non-NULL debugging description of the object
@@ -513,7 +522,15 @@ CFStringRef CFCopyDescription(CFTypeRef cf) {
 #if defined(DEBUG)
     if (NULL == cf) HALT;
 #endif
-    CFTYPE_OBJC_FUNCDISPATCH0(CFStringRef, cf, "_copyDescription");
+    if (CFTYPE_IS_OBJC(cf)) {
+        static SEL s = NULL;
+        CFStringRef (*func)(void *, SEL, ...) = (void *)__CFSendObjCMsg;
+        if (!s) s = sel_registerName("_copyDescription");
+        CFStringRef result = func((void *)cf, s);
+        if (result && CF_USING_COLLECTABLE_MEMORY) CFRetain(result);	// needs hard retain
+        return result;
+    }
+    // CFTYPE_OBJC_FUNCDISPATCH0(CFStringRef, cf, "_copyDescription");  // XXX returns 0 refcounted item under GC
     __CFGenericAssertIsCF(cf);
     if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->copyDebugDesc) {
 	CFStringRef result;
@@ -532,8 +549,8 @@ __private_extern__ CFStringRef __CFCopyFormattingDescription(CFTypeRef cf, CFDic
     if (CFTYPE_IS_OBJC(cf)) {
 	static SEL s = NULL, r = NULL;
 	CFStringRef (*func)(void *, SEL, ...) = (void *)__CFSendObjCMsg;
-	if (!s) s = __CFGetObjCSelector("_copyFormattingDescription:");
-	if (!r) r = __CFGetObjCSelector("respondsToSelector:");
+	if (!s) s = sel_registerName("_copyFormattingDescription:");
+	if (!r) r = sel_registerName("respondsToSelector:");
 	if (s && func((void *)cf, r, s)) return func((void *)cf, s, formatOptions);
 	return NULL;
     }
@@ -579,6 +596,10 @@ extern void __CFTreeInitialize(void);
 extern void __CFURLInitialize(void);
 extern void __CFXMLNodeInitialize(void);
 extern void __CFXMLParserInitialize(void);
+extern void __CFLocaleInitialize(void);
+extern void __CFCalendarInitialize(void);
+extern void __CFNumberFormatterInitialize(void);
+extern void __CFDateFormatterInitialize(void);
 #if defined(__MACH__)
 extern void __CFMessagePortInitialize(void);
 extern void __CFMachPortInitialize(void);
@@ -596,15 +617,24 @@ extern void __CFPlugInInstanceInitialize(void);
 extern void __CFUUIDInitialize(void);
 extern void __CFBinaryHeapInitialize(void);
 extern void __CFBitVectorInitialize(void);
+#if defined(__WIN32__)
+extern void __CFWindowsMessageQueueInitialize(void);
+extern void __CFBaseCleanup(void);
+#endif
+extern void __CFStreamInitialize(void);
+#if defined(__MACH__)
+extern void __CFPreferencesDomainInitialize(void);
+extern void __CFUserNotificationInitialize(void);
+#endif
 
 #if defined(DEBUG)
 #define DO_SYSCALL_TRACE_HELPERS 1
 #endif
 #if defined(DO_SYSCALL_TRACE_HELPERS) && defined(__MACH__)
 extern void ptrace(int, int, int, int);
-#define SYSCALL_TRACE(N)        do ptrace(N, 0, 0, 0); while (0)
+#define SYSCALL_TRACE(N)	do ptrace(N, 0, 0, 0); while (0)
 #else
-#define SYSCALL_TRACE(N)        do {} while (0)
+#define SYSCALL_TRACE(N)	do {} while (0)
 #endif
 
 #if defined(__MACH__) && defined(PROFILE)
@@ -612,10 +642,6 @@ static void _CF_mcleanup(void) {
     monitor(0,0,0,0,0);
 }
 #endif
-
-extern CFTypeID CFTimeZoneGetTypeID(void);
-extern CFTypeID CFNumberGetTypeID(void);
-extern CFTypeID CFBooleanGetTypeID(void);
 
 const void *__CFArgStuff = NULL;
 __private_extern__ void *__CFAppleLanguages = NULL;
@@ -631,14 +657,22 @@ CF_EXPORT
 void __CFInitialize(void) {
     static int __done = 0;
     if (sizeof(int) != sizeof(long) || 4 != sizeof(long)) __HALT();
-    if (!__done) {
-	CFIndex idx, cnt;
 
+    if (!__done) {
 	__done = 1;
 	SYSCALL_TRACE(0xC000);
-
-	__setonlyClocaleconv(1);
-#if defined(DEBUG)
+	{
+            kCFUseCollectableAllocator = objc_collecting_enabled();
+            if (kCFUseCollectableAllocator) {
+                __CFCollectableZone = auto_zone();
+                __CFObjCIsCollectable = objc_isAuto;
+                __CFObjCAssignIvar = objc_assign_ivar_address_CF;
+                __CFObjCStrongAssign = objc_assign_strongCast_CF;
+                __CFObjCMemmoveCollectable = objc_memmove_collectable;
+		__CFObjCWriteBarrierRange = objc_WriteBarrierRange_auto;
+            }
+        }
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
 	{
 	    const char *value = getenv("CFZombieLevel");
 	    if (NULL != value) {
@@ -665,9 +699,12 @@ void __CFInitialize(void) {
 	__CFBaseInitialize();
 
 #if defined(__MACH__)
-	for (idx = 0; idx < __CFMaxRuntimeTypes; idx++) {
-	    __CFRuntimeObjCClassTable[idx] = &__CFNSTypeClass;
-	}
+        {
+            CFIndex idx;
+            for (idx = 0; idx < __CFMaxRuntimeTypes; idx++) {
+                __CFRuntimeObjCClassTable[idx] = &__CFNSTypeClass;
+            }
+        }
 #endif
 
 	/* Here so that two runtime classes get indices 0, 1. */
@@ -685,6 +722,7 @@ void __CFInitialize(void) {
 
 #if defined(__MACH__)
 	{
+            CFIndex idx, cnt;
 	    char **args = *_NSGetArgv();
 	    cnt = *_NSGetArgc();
 	    for (idx = 1; idx < cnt - 1; idx++) {
@@ -698,27 +736,13 @@ void __CFInitialize(void) {
 	}
 #endif
 
-#if defined(__MACH__)
-	// Pre-initialize for possible future toll-free bridging
-	// These have to be initialized before the *Initialize functions below are called
-	__CFRuntimeObjCClassTable[CFDictionaryGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFArrayGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFDataGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFSetGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[0x7] = (struct objc_class *)&__CFConstantStringClassReference;
-	__CFRuntimeObjCClassTable[0x8] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[0x9] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[0xa] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[0xb] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[0xc] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-#endif
 
-        // Creating this lazily in CFRetain causes recursive call to CFRetain
-        __CFRuntimeExternRefCountTable = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, NULL, NULL);
+	// Creating this lazily in CFRetain causes recursive call to CFRetain
+	__CFRuntimeExternRefCountTable = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, NULL, NULL);
 
-        /*** _CFRuntimeCreateInstance() can finally be called generally after this line. ***/
+	/*** _CFRuntimeCreateInstance() can finally be called generally after this line. ***/
 
-        __CFStringInitialize();		// CFString's TypeID must be 0x7, now and forever
+	__CFStringInitialize();		// CFString's TypeID must be 0x7, now and forever
 	__CFNullInitialize();		// See above for hard-coding of this position
 	__CFBooleanInitialize();	// See above for hard-coding of this position
 	__CFNumberInitialize();		// See above for hard-coding of this position
@@ -732,7 +756,7 @@ void __CFInitialize(void) {
 	__CFStorageInitialize();
 	__CFTreeInitialize();
 	__CFURLInitialize();
-        __CFXMLNodeInitialize();
+	__CFXMLNodeInitialize();
 	__CFXMLParserInitialize();
 	__CFBundleInitialize();
 	__CFPlugInInitialize();
@@ -749,19 +773,17 @@ void __CFInitialize(void) {
 	__CFRunLoopTimerInitialize();
 	__CFSocketInitialize();
 #endif
-
+        __CFStreamInitialize();
 #if defined(__MACH__)
-        // Pre-initialize for possible future toll-free bridging, continued
-	__CFRuntimeObjCClassTable[CFRunLoopTimerGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFMachPortGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFURLGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-	__CFRuntimeObjCClassTable[CFCharacterSetGetTypeID()] = (struct objc_class *)calloc(sizeof(struct objc_class), 1);
-#endif
+	__CFPreferencesDomainInitialize();
+#endif // __MACH__
+
 
 	SYSCALL_TRACE(0xC001);
 
 #if defined(__MACH__)
 	{
+            CFIndex idx, cnt;
 	    char **args = *_NSGetArgv();
 	    CFIndex count;
 	    cnt = *_NSGetArgc();
@@ -788,9 +810,11 @@ void __CFInitialize(void) {
 	_CFProcessPath();	// cache this early
 
 #if defined(__MACH__)
-        __CFOAInitialize();
+	__CFOAInitialize();
 	SYSCALL_TRACE(0xC003);
 #endif
+
+	if (__CFRuntimeClassTableCount < 100) __CFRuntimeClassTableCount = 100;
 
 #if defined(DEBUG) && !defined(__WIN32__)
 	// Don't log on MacOS 8 as this will create a log file unnecessarily
@@ -807,8 +831,15 @@ void __CFInitialize(void) {
  */
 WINBOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID pReserved ) {
     if (dwReason == DLL_PROCESS_ATTACH) {
-        __CFInitialize();
+	__CFInitialize();
     } else if (dwReason == DLL_PROCESS_DETACH) {
+        __CFStringCleanup();
+        __CFSocketCleanup();
+        __CFUniCharCleanup();
+        __CFStreamCleanup();
+        __CFBaseCleanup();
+    } else if (dwReason == DLL_THREAD_DETACH) {
+        __CFFinalizeThreadData(NULL);
     }
     return TRUE;
 }
@@ -827,9 +858,9 @@ Boolean _CFEqual(CFTypeRef cf1, CFTypeRef cf2) {
     if (cf1 == cf2) return true;
     __CFGenericAssertIsCF(cf1);
     __CFGenericAssertIsCF(cf2);
-    if (__CFGenericTypeID(cf1) != __CFGenericTypeID(cf2)) return false;
-    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID(cf1)]->equal) {
-	return __CFRuntimeClassTable[__CFGenericTypeID(cf1)]->equal(cf1, cf2);
+    if (__CFGenericTypeID_inline(cf1) != __CFGenericTypeID_inline(cf2)) return false;
+    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf1)]->equal) {
+	return __CFRuntimeClassTable[__CFGenericTypeID_inline(cf1)]->equal(cf1, cf2);
     }
     return false;
 }
@@ -843,6 +874,9 @@ CFIndex _CFGetRetainCount(CFTypeRef cf) {
 }
 
 CFHashCode _CFHash(CFTypeRef cf) {
+#if defined(DEBUG)
+    if (NULL == cf) HALT;
+#endif
     if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->hash) {
 	return __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->hash(cf);
     }
@@ -851,25 +885,24 @@ CFHashCode _CFHash(CFTypeRef cf) {
 
 CF_EXPORT CFTypeRef _CFRetain(CFTypeRef cf) {
     CFIndex lowBits = 0;
-    bool is_threaded = __is_threaded;
 #if defined(DEBUG)
     if (NULL == cf) HALT;
 #endif
-    if (is_threaded) __CFSpinLock(&__CFGlobalRetainLock);
+    __CFSpinLock(&__CFGlobalRetainLock);
     lowBits = ((CFRuntimeBase *)cf)->_rc;
-    if (0 == lowBits) {	// Constant CFTypeRef
-	if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
+    if (__builtin_expect(0 == lowBits, 0)) {	// Constant CFTypeRef
+	__CFSpinUnlock(&__CFGlobalRetainLock);
 	return cf;
     }
     lowBits++;
-    if ((lowBits & 0x07fff) == 0) {
+    if (__builtin_expect((lowBits & 0x07fff) == 0, 0)) {
 	// Roll over another bit to the external ref count
 	_CFDictionaryIncrementValue(__CFRuntimeExternRefCountTable, DISGUISE(cf));
 	lowBits = 0x8000; // Bit 16 indicates external ref count
     }
     ((CFRuntimeBase *)cf)->_rc = lowBits;
-    if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-    if (__CFOASafe) {
+    __CFSpinUnlock(&__CFGlobalRetainLock);
+    if (__builtin_expect(__CFOASafe, 0)) {
 	uint64_t compositeRC;
 	compositeRC = (lowBits & 0x7fff) + ((uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf)) << 15);
 	if (compositeRC > (uint64_t)0x7fffffff) compositeRC = (uint64_t)0x7fffffff;
@@ -880,21 +913,20 @@ CF_EXPORT CFTypeRef _CFRetain(CFTypeRef cf) {
 
 CF_EXPORT void _CFRelease(CFTypeRef cf) {
     CFIndex lowBits = 0;
-    bool is_threaded = __is_threaded;
 #if defined(DEBUG)
     if (NULL == cf) HALT;
 #endif
-    if (is_threaded) __CFSpinLock(&__CFGlobalRetainLock);
+    __CFSpinLock(&__CFGlobalRetainLock);
     lowBits = ((CFRuntimeBase *)cf)->_rc;
-    if (0 == lowBits) {	// Constant CFTypeRef
-	if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
+    if (__builtin_expect(0 == lowBits, 0)) {	// Constant CFTypeRef
+	__CFSpinUnlock(&__CFGlobalRetainLock);
 	return;
     }
-    if (1 == lowBits) {
-        if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	if (__CFOASafe) __CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
-	if (__kCFAllocatorTypeID_CONST == __CFGenericTypeID(cf)) {
-#if defined(DEBUG)
+    if (__builtin_expect(1 == lowBits, 0)) {
+	__CFSpinUnlock(&__CFGlobalRetainLock);
+	if (__builtin_expect(__CFOASafe, 0)) __CFRecordAllocationEvent(__kCFReleaseEvent, (void *)cf, 0, 0, NULL);
+	if (__builtin_expect(__kCFAllocatorTypeID_CONST == __CFGenericTypeID_inline(cf), 0)) {
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
 	    __CFZombifyDeallocatedMemory((void *)cf);
 	    if (!(__CFZombieLevel & (1 << 4))) {
 		__CFAllocatorDeallocate((void *)cf);
@@ -904,16 +936,17 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 #endif
 	} else {
 	    CFAllocatorRef allocator;
-	    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID(cf)]->finalize) {
-		__CFRuntimeClassTable[__CFGenericTypeID(cf)]->finalize(cf);
+//	    ((CFRuntimeBase *)cf)->_rc = 0;
+	    if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->finalize) {
+		__CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->finalize(cf);
 	    }
-	    if (__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 7, 7)) {
+	    if (__builtin_expect(__CFBitfieldGetValue(((const CFRuntimeBase *)cf)->_info, 7, 7), 1)) {
 		allocator = kCFAllocatorSystemDefault;
 	    } else {
 		allocator = CFGetAllocator(cf);
 		(intptr_t)cf -= sizeof(CFAllocatorRef);
 	    }
-#if defined(DEBUG)
+#if defined(DEBUG) || defined(ENABLE_ZOMBIES)
 	    __CFZombifyDeallocatedMemory((void *)cf);
 	    if (!(__CFZombieLevel & (1 << 4))) {
 		CFAllocatorDeallocate(allocator, (void *)cf);
@@ -926,7 +959,7 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 	    }
 	}
     } else {
-	if (0x8000 == lowBits) {
+	if (__builtin_expect(0x8000 == lowBits, 0)) {
 	    // Time to remove a bit from the external ref count
 	    if (0 == _CFDictionaryDecrementValue(__CFRuntimeExternRefCountTable, DISGUISE(cf))) {
 		lowBits = 0x07fff;
@@ -937,8 +970,8 @@ CF_EXPORT void _CFRelease(CFTypeRef cf) {
 	    lowBits--;
 	}
 	((CFRuntimeBase *)cf)->_rc = lowBits;
-        if (is_threaded) __CFSpinUnlock(&__CFGlobalRetainLock);
-	if (__CFOASafe) {
+	__CFSpinUnlock(&__CFGlobalRetainLock);
+	if (__builtin_expect(__CFOASafe, 0)) {
 	    uint64_t compositeRC;
 	    compositeRC = (lowBits & 0x7fff) + ((uint64_t)(uintptr_t)CFDictionaryGetValue(__CFRuntimeExternRefCountTable, DISGUISE(cf)) << 15);
 	    if (compositeRC > (uint64_t)0x7fffffff) compositeRC = (uint64_t)0x7fffffff;

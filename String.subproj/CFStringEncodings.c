@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -30,7 +28,7 @@
 #include "CFInternal.h"
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFByteOrder.h>
-#include "CFUtilities.h"
+#include "CFUtilitiesPriv.h"
 #include <string.h>
 #include "CFStringEncodingConverterExt.h"
 #include "CFUniChar.h"
@@ -39,7 +37,7 @@
 static UInt32 __CFWantsToUseASCIICompatibleConversion = (UInt32)-1;
 CF_INLINE UInt32 __CFGetASCIICompatibleFlag(void) {
     if (__CFWantsToUseASCIICompatibleConversion == (UInt32)-1) {
-	__CFWantsToUseASCIICompatibleConversion = false;
+        __CFWantsToUseASCIICompatibleConversion = false;
     }
     return (__CFWantsToUseASCIICompatibleConversion ? kCFStringEncodingASCIICompatibleConversion : 0);
 }
@@ -100,12 +98,6 @@ __private_extern__ void __CFStrConvertBytesToUnicode(const uint8_t *bytes, UniCh
 #define MAX_LOCAL_CHARS		(sizeof(buffer->localBuffer) / sizeof(uint8_t))
 #define MAX_LOCAL_UNICHARS	(sizeof(buffer->localBuffer) / sizeof(UniChar))
 
-#if defined(__BIG_ENDIAN__)
-#define SHOULD_SWAP(BOM) (BOM == 0xFFFE)
-#else
-#define SHOULD_SWAP(BOM) (BOM != 0xFEFF)
-#endif
-
 /* Convert a byte stream to ASCII (7-bit!) or Unicode, with a CFVarWidthCharBuffer struct on the stack. false return indicates an error occured during the conversion. The caller needs to free the returned buffer in either ascii or unicode (indicated by isASCII), if shouldFreeChars is true. 
 9/18/98 __CFStringDecodeByteStream now avoids to allocate buffer if buffer->chars is not NULL
 Added useClientsMemoryPtr; if not-NULL, and the provided memory can be used as is, this is set to true
@@ -127,204 +119,314 @@ enum {
 };
 
 Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, UInt32 len, CFStringEncoding encoding, Boolean alwaysUnicode, CFVarWidthCharBuffer *buffer, Boolean *useClientsMemoryPtr, UInt32 converterFlags) {
-    UInt32 idx;
-    const UniChar *uniChars = (const UniChar *)bytes;
-    const uint8_t *chars = (const uint8_t *)bytes;
-    const uint8_t *end = chars + len;
-    uint16_t bom;
-    Boolean allASCII = false;
 
     if (useClientsMemoryPtr) *useClientsMemoryPtr = false;
 
     buffer->isASCII = !alwaysUnicode;
     buffer->shouldFreeChars = false;
     buffer->numChars = 0;
+
     if (0 == len) return true;
 
     buffer->allocator = (buffer->allocator ? buffer->allocator : __CFGetDefaultAllocator());
-    switch (encoding) {
-    case kCFStringEncodingUnicode:
-        bom = (*uniChars == 0xfffe || *uniChars == 0xfeff) ? (*uniChars++) : 0;
-	/* If the byte order mark is missing, we assume big endian... */
-	len = len / 2 - (0 == bom ? 0 : 1);
 
-        if (buffer->isASCII) {	// Let's see if we can reduce the Unicode down to ASCII...
-            if (SHOULD_SWAP(bom)) {
-                for (idx = 0; idx < len; idx++) if ((uniChars[idx] & 0x80ff) != 0) {buffer->isASCII = false; break;}
-            } else {
-                for (idx = 0; idx < len; idx++) if (uniChars[idx] > 127) {buffer->isASCII = false; break;}
-            }
+    if ((encoding == kCFStringEncodingUTF16) || (encoding == kCFStringEncodingUTF16BE) || (encoding == kCFStringEncodingUTF16LE)) { // UTF-16
+        const UTF16Char *src = (const UTF16Char *)bytes;
+        const UTF16Char *limit = (const UTF16Char *)(bytes + len);
+        bool swap = false;
+
+        if (kCFStringEncodingUTF16 == encoding) {
+            UTF16Char bom = ((*src == 0xFFFE) || (*src == 0xFEFF) ? *(src++) : 0);
+
+#if defined(__BIG_ENDIAN__)
+            if (bom == 0xFFFE) swap = true;
+#else
+            if (bom != 0xFEFF) swap = true;
+#endif
+            if (bom) useClientsMemoryPtr = NULL;
+        } else {
+#if defined(__BIG_ENDIAN__)
+            if (kCFStringEncodingUTF16LE == encoding) swap = true;
+#else
+            if (kCFStringEncodingUTF16BE == encoding) swap = true;
+#endif
         }
 
-        if (buffer->isASCII) {
-            buffer->numChars = len;
-            buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
-            buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
-            if (SHOULD_SWAP(bom)) {	// !!! Can be somewhat trickier here and use a single loop with a properly inited ptr
-                for (idx = 0; idx < len; idx++) buffer->chars.ascii[idx] = (uniChars[idx] >> 8);
+        buffer->numChars = limit - src;
+
+        if (useClientsMemoryPtr && !swap) { // If the caller is ready to deal with no-copy situation, and the situation is possible, indicate it...
+            *useClientsMemoryPtr = true;
+            buffer->chars.unicode = (UniChar *)src;
+            buffer->isASCII = false;
+        } else {
+            if (buffer->isASCII) {	// Let's see if we can reduce the Unicode down to ASCII...
+                const UTF16Char *characters = src;
+                UTF16Char mask = (swap ? 0x80FF : 0xFF80);
+    
+                while (characters < limit) {
+                    if (*(characters++) & mask) {
+                        buffer->isASCII = false;
+                        break;
+                    }
+                }
+            }
+    
+            if (buffer->isASCII) {
+                uint8_t *dst;
+                if (NULL == buffer->chars.ascii) { // we never reallocate when buffer is supplied
+                    if (buffer->numChars > MAX_LOCAL_CHARS) {
+                        buffer->chars.ascii = CFAllocatorAllocate(buffer->allocator, (buffer->numChars * sizeof(uint8_t)), 0);
+                        buffer->shouldFreeChars = true;
+                    } else {
+                        buffer->chars.ascii = (uint8_t *)buffer->localBuffer;
+                    }
+                }
+                dst = buffer->chars.ascii;
+    
+                if (swap) {
+                    while (src < limit) *(dst++) = (*(src++) >> 8);
+                } else {
+                    while (src < limit) *(dst++) = *(src++);
+                }
             } else {
-                for (idx = 0; idx < len; idx++) buffer->chars.ascii[idx] = uniChars[idx];
+                UTF16Char *dst;
+
+                if (NULL == buffer->chars.unicode) { // we never reallocate when buffer is supplied
+                    if (buffer->numChars > MAX_LOCAL_UNICHARS) {
+                        buffer->chars.unicode = CFAllocatorAllocate(buffer->allocator, (buffer->numChars * sizeof(UTF16Char)), 0);
+                        buffer->shouldFreeChars = true;
+                    } else {
+                        buffer->chars.unicode = (UTF16Char *)buffer->localBuffer;
+                    }
+                }
+                dst = buffer->chars.unicode;
+
+                if (swap) {
+                    while (src < limit) *(dst++) = CFSwapInt16(*(src++));
+                } else {
+                    memmove(dst, src, buffer->numChars * sizeof(UTF16Char));
+                }
+            }
+        }
+    } else if ((encoding == kCFStringEncodingUTF32) || (encoding == kCFStringEncodingUTF32BE) || (encoding == kCFStringEncodingUTF32LE)) {
+        const UTF32Char *src = (const UTF32Char *)bytes;
+        const UTF32Char *limit = (const UTF32Char *)(bytes + len);
+        bool swap = false;
+
+        if (kCFStringEncodingUTF32 == encoding) {
+            UTF32Char bom = ((*src == 0xFFFE0000) || (*src == 0x0000FEFF) ? *(src++) : 0);
+
+#if defined(__BIG_ENDIAN__)
+            if (bom == 0xFFFE0000) swap = true;
+#else
+            if (bom != 0x0000FEFF) swap = true;
+#endif
+        } else {
+#if defined(__BIG_ENDIAN__)
+            if (kCFStringEncodingUTF32LE == encoding) swap = true;
+#else
+            if (kCFStringEncodingUTF32BE == encoding) swap = true;
+#endif
+        }
+
+        buffer->numChars = limit - src;
+
+        {
+            // Let's see if we have non-ASCII or non-BMP
+            const UTF32Char *characters = src;
+            UTF32Char asciiMask = (swap ? 0x80FFFFFF : 0xFFFFFF80);
+            UTF32Char bmpMask = (swap ? 0x0000FFFF : 0xFFFF0000);
+    
+            while (characters < limit) {
+                if (*characters & asciiMask) {
+                    buffer->isASCII = false;
+                    if (*characters & bmpMask) ++(buffer->numChars);
+                }
+                ++characters;
+            }
+        }
+    
+        if (buffer->isASCII) {
+            uint8_t *dst;
+            if (NULL == buffer->chars.ascii) { // we never reallocate when buffer is supplied
+                if (buffer->numChars > MAX_LOCAL_CHARS) {
+                    buffer->chars.ascii = CFAllocatorAllocate(buffer->allocator, (buffer->numChars * sizeof(uint8_t)), 0);
+                    buffer->shouldFreeChars = true;
+                } else {
+                    buffer->chars.ascii = (uint8_t *)buffer->localBuffer;
+                }
+            }
+            dst = buffer->chars.ascii;
+
+            if (swap) {
+                while (src < limit) *(dst++) = (*(src++) >> 24);
+            } else {
+                while (src < limit) *(dst++) = *(src++);
             }
         } else {
-            buffer->numChars = len;
-            if (useClientsMemoryPtr && (bom == 0) && !SHOULD_SWAP(bom)) {	// If the caller is ready to deal with no-copy situation, and the situation is possible, indicate it...
-                *useClientsMemoryPtr = true;
-                buffer->shouldFreeChars = false;
-                buffer->chars.unicode = (UniChar *)bytes;
-            } else {
-                buffer->shouldFreeChars = !buffer->chars.unicode && (len <= MAX_LOCAL_UNICHARS) ? false : true;
-                buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (len <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(UniChar), 0));
-            if (SHOULD_SWAP(bom)) {
-                    for (idx = 0; idx < len; idx++) buffer->chars.unicode[idx] = CFSwapInt16(uniChars[idx]);
+            if (NULL == buffer->chars.unicode) { // we never reallocate when buffer is supplied
+                if (buffer->numChars > MAX_LOCAL_UNICHARS) {
+                    buffer->chars.unicode = CFAllocatorAllocate(buffer->allocator, (buffer->numChars * sizeof(UTF16Char)), 0);
+                    buffer->shouldFreeChars = true;
                 } else {
-                    memmove(buffer->chars.unicode, uniChars, len * sizeof(UniChar));
+                    buffer->chars.unicode = (UTF16Char *)buffer->localBuffer;
                 }
             }
+            CFUniCharFromUTF32(src, limit - src, buffer->chars.unicode, false,
+#if defined(__BIG_ENDIAN__)
+            !swap
+#else
+            swap
+#endif
+            );
         }
-	return true;
-
-    case kCFStringEncodingNonLossyASCII: {
-        UTF16Char currentValue = 0;
-        uint8_t character;
-        int8_t mode = __NSNonLossyASCIIMode;
-
-	buffer->isASCII = false;
-        buffer->shouldFreeChars = !buffer->chars.unicode && (len <= MAX_LOCAL_UNICHARS) ? false : true;
-        buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (len <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(UniChar), 0));
-	buffer->numChars = 0;
-
-	while (chars < end) {
-            character = (*chars++);
-
-            switch (mode) {
-            case __NSNonLossyASCIIMode:
-                if (character == '\\') {
-                    mode = __NSNonLossyBackslashMode;
-                } else if (character < 0x80) {
-                    currentValue = character;
-                } else {
-                    mode = __NSNonLossyErrorMode;
-                }
-                break;
-
-            case __NSNonLossyBackslashMode:
-                if ((character == 'U') || (character == 'u')) {
-                    mode = __NSNonLossyHexInitialMode;
-                    currentValue = 0;
-                } else if ((character >= '0') && (character <= '9')) {
-                    mode = __NSNonLossyOctalInitialMode;
-                    currentValue = character - '0';
-                } else if (character == '\\') {
-                    mode = __NSNonLossyASCIIMode;
-                    currentValue = character;
-                } else {
-                    mode = __NSNonLossyErrorMode;
-                }
-                break;
-
-            default:
-                if (mode < __NSNonLossyHexFinalMode) {
-                    if ((character >= '0') && (character <= '9')) {
-                        currentValue = (currentValue << 4) | (character - '0');
-                        if (++mode == __NSNonLossyHexFinalMode) mode = __NSNonLossyASCIIMode;
+    } else {
+        UInt32 idx;
+        const uint8_t *chars = (const uint8_t *)bytes;
+        const uint8_t *end = chars + len;
+    
+        switch (encoding) {
+        case kCFStringEncodingNonLossyASCII: {
+            UTF16Char currentValue = 0;
+            uint8_t character;
+            int8_t mode = __NSNonLossyASCIIMode;
+    
+            buffer->isASCII = false;
+            buffer->shouldFreeChars = !buffer->chars.unicode && (len <= MAX_LOCAL_UNICHARS) ? false : true;
+            buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (len <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(UniChar), 0));
+            buffer->numChars = 0;
+    
+            while (chars < end) {
+                character = (*chars++);
+    
+                switch (mode) {
+                case __NSNonLossyASCIIMode:
+                    if (character == '\\') {
+                        mode = __NSNonLossyBackslashMode;
+                    } else if (character < 0x80) {
+                        currentValue = character;
                     } else {
-                        if (character >= 'a') character -= ('a' - 'A');
-                        if ((character >= 'A') && (character <= 'F')) {
-                            currentValue = (currentValue << 4) | ((character - 'A') + 10);
+                        mode = __NSNonLossyErrorMode;
+                    }
+                    break;
+    
+                case __NSNonLossyBackslashMode:
+                    if ((character == 'U') || (character == 'u')) {
+                        mode = __NSNonLossyHexInitialMode;
+                        currentValue = 0;
+                    } else if ((character >= '0') && (character <= '9')) {
+                        mode = __NSNonLossyOctalInitialMode;
+                        currentValue = character - '0';
+                    } else if (character == '\\') {
+                        mode = __NSNonLossyASCIIMode;
+                        currentValue = character;
+                    } else {
+                        mode = __NSNonLossyErrorMode;
+                    }
+                    break;
+    
+                default:
+                    if (mode < __NSNonLossyHexFinalMode) {
+                        if ((character >= '0') && (character <= '9')) {
+                            currentValue = (currentValue << 4) | (character - '0');
                             if (++mode == __NSNonLossyHexFinalMode) mode = __NSNonLossyASCIIMode;
+                        } else {
+                            if (character >= 'a') character -= ('a' - 'A');
+                            if ((character >= 'A') && (character <= 'F')) {
+                                currentValue = (currentValue << 4) | ((character - 'A') + 10);
+                                if (++mode == __NSNonLossyHexFinalMode) mode = __NSNonLossyASCIIMode;
+                            } else {
+                                mode = __NSNonLossyErrorMode;
+                            }
+                        }
+                    } else {
+                        if ((character >= '0') && (character <= '9')) {
+                            currentValue = (currentValue << 3) | (character - '0');
+                            if (++mode == __NSNonLossyOctalFinalMode) mode = __NSNonLossyASCIIMode;
                         } else {
                             mode = __NSNonLossyErrorMode;
                         }
                     }
-                } else {
-                    if ((character >= '0') && (character <= '9')) {
-                        currentValue = (currentValue << 3) | (character - '0');
-                        if (++mode == __NSNonLossyOctalFinalMode) mode = __NSNonLossyASCIIMode;
-                    } else {
-                        mode = __NSNonLossyErrorMode;
-                    }
-                }
-                break;
-            }
-
-            if (mode == __NSNonLossyASCIIMode) {
-                buffer->chars.unicode[buffer->numChars++] = currentValue;
-            } else if (mode == __NSNonLossyErrorMode) {
-                return false;
-            }
-	}
-        return (mode == __NSNonLossyASCIIMode);
-    }
-
-    case kCFStringEncodingUTF8:
-        if ((len >= 3) && (chars[0] == 0xef) && (chars[1] == 0xbb) && (chars[2] == 0xbf)) {	// If UTF8 BOM, skip
-            chars += 3;
-            len -= 3;
-            if (0 == len) return true;
-        }
-        allASCII = !alwaysUnicode;
-        if (allASCII) {
-            for (idx = 0; idx < len; idx++) {
-                if (128 <= chars[idx]) {
-                    allASCII = false;
                     break;
                 }
-            }
-        }
-        buffer->isASCII = allASCII;
-        if (allASCII) {
-            buffer->numChars = len;
-            buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
-            buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
-            memmove(buffer->chars.ascii, chars, len * sizeof(uint8_t));
-        } else {
-            UInt32 numDone;
-            static CFStringEncodingToUnicodeProc __CFFromUTF8 = NULL;
-
-            if (!__CFFromUTF8) {
-                const CFStringEncodingConverter *converter = CFStringEncodingGetConverter(kCFStringEncodingUTF8);
-                __CFFromUTF8 = (CFStringEncodingToUnicodeProc)converter->toUnicode;
-            }
-
-            buffer->shouldFreeChars = !buffer->chars.unicode && (len <= MAX_LOCAL_UNICHARS) ? false : true;
-            buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (len <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(UniChar), 0));
-            buffer->numChars = 0;
-            while (chars < end) {
-                numDone = 0;
-                chars += __CFFromUTF8(converterFlags, chars, end - chars, &(buffer->chars.unicode[buffer->numChars]), len - buffer->numChars, &numDone);
-
-                if (0 == numDone) {
-                    if (buffer->shouldFreeChars) CFAllocatorDeallocate(buffer->allocator, buffer->chars.unicode);
-                    buffer->isASCII = !alwaysUnicode;
-                    buffer->shouldFreeChars = false;
-                    buffer->chars.ascii = NULL;
-                    buffer->numChars = 0;
+    
+                if (mode == __NSNonLossyASCIIMode) {
+                    buffer->chars.unicode[buffer->numChars++] = currentValue;
+                } else if (mode == __NSNonLossyErrorMode) {
                     return false;
                 }
-                buffer->numChars += numDone;
             }
+            return (mode == __NSNonLossyASCIIMode);
         }
-        return true;
+    
+        case kCFStringEncodingUTF8:
+            if ((len >= 3) && (chars[0] == 0xef) && (chars[1] == 0xbb) && (chars[2] == 0xbf)) {	// If UTF8 BOM, skip
+                chars += 3;
+                len -= 3;
+                if (0 == len) return true;
+            }
+            if (buffer->isASCII) {
+                for (idx = 0; idx < len; idx++) {
+                    if (128 <= chars[idx]) {
+                        buffer->isASCII = false;
+                        break;
+                    }
+                }
+            }
+            if (buffer->isASCII) {
+                buffer->numChars = len;
+                buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
+                buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
+                memmove(buffer->chars.ascii, chars, len * sizeof(uint8_t));
+            } else {
+                UInt32 numDone;
+                static CFStringEncodingToUnicodeProc __CFFromUTF8 = NULL;
+    
+                if (!__CFFromUTF8) {
+                    const CFStringEncodingConverter *converter = CFStringEncodingGetConverter(kCFStringEncodingUTF8);
+                    __CFFromUTF8 = (CFStringEncodingToUnicodeProc)converter->toUnicode;
+                }
+    
+                buffer->shouldFreeChars = !buffer->chars.unicode && (len <= MAX_LOCAL_UNICHARS) ? false : true;
+                buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (len <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(UniChar), 0));
+                buffer->numChars = 0;
+                while (chars < end) {
+                    numDone = 0;
+                    chars += __CFFromUTF8(converterFlags, chars, end - chars, &(buffer->chars.unicode[buffer->numChars]), len - buffer->numChars, &numDone);
+    
+                    if (0 == numDone) {
+                        if (buffer->shouldFreeChars) CFAllocatorDeallocate(buffer->allocator, buffer->chars.unicode);
+                        buffer->isASCII = !alwaysUnicode;
+                        buffer->shouldFreeChars = false;
+                        buffer->chars.ascii = NULL;
+                        buffer->numChars = 0;
+                        return false;
+                    }
+                    buffer->numChars += numDone;
+                }
+            }
+            break;
+    
+        default:
+            if (CFStringEncodingIsValidEncoding(encoding)) {
+                const CFStringEncodingConverter *converter = CFStringEncodingGetConverter(encoding);
+                Boolean isASCIISuperset = __CFStringEncodingIsSupersetOfASCII(encoding);
+                
+                if (!converter) return false;
+    
+                if (!isASCIISuperset) buffer->isASCII = false;
 
-    default:
-        if (CFStringEncodingIsValidEncoding(encoding)) {
-            const CFStringEncodingConverter *converter = CFStringEncodingGetConverter(encoding);
-            Boolean isASCIISuperset = __CFStringEncodingIsSupersetOfASCII(encoding);
-            
-            if (!converter) return false;
-
-            if (converter->encodingClass == kCFStringEncodingConverterCheapEightBit) {
-                allASCII = !alwaysUnicode && isASCIISuperset;
-                    if (allASCII) {
-                        for (idx = 0; idx < len; idx++) {
-                            if (128 <= chars[idx]) {
-                                allASCII = false;
-                                break;
-                            }
+                if (buffer->isASCII) {
+                    for (idx = 0; idx < len; idx++) {
+                        if (128 <= chars[idx]) {
+                            buffer->isASCII = false;
+                            break;
                         }
                     }
-                    buffer->isASCII = allASCII;
-                    if (allASCII) {
+                }
+
+                if (converter->encodingClass == kCFStringEncodingConverterCheapEightBit) {
+                    if (buffer->isASCII) {
                         buffer->numChars = len;
                         buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
                         buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
@@ -343,46 +445,38 @@ Boolean __CFStringDecodeByteStream3(const uint8_t *bytes, UInt32 len, CFStringEn
                                     return false;
                         }
                     }
-                    return true;
-            } else {
-                allASCII = !alwaysUnicode && isASCIISuperset;
-                if (allASCII) {
-                    for (idx = 0; idx < len; idx++)
-                        if (128 <= chars[idx]) {
-                            allASCII = false;
-                            break;
-                        }
-                }
-                buffer->isASCII = allASCII;
-                if (allASCII) {
-                    buffer->numChars = len;
-                    buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
-                    buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
-                    memmove(buffer->chars.ascii, chars, len * sizeof(uint8_t));
                 } else {
-                    UInt32 guessedLength = CFStringEncodingCharLengthForBytes(encoding, 0, bytes, len);
-                    static UInt32 lossyFlag = (UInt32)-1;
-
-                    buffer->shouldFreeChars = !buffer->chars.unicode && (guessedLength <= MAX_LOCAL_UNICHARS) ? false : true;
-                    buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (guessedLength <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, guessedLength * sizeof(UniChar), 0));
-
-                    if (lossyFlag == (UInt32)-1) lossyFlag = (_CFExecutableLinkedOnOrAfter(CFSystemVersionPanther) ? 0 : kCFStringEncodingAllowLossyConversion);
-
-                    if (CFStringEncodingBytesToUnicode(encoding, lossyFlag|__CFGetASCIICompatibleFlag(), bytes, len, NULL, buffer->chars.unicode, (guessedLength > MAX_LOCAL_UNICHARS ? guessedLength : MAX_LOCAL_UNICHARS), &(buffer->numChars))) {
-                        if (buffer->shouldFreeChars) CFAllocatorDeallocate(buffer->allocator, buffer->chars.unicode);
-                        buffer->isASCII = !alwaysUnicode;
-                        buffer->shouldFreeChars = false;
-                        buffer->chars.ascii = NULL;
-                        buffer->numChars = 0;
-                        return false;
+                    if (buffer->isASCII) {
+                        buffer->numChars = len;
+                        buffer->shouldFreeChars = !buffer->chars.ascii && (len <= MAX_LOCAL_CHARS) ? false : true;
+                        buffer->chars.ascii = (buffer->chars.ascii ? buffer->chars.ascii : (len <= MAX_LOCAL_CHARS) ? (uint8_t *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, len * sizeof(uint8_t), 0));
+                        memmove(buffer->chars.ascii, chars, len * sizeof(uint8_t));
+                    } else {
+                        UInt32 guessedLength = CFStringEncodingCharLengthForBytes(encoding, 0, bytes, len);
+                        static UInt32 lossyFlag = (UInt32)-1;
+    
+                        buffer->shouldFreeChars = !buffer->chars.unicode && (guessedLength <= MAX_LOCAL_UNICHARS) ? false : true;
+                        buffer->chars.unicode = (buffer->chars.unicode ? buffer->chars.unicode : (guessedLength <= MAX_LOCAL_UNICHARS) ? (UniChar *)buffer->localBuffer : CFAllocatorAllocate(buffer->allocator, guessedLength * sizeof(UniChar), 0));
+    
+                        if (lossyFlag == (UInt32)-1) lossyFlag = (_CFExecutableLinkedOnOrAfter(CFSystemVersionPanther) ? 0 : kCFStringEncodingAllowLossyConversion);
+    
+                        if (CFStringEncodingBytesToUnicode(encoding, lossyFlag|__CFGetASCIICompatibleFlag(), bytes, len, NULL, buffer->chars.unicode, (guessedLength > MAX_LOCAL_UNICHARS ? guessedLength : MAX_LOCAL_UNICHARS), &(buffer->numChars))) {
+                            if (buffer->shouldFreeChars) CFAllocatorDeallocate(buffer->allocator, buffer->chars.unicode);
+                            buffer->isASCII = !alwaysUnicode;
+                            buffer->shouldFreeChars = false;
+                            buffer->chars.ascii = NULL;
+                            buffer->numChars = 0;
+                            return false;
+                        }
                     }
                 }
-                return true;
+            } else {
+                return false;
             }
-	} else {
-	    return false;
         }
     }
+
+    return true;
 }
 
 
@@ -454,15 +548,15 @@ CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLoc, CFIndex
 	    totalBytesWritten += reqLength;
 	    numCharsProcessed++;
 	}
-    } else if (encoding == kCFStringEncodingUnicode) {
-   	CFIndex extraForBOM = generatingExternalFile ? sizeof(UniChar) : 0;
+    } else if ((encoding == kCFStringEncodingUTF16) || (encoding == kCFStringEncodingUTF16BE) || (encoding == kCFStringEncodingUTF16LE)) {
+   	CFIndex extraForBOM = (generatingExternalFile && (encoding == kCFStringEncodingUTF16) ? sizeof(UniChar) : 0);
         numCharsProcessed = rangeLen;
         if (buffer && (numCharsProcessed * (CFIndex)sizeof(UniChar) + extraForBOM > max)) {
             numCharsProcessed = (max > extraForBOM) ? ((max - extraForBOM) / sizeof(UniChar)) : 0;
         }
         totalBytesWritten = (numCharsProcessed * sizeof(UniChar)) + extraForBOM;
 	if (buffer) {
-	    if (generatingExternalFile) {	/* Generate BOM */
+	    if (extraForBOM) {	/* Generate BOM */
 #if defined(__BIG_ENDIAN__)
 		*buffer++ = 0xfe; *buffer++ = 0xff;
 #else
@@ -470,13 +564,89 @@ CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLoc, CFIndex
 #endif
 	    }
 	    CFStringGetCharacters(string, CFRangeMake(rangeLoc, numCharsProcessed), (UniChar *)buffer);
+            if (
+#if defined(__BIG_ENDIAN__)
+                kCFStringEncodingUTF16LE
+#else
+                kCFStringEncodingUTF16BE
+#endif
+                == encoding) { // Need to swap
+                UTF16Char *characters = (UTF16Char *)buffer;
+                const UTF16Char *limit = characters + numCharsProcessed;
+
+                while (characters < limit) {
+                    *characters = CFSwapInt16(*characters);
+                    ++characters;
+                }
+            }
 	}
+    } else if ((encoding == kCFStringEncodingUTF32) || (encoding == kCFStringEncodingUTF32BE) || (encoding == kCFStringEncodingUTF32LE)) {
+        UTF32Char character;
+        CFStringInlineBuffer buf;
+        UTF32Char *characters = (UTF32Char *)buffer;
+
+#if defined(__BIG_ENDIAN__)
+        bool swap = (encoding == kCFStringEncodingUTF32LE ? true : false);
+#else
+        bool swap = (encoding == kCFStringEncodingUTF32BE ? true : false);
+#endif
+
+        if (generatingExternalFile && (encoding == kCFStringEncodingUTF32)) {
+            totalBytesWritten += sizeof(UTF32Char);
+            if (characters) {
+                if (totalBytesWritten > max) { // insufficient buffer
+                    totalBytesWritten = 0;
+                } else {
+#if defined(__BIG_ENDIAN__)
+                    *(characters++) = 0x0000FEFF;
+#else
+                    *(characters++) = 0xFFFE0000;
+#endif
+                }
+            }
+        }
+
+        CFStringInitInlineBuffer(string, &buf, CFRangeMake(rangeLoc, rangeLen));
+        while (numCharsProcessed < rangeLen) {
+            character = CFStringGetCharacterFromInlineBuffer(&buf, numCharsProcessed);
+
+            if (CFUniCharIsSurrogateHighCharacter(character)) {
+                UTF16Char otherCharacter;
+
+                if (((numCharsProcessed + 1) < rangeLen) && CFUniCharIsSurrogateLowCharacter((otherCharacter = CFStringGetCharacterFromInlineBuffer(&buf, numCharsProcessed + 1)))) {
+                    character = CFUniCharGetLongCharacterForSurrogatePair(character, otherCharacter);
+                } else if (lossByte) {
+                    character = lossByte;
+                } else {
+                    break;
+                }
+            } else if (CFUniCharIsSurrogateLowCharacter(character)) {
+                if (lossByte) {
+                    character = lossByte;
+                } else {
+                    break;
+                }
+            }
+
+            totalBytesWritten += sizeof(UTF32Char);
+
+            if (characters) {
+                if (totalBytesWritten > max) {
+                    totalBytesWritten -= sizeof(UTF32Char);
+                    break;
+                }
+                *(characters++) = (swap ? CFSwapInt32(character) : character);
+            }
+
+            numCharsProcessed += (character > 0xFFFF ? 2 : 1);
+        }
     } else {
         CFIndex numChars;
         UInt32 flags;
         const unsigned char *cString = NULL;
+        BOOL isASCIISuperset = __CFStringEncodingIsSupersetOfASCII(encoding);
 
-        if (!CF_IS_OBJC(CFStringGetTypeID(), string) && __CFStringEncodingIsSupersetOfASCII(encoding)) { // Checking for NSString to avoid infinite recursion
+        if (!CF_IS_OBJC(CFStringGetTypeID(), string) && isASCIISuperset) { // Checking for NSString to avoid infinite recursion
             const unsigned char *ptr;
             if ((cString = CFStringGetCStringPtr(string, __CFStringGetEightBitStringEncoding()))) {
                 ptr = (cString += rangeLoc);
@@ -535,7 +705,8 @@ CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLoc, CFIndex
         if (!buffer) max = 0;
 
         // Special case for Foundation. When lossByte == 0xFF && encoding kCFStringEncodingASCII, we do the default ASCII fallback conversion
-        flags = (lossByte ? ((unsigned char)lossByte == 0xFF && encoding == kCFStringEncodingASCII ? kCFStringEncodingAllowLossyConversion : CFStringEncodingLossyByteToMask(lossByte)) : 0) | (generatingExternalFile ? kCFStringEncodingPrependBOM : 0) | __CFGetASCIICompatibleFlag();
+        // Aki 11/24/04 __CFGetASCIICompatibleFlag() is called only for non-ASCII superset encodings. Otherwise, it could lead to a deadlock (see 3890536).
+        flags = (lossByte ? ((unsigned char)lossByte == 0xFF && encoding == kCFStringEncodingASCII ? kCFStringEncodingAllowLossyConversion : CFStringEncodingLossyByteToMask(lossByte)) : 0) | (generatingExternalFile ? kCFStringEncodingPrependBOM : 0) | (isASCIISuperset ? 0 : __CFGetASCIICompatibleFlag());
 
         if (!cString && (cString = (const char*)CFStringGetCharactersPtr(string))) { // Must be Unicode string
             if (CFStringEncodingIsValidEncoding(encoding)) { // Converter available in CF
@@ -633,9 +804,25 @@ CFIndex __CFStringEncodeByteStream(CFStringRef string, CFIndex rangeLoc, CFIndex
     return numCharsProcessed;
 }
 
-#define MAX_STACK_BUFFER_LEN	(255)
-CF_EXPORT Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, uint8_t *buffer, CFIndex maxBufLen) {
+CFStringRef CFStringCreateWithFileSystemRepresentation(CFAllocatorRef alloc, const char *buffer) {
+    return CFStringCreateWithCString(alloc, buffer, CFStringFileSystemEncoding());
+}
+
+CFIndex CFStringGetMaximumSizeOfFileSystemRepresentation(CFStringRef string) {
+    CFIndex len = CFStringGetLength(string);
+    CFStringEncoding enc = CFStringGetFastestEncoding(string);
+    switch (enc) {
+	case kCFStringEncodingASCII:
+	case kCFStringEncodingMacRoman:
+	    return len * 3 + 1;
+	default:
+	    return len * 9 + 1;
+    }
+} 
+
+Boolean CFStringGetFileSystemRepresentation(CFStringRef string, char *buffer, CFIndex maxBufLen) {
 #if defined(__MACH__)
+#define MAX_STACK_BUFFER_LEN	(255)
     const UTF16Char *characters = CFStringGetCharactersPtr(string);
     uint32_t usedBufLen;
 
@@ -662,7 +849,7 @@ CF_EXPORT Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, uint8
                 range.length = (length < MAX_STACK_BUFFER_LEN ? length : MAX_STACK_BUFFER_LEN);
             }
         } else {
-            UTF16Char charactersBuffer[MAX_STACK_BUFFER_LEN]; // C99 Variable array
+            UTF16Char charactersBuffer[MAX_STACK_BUFFER_LEN];
 
             CFStringGetCharacters(string, CFRangeMake(0, length), charactersBuffer);
             if (!CFUniCharDecompose(charactersBuffer, length, NULL, (void *)buffer, maxBufLen, &usedBufLen, true, kCFUniCharUTF8Format, true)) return false;
@@ -683,3 +870,8 @@ CF_EXPORT Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, uint8
     return CFStringGetCString(string, buffer, maxBufLen, CFStringFileSystemEncoding());
 #endif __MACH__
 }
+
+Boolean _CFStringGetFileSystemRepresentation(CFStringRef string, uint8_t *buffer, CFIndex maxBufLen) {
+    return CFStringGetFileSystemRepresentation(string, buffer, maxBufLen);
+}
+
