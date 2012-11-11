@@ -3,6 +3,9 @@ sometimes also known as "CF-lite", because it does not
 contain every facility available from the CoreFoundation
 framework in Mac OS X.
 
+This CoreFoundation corresponds to the Mac OS X 10.5.2 version
+of CF (CF-476.10)
+
 The purpose of this README file is to share "what needs
 doing", "how to do things", and Q&A information about
 CF-lite, as this information is discovered.

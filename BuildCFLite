@@ -1,0 +1,91 @@
+#/bin/sh
+
+echo "Setup ..."
+
+ALL_CFILES=`ls *.c`
+ALL_HFILES=`ls *.h`
+
+MACHINE_TYPE=`uname -p`
+UNICODE_DATA_FILE="UNKNOWN"
+
+if [ "$MACHINE_TYPE" == "i386" ]; then
+	UNICODE_DATA_FILE="CFUnicodeData-L.mapping"
+fi
+
+if [ "$MACHINE_TYPE" == "powerpc" ]; then
+	UNICODE_DATA_FILE="CFUnicodeData-B.mapping"
+fi
+
+
+
+PUBLIC_HEADERS="CFArray.h CFBag.h CFBase.h CFBinaryHeap.h CFBitVector.h CFBundle.h CFByteOrder.h CFCalendar.h CFCharacterSet.h CFData.h CFDate.h CFDateFormatter.h CFDictionary.h CFError.h CFLocale.h CFMachPort.h CFMessagePort.h CFNumber.h CFNumberFormatter.h CFPlugIn.h CFPlugInCOM.h CFPreferences.h CFPropertyList.h CFRunLoop.h CFSet.h CFSocket.h CFStream.h CFString.h CFStringEncodingExt.h CFTimeZone.h CFTree.h CFURL.h CFURLAccess.h CFUUID.h CFUserNotification.h CFXMLNode.h CFXMLParser.h CoreFoundation.h"
+PRIVATE_HEADERS="CFBundlePriv.h CFCharacterSetPriv.h CFError_Private.h CFLogUtilities.h CFPriv.h CFRuntime.h CFStorage.h CFStreamAbstract.h CFStreamPriv.h CFStreamInternal.h CFStringDefaultEncoding.h CFStringEncodingConverter.h CFStringEncodingConverterExt.h CFUniChar.h CFUnicodeDecomposition.h CFUnicodePrecomposition.h ForFoundationOnly.h"
+
+OBJBASE=../CF-Objects
+ARCHFLAGS="-arch ppc -arch ppc64 -arch i386 -arch x86_64"
+CFLAGS="-c -pipe -std=gnu99 -g -Wmost -Wno-trigraphs -mmacosx-version-min=10.5 -fconstant-cfstrings -fexceptions -DCF_BUILDING_CF=1 -DDEPLOYMENT_TARGET_MACOSX=1 -DMAC_OS_X_VERSION_MAX_ALLOWED=MAC_OS_X_VERSION_10_5 -DU_SHOW_DRAFT_API=1 -I$OBJBASE -DVERSION=476.10"
+LFLAGS="-dynamiclib -mmacosx-version-min=10.5 -twolevel_namespace -init ___CFInitialize -compatibility_version 150 -current_version 476 -sectcreate __UNICODE __csbitmaps CFCharacterSetBitmaps.bitmap -sectcreate __UNICODE __properties CFUniCharPropertyDatabase.data -sectcreate __UNICODE __data $UNICODE_DATA_FILE -segprot __UNICODE r r"
+
+/bin/rm -rf $OBJBASE
+/bin/mkdir -p $OBJBASE
+/bin/mkdir $OBJBASE/normal
+/bin/mkdir $OBJBASE/CoreFoundation
+/bin/cp $ALL_HFILES $OBJBASE/CoreFoundation
+if [ $? -ne 0 ]; then
+	echo "Setup failed"
+	exit 1
+fi
+
+Build () {
+	echo "Compiling $STYLE ..."
+	for F in $ALL_CFILES ; do
+		echo /usr/bin/gcc $STYLE_CFLAGS $ARCHFLAGS $CFLAGS $F -o $OBJBASE/$STYLE/`basename $F .c`.o
+		/usr/bin/gcc $STYLE_CFLAGS $ARCHFLAGS $CFLAGS $F -o $OBJBASE/$STYLE/`basename $F .c`.o
+		if [ $? -ne 0 ]; then
+			echo "*** Compiling $STYLE failed ***"
+			exit 1
+		fi
+	done
+	echo "Linking $STYLE ..."
+	echo /usr/bin/gcc $STYLE_LFLAGS -install_name /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation_$STYLE $ARCHFLAGS $LFLAGS $OBJBASE/$STYLE/*.o -licucore.A -lobjc -o $OBJBASE/CoreFoundation_$STYLE
+	/usr/bin/gcc $STYLE_LFLAGS -install_name /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation_$STYLE $ARCHFLAGS $LFLAGS $OBJBASE/$STYLE/*.o -licucore.A -lobjc -o $OBJBASE/CoreFoundation_$STYLE
+	if [ $? -ne 0 ]; then
+		echo "*** Linking $STYLE failed ***"
+		exit 1
+	fi
+}
+
+STYLE=normal
+STYLE_CFLAGS="-O2"
+STYLE_LFLAGS=
+Build
+
+echo "Building done."
+
+echo "Installing ..."
+if [ -z "$DSTBASE" ]; then DSTBASE=../CF-Root ; fi
+
+/bin/rm -rf $DSTBASE/CoreFoundation.framework
+/bin/mkdir -p $DSTBASE/CoreFoundation.framework/Versions/A/Resources
+/bin/mkdir -p $DSTBASE/CoreFoundation.framework/Versions/A/Headers
+/bin/mkdir -p $DSTBASE/CoreFoundation.framework/Versions/A/PrivateHeaders
+/bin/ln -sf A $DSTBASE/CoreFoundation.framework/Versions/Current
+/bin/ln -sf Versions/Current/Resources $DSTBASE/CoreFoundation.framework/Resources
+/bin/ln -sf Versions/Current/Headers $DSTBASE/CoreFoundation.framework/Headers
+/bin/ln -sf Versions/Current/PrivateHeaders $DSTBASE/CoreFoundation.framework/PrivateHeaders
+/bin/ln -sf Versions/Current/CoreFoundation $DSTBASE/CoreFoundation.framework/CoreFoundation
+/bin/cp Info.plist $DSTBASE/CoreFoundation.framework/Versions/A/Resources
+/bin/mkdir -p $DSTBASE/CoreFoundation.framework/Versions/A/Resources/en.lproj
+/bin/cp $PUBLIC_HEADERS $DSTBASE/CoreFoundation.framework/Versions/A/Headers
+/bin/cp $PRIVATE_HEADERS $DSTBASE/CoreFoundation.framework/Versions/A/PrivateHeaders
+/usr/bin/strip -S -o $DSTBASE/CoreFoundation.framework/Versions/A/CoreFoundation $OBJBASE/CoreFoundation_normal
+/usr/sbin/chown -RH -f root:wheel $DSTBASE/CoreFoundation.framework
+/bin/chmod -RH a-w,a+rX $DSTBASE/CoreFoundation.framework
+/bin/chmod -RH u+w $DSTBASE
+
+install_name_tool -id /System/Library/Frameworks/CoreFoundation/Versions/A/CoreFoundation $DSTBASE/CoreFoundation.framework/Versions/A/CoreFoundation
+
+echo "Installing done.  The framework is in $DSTBASE"
+
+exit 0
+
