@@ -687,9 +687,9 @@ Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef 
         return false;
     } else {
         Boolean result;
-        if (CFStringCompare(scheme, CFSTR("file"), 0) == kCFCompareEqualTo) {
+        if (CFStringCompare(scheme, CFSTR("file"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
             result = _CFFileURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, desiredProperties, fetchedProperties, errorCode);
-        } else if (CFStringCompare(scheme, CFSTR("data"), 0) == kCFCompareEqualTo) {
+        } else if (CFStringCompare(scheme, CFSTR("data"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
 			result = _CFDataURLCreateDataAndPropertiesFromResource(alloc, url, fetchedData, desiredProperties, fetchedProperties, errorCode);
 		} else {
 #if DEPLOYMENT_TARGET_MACOSX
