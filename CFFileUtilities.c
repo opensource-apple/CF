@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFFileUtilities.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -74,33 +74,33 @@ CF_INLINE void closeAutoFSNoWait(int fd) {
     if (-1 != fd) close(fd);
 }
 
-__private_extern__ CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType) {
+CF_PRIVATE CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType) {
     return (abstractType ? (CFStringRef)CFRetain(abstractType) : NULL);
 }
 
 
-__private_extern__ Boolean _CFCreateDirectory(const char *path) {
+CF_PRIVATE Boolean _CFCreateDirectory(const char *path) {
     int no_hang_fd = openAutoFSNoWait();
     int ret = ((mkdir(path, 0777) == 0) ? true : false);
     closeAutoFSNoWait(no_hang_fd);
     return ret;
 }
 
-__private_extern__ Boolean _CFRemoveDirectory(const char *path) {
+CF_PRIVATE Boolean _CFRemoveDirectory(const char *path) {
     int no_hang_fd = openAutoFSNoWait();
     int ret = ((rmdir(path) == 0) ? true : false);
     closeAutoFSNoWait(no_hang_fd);
     return ret;
 }
 
-__private_extern__ Boolean _CFDeleteFile(const char *path) {
+CF_PRIVATE Boolean _CFDeleteFile(const char *path) {
     int no_hang_fd = openAutoFSNoWait();
     int ret = unlink(path) == 0;
     closeAutoFSNoWait(no_hang_fd);
     return ret;
 }
 
-__private_extern__ Boolean _CFReadBytesFromPathAndGetFD(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags, int *fd) {    // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
+CF_PRIVATE Boolean _CFReadBytesFromPathAndGetFD(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags, int *fd) {    // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
     struct statinfo statBuf;
     
     *bytes = NULL;
@@ -155,7 +155,7 @@ __private_extern__ Boolean _CFReadBytesFromPathAndGetFD(CFAllocatorRef alloc, co
     return true;
 }
 
-__private_extern__ Boolean _CFReadBytesFromPath(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
+CF_PRIVATE Boolean _CFReadBytesFromPath(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
     int fd = -1;
     Boolean result = _CFReadBytesFromPathAndGetFD(alloc, path, bytes, length, maxLength, extraOpenFlags, &fd);
     if (fd >= 0) {
@@ -163,7 +163,7 @@ __private_extern__ Boolean _CFReadBytesFromPath(CFAllocatorRef alloc, const char
     }
     return result;
 }
-__private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
+CF_PRIVATE Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags) {
     // maxLength is the number of bytes desired, or 0 if the whole file is desired regardless of length.
     
     char path[CFMaxPathSize];
@@ -173,7 +173,7 @@ __private_extern__ Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef u
     return _CFReadBytesFromPath(alloc, (const char *)path, bytes, length, maxLength, extraOpenFlags);
 }
 
-__private_extern__ Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, CFIndex length) {
+CF_PRIVATE Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, CFIndex length) {
     int fd = -1;
     int mode;
     struct statinfo statBuf;
@@ -216,7 +216,7 @@ __private_extern__ Boolean _CFWriteBytesToFile(CFURLRef url, const void *bytes, 
 /* On Mac OS 8/9, one of dirSpec and dirURL must be non-NULL.  On all other platforms, one of path and dirURL must be non-NULL
 If both are present, they are assumed to be in-synch; that is, they both refer to the same directory.  */
 /* Lately, dirSpec appears to be (rightfully) unused. */
-__private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc, char *dirPath, void *dirSpec, CFURLRef dirURL, CFStringRef matchingAbstractType) {
+CF_PRIVATE CFMutableArrayRef _CFCreateContentsOfDirectory(CFAllocatorRef alloc, char *dirPath, void *dirSpec, CFURLRef dirURL, CFStringRef matchingAbstractType) {
     CFMutableArrayRef files = NULL;
     Boolean releaseBase = false;
     CFIndex pathLength = dirPath ? strlen(dirPath) : 0;
@@ -493,7 +493,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     
 #else
     
-#error _CFContentsOfDirectory() unknown architecture, not implemented
+#error _CFCreateContentsOfDirectory() unknown architecture, not implemented
     
 #endif
 
@@ -506,7 +506,7 @@ __private_extern__ CFMutableArrayRef _CFContentsOfDirectory(CFAllocatorRef alloc
     return files;
 }
 
-__private_extern__ SInt32 _CFGetPathProperties(CFAllocatorRef alloc, char *path, Boolean *exists, SInt32 *posixMode, int64_t *size, CFDateRef *modTime, SInt32 *ownerID, CFArrayRef *dirContents) {
+CF_PRIVATE SInt32 _CFGetPathProperties(CFAllocatorRef alloc, char *path, Boolean *exists, SInt32 *posixMode, int64_t *size, CFDateRef *modTime, SInt32 *ownerID, CFArrayRef *dirContents) {
     Boolean fileExists;
     Boolean isDirectory = false;
     
@@ -580,7 +580,7 @@ __private_extern__ SInt32 _CFGetPathProperties(CFAllocatorRef alloc, char *path,
     if (dirContents != NULL) {
         if (fileExists && isDirectory) {
             
-            CFMutableArrayRef contents = _CFContentsOfDirectory(alloc, (char *)path, NULL, NULL, NULL);
+            CFMutableArrayRef contents = _CFCreateContentsOfDirectory(alloc, (char *)path, NULL, NULL, NULL);
             
             if (contents) {
                 *dirContents = contents;
@@ -594,7 +594,7 @@ __private_extern__ SInt32 _CFGetPathProperties(CFAllocatorRef alloc, char *path,
     return 0;
 }
 
-__private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pathURL, Boolean *exists, SInt32 *posixMode, int64_t *size, CFDateRef *modTime, SInt32 *ownerID, CFArrayRef *dirContents) {
+CF_PRIVATE SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pathURL, Boolean *exists, SInt32 *posixMode, int64_t *size, CFDateRef *modTime, SInt32 *ownerID, CFArrayRef *dirContents) {
     
     char path[CFMaxPathSize];
 
@@ -614,35 +614,57 @@ __private_extern__ SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pa
 
 #if defined(WINDOWS_PATH_SEMANTICS)
     #define CFPreferredSlash	((UniChar)'\\')
+    #define CFPreferredSlashStr CFSTR("\\")
 #elif defined(UNIX_PATH_SEMANTICS)
     #define CFPreferredSlash	((UniChar)'/')
-#elif defined(HFS_PATH_SEMANTICS)
-    #define CFPreferredSlash	((UniChar)':')
+    #define CFPreferredSlashStr CFSTR("/")
 #else
     #error Cannot define NSPreferredSlash on this platform
 #endif
 
-#if defined(HFS_PATH_SEMANTICS)
-#define HAS_DRIVE(S) (false)
-#define HAS_NET(S) (false)
-#else
+static Boolean _hasDrive(CFStringRef path) {
+    if (CFStringGetLength(path) >= 2) {
+        UniChar firstCharacters[2];
+        firstCharacters[0] = CFStringGetCharacterAtIndex(path, 0);
+        firstCharacters[1] = CFStringGetCharacterAtIndex(path, 1);
+        if (firstCharacters[1] == ':' &&
+            (('A' <= (firstCharacters)[0] && (firstCharacters)[0] <= 'Z') ||
+             ('a' <= (firstCharacters)[0] && (firstCharacters)[0] <= 'z'))
+            ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Boolean _hasNet(CFStringRef path) {
+    if (CFStringGetLength(path) >= 2) {
+        UniChar firstCharacters[2];
+        firstCharacters[0] = CFStringGetCharacterAtIndex(path, 0);
+        firstCharacters[1] = CFStringGetCharacterAtIndex(path, 1);
+        if (firstCharacters[0] == '\\' && firstCharacters[1] == '\\') return true;
+    }
+    return false;
+}
+
 #define HAS_DRIVE(S) ((S)[1] == ':' && (('A' <= (S)[0] && (S)[0] <= 'Z') || ('a' <= (S)[0] && (S)[0] <= 'z')))
 #define HAS_NET(S) ((S)[0] == '\\' && (S)[1] == '\\')
-#endif
 
 #if defined(WINDOWS_PATH_SEMANTICS)
     #define IS_SLASH(C)	((C) == '\\' || (C) == '/')
 #elif defined(UNIX_PATH_SEMANTICS)
     #define IS_SLASH(C)	((C) == '/')
-#elif defined(HFS_PATH_SEMANTICS)
-    #define IS_SLASH(C)	((C) == ':')
 #endif
 
-__private_extern__ UniChar _CFGetSlash(){
+CF_PRIVATE UniChar _CFGetSlash() {
     return CFPreferredSlash;
 }
 
-__private_extern__ Boolean _CFIsAbsolutePath(UniChar *unichars, CFIndex length) {
+CF_PRIVATE CFStringRef _CFGetSlashStr() {
+    return CFPreferredSlashStr;
+}
+
+CF_PRIVATE Boolean _CFIsAbsolutePath(UniChar *unichars, CFIndex length) {
     if (length < 1) {
         return false;
     }
@@ -662,8 +684,6 @@ __private_extern__ Boolean _CFIsAbsolutePath(UniChar *unichars, CFIndex length) 
     if (IS_SLASH(unichars[2]) && HAS_DRIVE(unichars)) {
         return true;
     }
-#elif defined(HFS_PATH_SEMANTICS)
-    return !IS_SLASH(unichars[0]);
 #else
     if (unichars[0] == '~') {
         return true;
@@ -675,7 +695,7 @@ __private_extern__ Boolean _CFIsAbsolutePath(UniChar *unichars, CFIndex length) 
     return false;
 }
 
-__private_extern__ Boolean _CFStripTrailingPathSlashes(UniChar *unichars, CFIndex *length) {
+CF_PRIVATE Boolean _CFStripTrailingPathSlashes(UniChar *unichars, CFIndex *length) {
     Boolean destHasDrive = (1 < *length) && HAS_DRIVE(unichars);
     CFIndex oldLength = *length;
     while (((destHasDrive && 3 < *length) || (!destHasDrive && 1 < *length)) && IS_SLASH(unichars[*length - 1])) {
@@ -684,7 +704,7 @@ __private_extern__ Boolean _CFStripTrailingPathSlashes(UniChar *unichars, CFInde
     return (oldLength != *length);
 }
 
-__private_extern__ Boolean _CFAppendTrailingPathSlash(UniChar *unichars, CFIndex *length, CFIndex maxLength) {
+static Boolean _CFAppendTrailingPathSlash(UniChar *unichars, CFIndex *length, CFIndex maxLength) {
     if (maxLength < *length + 1) {
         return false;
     }
@@ -708,7 +728,39 @@ __private_extern__ Boolean _CFAppendTrailingPathSlash(UniChar *unichars, CFIndex
     return true;
 }
 
-__private_extern__ Boolean _CFAppendPathComponent(UniChar *unichars, CFIndex *length, CFIndex maxLength, UniChar *component, CFIndex componentLength) {
+CF_PRIVATE void _CFAppendTrailingPathSlash2(CFMutableStringRef path) {
+    static const UniChar slash[1] = { CFPreferredSlash };
+    CFIndex len = CFStringGetLength(path);
+    if (len == 0) {
+        // Do nothing for this case
+    } else if (len == 1) {
+        UniChar character = CFStringGetCharacterAtIndex((CFStringRef)path, 0);
+        if (!IS_SLASH(character)) {
+            CFStringAppendCharacters(path, slash, 1);
+        }
+    } else if (len == 2) {
+        if (!_hasDrive(path) && !_hasNet(path)) {
+            CFStringAppendCharacters(path, slash, 1);
+        }
+    } else {
+        CFStringAppendCharacters(path, slash, 1);
+    }
+}
+
+CF_PRIVATE void _CFAppendConditionalTrailingPathSlash2(CFMutableStringRef path) {
+    static const UniChar slash[1] = { CFPreferredSlash };
+    UniChar character = CFStringGetCharacterAtIndex((CFStringRef)path, CFStringGetLength(path) - 1);
+    if (!IS_SLASH(character)) {
+        CFStringAppendCharacters(path, slash, 1);
+    }
+}
+
+CF_PRIVATE void _CFAppendPathComponent2(CFMutableStringRef path, CFStringRef component) {
+    _CFAppendTrailingPathSlash2(path);
+    CFStringAppend(path, component);
+}
+
+CF_PRIVATE Boolean _CFAppendPathComponent(UniChar *unichars, CFIndex *length, CFIndex maxLength, UniChar *component, CFIndex componentLength) {
     if (0 == componentLength) {
         return true;
     }
@@ -721,7 +773,61 @@ __private_extern__ Boolean _CFAppendPathComponent(UniChar *unichars, CFIndex *le
     return true;
 }
 
-__private_extern__ Boolean _CFAppendPathExtension(UniChar *unichars, CFIndex *length, CFIndex maxLength, UniChar *extension, CFIndex extensionLength) {
+CF_PRIVATE Boolean _CFAppendPathExtension2(CFMutableStringRef path, CFStringRef extension) {
+    if (!path) {
+        return false;
+    }
+    
+    if (0 < CFStringGetLength(extension) && IS_SLASH(CFStringGetCharacterAtIndex(extension, 0))) {
+        return false;
+    }
+    if (1 < CFStringGetLength(extension)) {
+        if (_hasDrive(extension)) return false;
+    }
+    
+    Boolean destHasDrive = (1 < CFStringGetLength(path)) && _hasDrive(path);
+    while (((destHasDrive && 3 < CFStringGetLength(path)) || (!destHasDrive && 1 < CFStringGetLength(path))) && IS_SLASH(CFStringGetCharacterAtIndex(path, CFStringGetLength(path) - 1))) {
+        CFStringDelete(path, CFRangeMake(CFStringGetLength(path) - 1, 1));
+    }
+
+    if (CFStringGetLength(path) == 0) {
+        return false;
+    }
+    
+    UniChar firstChar = CFStringGetCharacterAtIndex(path, 0);
+    CFIndex newLength = CFStringGetLength(path);
+    switch (newLength) {
+        case 0:
+            return false;
+        case 1:
+            if (IS_SLASH(firstChar) || firstChar == '~') {
+                return false;
+            }
+            break;
+        case 2:
+            if (_hasDrive(path) || _hasNet(path)) {
+                return false;
+            }
+            break;
+        case 3:
+            if (IS_SLASH(CFStringGetCharacterAtIndex(path, 2)) && _hasDrive(path)) {
+                return false;
+            }
+            break;
+    }
+    if (0 < newLength && firstChar == '~') {
+        // Make sure we have a slash in the string
+        if (!CFStringFindWithOptions(path, CFPreferredSlashStr, CFRangeMake(1, newLength - 1), 0, NULL)) {
+            return false;
+        }
+    }
+    static const UniChar dotChar = '.';
+    CFStringAppendCharacters(path, &dotChar, 1);
+    CFStringAppend(path, extension);
+    return true;
+}
+
+CF_PRIVATE Boolean _CFAppendPathExtension(UniChar *unichars, CFIndex *length, CFIndex maxLength, UniChar *extension, CFIndex extensionLength) {
     if (maxLength < *length + 1 + extensionLength) {
         return false;
     }
@@ -767,7 +873,7 @@ __private_extern__ Boolean _CFAppendPathExtension(UniChar *unichars, CFIndex *le
     return true;
 }
 
-__private_extern__ Boolean _CFTransmutePathSlashes(UniChar *unichars, CFIndex *length, UniChar replSlash) {
+CF_PRIVATE Boolean _CFTransmutePathSlashes(UniChar *unichars, CFIndex *length, UniChar replSlash) {
     CFIndex didx, sidx, scnt = *length;
     sidx = (1 < *length && HAS_NET(unichars)) ? 2 : 0;
     didx = sidx;
@@ -783,7 +889,34 @@ __private_extern__ Boolean _CFTransmutePathSlashes(UniChar *unichars, CFIndex *l
     return (scnt != didx);
 }
 
-__private_extern__ CFIndex _CFStartOfLastPathComponent(UniChar *unichars, CFIndex length) {
+CF_PRIVATE CFStringRef _CFCreateLastPathComponent(CFAllocatorRef alloc, CFStringRef path, CFIndex *slashIndex) {
+    CFIndex len = CFStringGetLength(path);
+    if (len < 2) {
+        // Can't be any path components in a string this short
+        if (slashIndex) *slashIndex = -1;
+        return (CFStringRef)CFRetain(path);
+    }
+    
+    // Find the last slash
+    for (CFIndex i = len - 1; i >= 0; i--) {
+        if (IS_SLASH(CFStringGetCharacterAtIndex(path, i))) {
+            if (slashIndex) *slashIndex = i;
+            return CFStringCreateWithSubstring(alloc, path, CFRangeMake(i + 1, len - i - 1));
+        }
+    }
+    
+    // Strip any drive if we have one
+    if (len > 2 && _hasDrive(path)) {
+        if (slashIndex) *slashIndex = -1;
+        return CFStringCreateWithSubstring(alloc, path, CFRangeMake(2, len - 2));
+    }
+    
+    // No slash, so just return the same string
+    if (slashIndex) *slashIndex = -1;
+    return (CFStringRef)CFRetain(path);
+}
+
+CF_PRIVATE CFIndex _CFStartOfLastPathComponent(UniChar *unichars, CFIndex length) {
     CFIndex idx;
     if (length < 2) {
         return 0;
@@ -799,7 +932,23 @@ __private_extern__ CFIndex _CFStartOfLastPathComponent(UniChar *unichars, CFInde
     return 0;
 }
 
-__private_extern__ CFIndex _CFLengthAfterDeletingLastPathComponent(UniChar *unichars, CFIndex length) {
+CF_PRIVATE CFIndex _CFStartOfLastPathComponent2(CFStringRef path) {
+    CFIndex length = CFStringGetLength(path);
+    if (length < 2) {
+        return 0;
+    }
+    for (CFIndex idx = length - 1; idx; idx--) {
+        if (IS_SLASH(CFStringGetCharacterAtIndex(path, idx - 1))) {
+            return idx;
+        }
+    }
+    if ((2 < length && _hasDrive(path))) {
+        return 2;
+    }
+    return 0;
+}
+
+CF_PRIVATE CFIndex _CFLengthAfterDeletingLastPathComponent(UniChar *unichars, CFIndex length) {
     CFIndex idx;
     if (length < 2) {
         return 0;
@@ -818,7 +967,28 @@ __private_extern__ CFIndex _CFLengthAfterDeletingLastPathComponent(UniChar *unic
     return 0;
 }
 
-__private_extern__ CFIndex _CFStartOfPathExtension(UniChar *unichars, CFIndex length) {
+CF_PRIVATE CFIndex _CFStartOfPathExtension2(CFStringRef path) {
+    if (CFStringGetLength(path) < 2) {
+        return 0;
+    }
+    Boolean hasDrive = _hasDrive(path);
+    for (CFIndex idx = CFStringGetLength(path) - 1; idx; idx--) {
+        UniChar thisCharacter = CFStringGetCharacterAtIndex(path, idx);
+        if (IS_SLASH(thisCharacter)) {
+            return 0;
+        }
+        if (thisCharacter != '.') {
+            continue;
+        }
+        if (idx == 2 && hasDrive) {
+            return 0;
+        }
+        return idx;
+    }
+    return 0;
+}
+
+CF_PRIVATE CFIndex _CFStartOfPathExtension(UniChar *unichars, CFIndex length) {
     CFIndex idx;
     if (length < 2) {
         return 0;
@@ -838,9 +1008,97 @@ __private_extern__ CFIndex _CFStartOfPathExtension(UniChar *unichars, CFIndex le
     return 0;
 }
 
-__private_extern__ CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex length) {
+CF_PRIVATE CFIndex _CFLengthAfterDeletingPathExtension2(CFStringRef path) {
+    CFIndex start = _CFStartOfPathExtension2(path);
+    return ((0 < start) ? start : CFStringGetLength(path));
+}
+
+CF_PRIVATE CFIndex _CFLengthAfterDeletingPathExtension(UniChar *unichars, CFIndex length) {
     CFIndex start = _CFStartOfPathExtension(unichars, length);
     return ((0 < start) ? start : length);
 }
 
+#if DEPLOYMENT_TARGET_WINDOWS
+#define	DT_DIR		 4
+#define	DT_REG		 8
+#define	DT_LNK		10
+#endif
+
+// NOTE: on Windows the filename is UTF16-encoded, the fileNameLen is result of wcslen. This function automatically skips '.' and '..', and '._' files
+CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean (^fileHandler)(CFStringRef fileName, uint8_t fileType)) {
+    char directoryPathBuf[CFMaxPathSize];
+    if (!CFStringGetFileSystemRepresentation(directoryPath, directoryPathBuf, CFMaxPathSize)) return;
+    
+#if DEPLOYMENT_TARGET_WINDOWS
+    CFIndex cpathLen = strlen(directoryPathBuf);
+    // Make sure there is room for the additional space we need in the win32 api
+    if (cpathLen + 2 < CFMaxPathSize) {
+        WIN32_FIND_DATAW file;
+        HANDLE handle;
+        
+        directoryPathBuf[cpathLen++] = '\\';
+        directoryPathBuf[cpathLen++] = '*';
+        directoryPathBuf[cpathLen] = '\0';
+        
+        // Convert UTF8 buffer to windows appropriate UTF-16LE
+        // Get the real length of the string in UTF16 characters
+        CFStringRef cfStr = CFStringCreateWithCString(kCFAllocatorSystemDefault, directoryPathBuf, kCFStringEncodingUTF8);
+        cpathLen = CFStringGetLength(cfStr);
+        // Allocate a wide buffer to hold the converted string, including space for a NULL terminator
+        wchar_t *wideBuf = (wchar_t *)malloc((cpathLen + 1) * sizeof(wchar_t));
+        // Copy the string into the buffer and terminate
+        CFStringGetCharacters(cfStr, CFRangeMake(0, cpathLen), (UniChar *)wideBuf);
+        wideBuf[cpathLen] = 0;
+        CFRelease(cfStr);
+        
+        handle = FindFirstFileW(wideBuf, (LPWIN32_FIND_DATAW)&file);
+        if (handle != INVALID_HANDLE_VALUE) {
+            do {
+                CFIndex nameLen = wcslen(file.cFileName);
+                if (file.cFileName[0] == '.' && (nameLen == 1 || (nameLen == 2  && file.cFileName[1] == '.'))) {
+                    continue;
+                }
+                
+                CFStringRef fileName = CFStringCreateWithBytes(kCFAllocatorSystemDefault, (const uint8_t *)file.cFileName, nameLen * sizeof(wchar_t), kCFStringEncodingUTF16, NO);
+                if (!fileName) {
+                    continue;
+                }
+                
+                Boolean isDirectory = file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+                Boolean result = fileHandler(fileName, isDirectory ? DT_DIR : DT_REG);
+                CFRelease(fileName);
+                if (!result) break;
+            } while (FindNextFileW(handle, &file));
+            
+            FindClose(handle);
+        }
+        free(wideBuf);
+    }
+#else
+    DIR *dirp;
+    struct dirent *dent;
+    if ((dirp = opendir(directoryPathBuf))) {
+        while ((dent = readdir(dirp))) {
+#if DEPLOYMENT_TARGET_LINUX
+            CFIndex nameLen = strlen(dent->d_name);
+#else
+            CFIndex nameLen = dent->d_namlen;
+#endif
+            if (0 == nameLen || 0 == dent->d_fileno || ('.' == dent->d_name[0] && (1 == nameLen || (2 == nameLen && '.' == dent->d_name[1]) || '_' == dent->d_name[1]))) {
+                continue;
+            }
+            
+            CFStringRef fileName = CFStringCreateWithFileSystemRepresentation(kCFAllocatorSystemDefault, dent->d_name);
+            if (!fileName) {
+                continue;
+            }
+
+            Boolean result = fileHandler(fileName, dent->d_type);
+            CFRelease(fileName);
+            if (!result) break;
+        }
+        (void)closedir(dirp);
+    }
+#endif
+}
 

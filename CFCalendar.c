@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFCalendar.c
-	Copyright (c) 2004-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -83,7 +83,7 @@ static const CFRuntimeClass __CFCalendarClass = {
     __CFCalendarCopyDescription
 };
 
-__private_extern__ void __CFCalendarInitialize(void) {
+CF_PRIVATE void __CFCalendarInitialize(void) {
     __kCFCalendarTypeID = _CFRuntimeRegisterClass(&__CFCalendarClass);
 }
 
@@ -92,7 +92,7 @@ CFTypeID CFCalendarGetTypeID(void) {
     return __kCFCalendarTypeID;
 }
 
-__private_extern__ UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID, CFStringRef localeID, CFTimeZoneRef tz) {
+CF_PRIVATE UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID, CFStringRef localeID, CFTimeZoneRef tz) {
     if (calendarID) {
 	CFDictionaryRef components = CFLocaleCreateComponentsFromLocaleIdentifier(kCFAllocatorSystemDefault, localeID);
 	CFMutableDictionaryRef mcomponents = CFDictionaryCreateMutableCopy(kCFAllocatorSystemDefault, 0, components);

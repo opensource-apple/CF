@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFXMLPreferencesDomain.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -62,7 +62,7 @@ static void getXMLKeysAndValues(CFAllocatorRef alloc, CFTypeRef context, void *x
 static CFDictionaryRef copyXMLDomainDictionary(CFTypeRef context, void *domain);
 static void setXMLDomainIsWorldReadable(CFTypeRef context, void *domain, Boolean isWorldReadable);
 
-__private_extern__ const _CFPreferencesDomainCallBacks __kCFXMLPropertyListDomainCallBacks = {createXMLDomain, freeXMLDomain, fetchXMLValue, writeXMLValue, synchronizeXMLDomain, getXMLKeysAndValues, copyXMLDomainDictionary, setXMLDomainIsWorldReadable};
+CF_PRIVATE const _CFPreferencesDomainCallBacks __kCFXMLPropertyListDomainCallBacks = {createXMLDomain, freeXMLDomain, fetchXMLValue, writeXMLValue, synchronizeXMLDomain, getXMLKeysAndValues, copyXMLDomainDictionary, setXMLDomainIsWorldReadable};
 
 // Directly ripped from Foundation....
 static void __CFMilliSleep(uint32_t msecs) {

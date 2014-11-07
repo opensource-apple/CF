@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -26,7 +26,7 @@
  *  CoreFoundation
  *
  *  Created by aki on Wed Oct 03 2001.
- *  Copyright (c) 2001-2012, Apple Inc. All rights reserved.
+ *  Copyright (c) 2001-2013, Apple Inc. All rights reserved.
  *
  */
 

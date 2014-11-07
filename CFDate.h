@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFDate.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFDATE__)
@@ -67,6 +67,17 @@ CF_IMPLICIT_BRIDGING_DISABLED
 
 typedef const struct __CFTimeZone * CFTimeZoneRef;
 
+
+#if !defined(CF_CALENDAR_ENUM_DEPRECATED)
+#if NS_ENABLE_CALENDAR_DEPRECATIONS
+#define CF_CALENDAR_ENUM_DEPRECATED(A, B, C, D, ...) CF_ENUM_DEPRECATED(A, B, C, D, __VA_ARGS__)
+#define CF_CALENDAR_DEPRECATED(A, B, C, D, ...) CF_DEPRECATED(A, B, C, D, __VA_ARGS__)
+#else
+#define CF_CALENDAR_ENUM_DEPRECATED(A, B, C, D, ...) CF_ENUM_AVAILABLE(A, C)
+#define CF_CALENDAR_DEPRECATED(A, B, C, D, ...) CF_AVAILABLE(A, C)
+#endif
+#endif
+
 typedef struct {
     SInt32 year;
     SInt8 month;
@@ -74,7 +85,7 @@ typedef struct {
     SInt8 hour;
     SInt8 minute;
     double second;
-} CFGregorianDate;
+} CFGregorianDate CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 typedef struct {
     SInt32 years;
@@ -83,41 +94,41 @@ typedef struct {
     SInt32 hours;
     SInt32 minutes;
     double seconds;
-} CFGregorianUnits;
+} CFGregorianUnits CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 typedef CF_OPTIONS(CFOptionFlags, CFGregorianUnitFlags) {
-    kCFGregorianUnitsYears = (1UL << 0),
-    kCFGregorianUnitsMonths = (1UL << 1),
-    kCFGregorianUnitsDays = (1UL << 2),
-    kCFGregorianUnitsHours = (1UL << 3),
-    kCFGregorianUnitsMinutes = (1UL << 4),
-    kCFGregorianUnitsSeconds = (1UL << 5),
-    kCFGregorianAllUnits = 0x00FFFFFF
+    kCFGregorianUnitsYears CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 0),
+    kCFGregorianUnitsMonths CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 1),
+    kCFGregorianUnitsDays CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 2),
+    kCFGregorianUnitsHours CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 3),
+    kCFGregorianUnitsMinutes CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 4),
+    kCFGregorianUnitsSeconds CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = (1UL << 5),
+    kCFGregorianAllUnits CF_CALENDAR_ENUM_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead") = 0x00FFFFFF
 };
 
 CF_EXPORT
-Boolean CFGregorianDateIsValid(CFGregorianDate gdate, CFOptionFlags unitFlags);
+Boolean CFGregorianDateIsValid(CFGregorianDate gdate, CFOptionFlags unitFlags) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-CFAbsoluteTime CFGregorianDateGetAbsoluteTime(CFGregorianDate gdate, CFTimeZoneRef tz);
+CFAbsoluteTime CFGregorianDateGetAbsoluteTime(CFGregorianDate gdate, CFTimeZoneRef tz) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-CFGregorianDate CFAbsoluteTimeGetGregorianDate(CFAbsoluteTime at, CFTimeZoneRef tz);
+CFGregorianDate CFAbsoluteTimeGetGregorianDate(CFAbsoluteTime at, CFTimeZoneRef tz) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-CFAbsoluteTime CFAbsoluteTimeAddGregorianUnits(CFAbsoluteTime at, CFTimeZoneRef tz, CFGregorianUnits units);
+CFAbsoluteTime CFAbsoluteTimeAddGregorianUnits(CFAbsoluteTime at, CFTimeZoneRef tz, CFGregorianUnits units) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-CFGregorianUnits CFAbsoluteTimeGetDifferenceAsGregorianUnits(CFAbsoluteTime at1, CFAbsoluteTime at2, CFTimeZoneRef tz, CFOptionFlags unitFlags);
+CFGregorianUnits CFAbsoluteTimeGetDifferenceAsGregorianUnits(CFAbsoluteTime at1, CFAbsoluteTime at2, CFTimeZoneRef tz, CFOptionFlags unitFlags) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-SInt32 CFAbsoluteTimeGetDayOfWeek(CFAbsoluteTime at, CFTimeZoneRef tz);
+SInt32 CFAbsoluteTimeGetDayOfWeek(CFAbsoluteTime at, CFTimeZoneRef tz) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-SInt32 CFAbsoluteTimeGetDayOfYear(CFAbsoluteTime at, CFTimeZoneRef tz);
+SInt32 CFAbsoluteTimeGetDayOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXPORT
-SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz);
+SInt32 CFAbsoluteTimeGetWeekOfYear(CFAbsoluteTime at, CFTimeZoneRef tz) CF_CALENDAR_DEPRECATED(10_4, 10_9, 2_0, 7_0, "Use CFCalendar or NSCalendar API instead");
 
 CF_EXTERN_C_END
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringScanner.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -63,7 +63,7 @@ CF_INLINE UniChar __CFStringGetFirstNonSpaceCharacterFromInlineBuffer(CFStringIn
 
 /* result is int64_t or int, depending on doLonglong
 */
-__private_extern__ Boolean __CFStringScanInteger(CFStringInlineBuffer *buf, CFTypeRef locale, SInt32 *indexPtr, Boolean doLonglong, void *result) {
+CF_PRIVATE Boolean __CFStringScanInteger(CFStringInlineBuffer *buf, CFTypeRef locale, SInt32 *indexPtr, Boolean doLonglong, void *result) {
     Boolean doingLonglong = false;	/* Set to true if doLonglong, and we overflow an int... */
     Boolean neg = false;
     int intResult = 0;
@@ -121,7 +121,7 @@ __private_extern__ Boolean __CFStringScanInteger(CFStringInlineBuffer *buf, CFTy
     return true;
 }
 
-__private_extern__ Boolean __CFStringScanHex(CFStringInlineBuffer *buf, SInt32 *indexPtr, unsigned *result) {
+CF_PRIVATE Boolean __CFStringScanHex(CFStringInlineBuffer *buf, SInt32 *indexPtr, unsigned *result) {
     UInt32 value = 0;
     SInt32 curDigit;
     UniChar ch;
@@ -175,7 +175,7 @@ static const unsigned char __CFNumberSet[16] = {
     0X00, // 0, 0, 0, 0, 0, 0, 0, 0  //  x   y   z   {   |   }   ~  del
 };
 
-__private_extern__ Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFTypeRef locale, SInt32 *indexPtr, double *resultPtr) {
+CF_PRIVATE Boolean __CFStringScanDouble(CFStringInlineBuffer *buf, CFTypeRef locale, SInt32 *indexPtr, double *resultPtr) {
     #define STACK_BUFFER_SIZE 256
     #define ALLOC_CHUNK_SIZE 256 // first and subsequent malloc size.  Should be greater than STACK_BUFFER_SIZE
     char localCharBuffer[STACK_BUFFER_SIZE];

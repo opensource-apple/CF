@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBurstTrie.h
-        Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+        Copyright (c) 2008-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBURSTTRIE__)
@@ -193,8 +193,6 @@ void CFBurstTrieTraverseFromCursor(CFBurstTrieCursorRef cursor, void *ctx, CFBur
 
 CF_EXPORT
 void CFBurstTrieCursorRelease(CFBurstTrieCursorRef cursor) CF_AVAILABLE(10_8, 6_0);
-
-__private_extern__ const CFDictionaryValueCallBacks kCFBurstTrieValueCallbacks;
 
 CF_EXTERN_C_END
 

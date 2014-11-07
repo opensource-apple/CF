@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -64,8 +64,8 @@ struct _CFStreamCallBacksV1 {
 };
 
 // These two are defined in CFSocketStream.c because that's where the glue for CFNetwork is.
-__private_extern__ CFErrorRef _CFErrorFromStreamError(CFAllocatorRef alloc, CFStreamError *err);
-__private_extern__ CFStreamError _CFStreamErrorFromError(CFErrorRef error);
+CF_PRIVATE CFErrorRef _CFErrorFromStreamError(CFAllocatorRef alloc, CFStreamError *err);
+CF_PRIVATE CFStreamError _CFStreamErrorFromError(CFErrorRef error);
 
 CF_EXTERN_C_END
 

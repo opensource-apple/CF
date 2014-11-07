@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFError.c
-	Copyright (c) 2006-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2006-2013, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -160,7 +160,7 @@ static const CFRuntimeClass __CFErrorClass = {
     __CFErrorCopyDescription
 };
 
-__private_extern__ void __CFErrorInitialize(void) {
+CF_PRIVATE void __CFErrorInitialize(void) {
     __kCFErrorTypeID = _CFRuntimeRegisterClass(&__CFErrorClass);
 }
 
@@ -312,7 +312,7 @@ CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err) {
     CFStringRef debugDesc = _CFErrorCopyUserInfoKey(err, kCFErrorDebugDescriptionKey);
     CFDictionaryRef userInfo = _CFErrorGetUserInfo(err);
     CFMutableStringRef result = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
-    CFStringAppendFormat(result, NULL, CFSTR("Error Domain=%@ Code=%d"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
+    CFStringAppendFormat(result, NULL, CFSTR("Error Domain=%@ Code=%ld"), CFErrorGetDomain(err), (long)CFErrorGetCode(err));
     CFStringAppendFormat(result, NULL, CFSTR(" \"%@\""), desc);
     if (debugDesc && CFStringGetLength(debugDesc) > 0) CFStringAppendFormat(result, NULL, CFSTR(" (%@)"), debugDesc);
     if (userInfo && CFDictionaryGetCount(userInfo)) {

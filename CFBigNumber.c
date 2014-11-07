@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBigNumber.c
-	Copyright (c) 2012-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2012-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 	Original author: Zhi Feng Huang
 */
@@ -35,7 +35,14 @@
 #include "CFInternal.h"
 
 
+typedef struct {
+    int64_t high;
+    uint64_t low;
+} CFSInt128Struct;
+
 #define kCFNumberSInt128Type 17
+
+CF_EXPORT CFNumberType _CFNumberGetType2(CFNumberRef number);
 
 #if __LP64__
 
@@ -286,11 +293,13 @@ __uint128_t _CFBigNumGetUInt128(const _CFBigNum *num) {
 
 
 void _CFBigNumInitWithCFNumber(_CFBigNum *r, CFNumberRef inNum) {
-    uint8_t bytes[128];
+    uint8_t bytes[128 + 16];
     memset(bytes, 0, sizeof(bytes));
-    CFNumberType type = CFNumberGetType(inNum);
-    CFNumberGetValue(inNum, type, (void *)bytes);
-    _CFBigNumInitWithBytes(r, (const void *)bytes, type);
+    // round bytes up to next multiple of 16; compiler attributes won't always guarantee big alignment
+    void *bytesa = (uint8_t *)(((uintptr_t)bytes / 16) * 16 + 16);
+    CFNumberType type = _CFNumberGetType2(inNum);
+    CFNumberGetValue(inNum, type, bytesa);
+    _CFBigNumInitWithBytes(r, bytesa, type);
 }
 
 void _CFBigNumInitWithBytes(_CFBigNum *r, const void *bytes, CFNumberType type) {
@@ -341,9 +350,13 @@ void _CFBigNumInitWithBytes(_CFBigNum *r, const void *bytes, CFNumberType type) 
         }
         return;
 #if __LP64__
-    case kCFNumberSInt128Type:
-        _CFBigNumInitWithInt128(r, *(__int128_t *)bytes);
+    case kCFNumberSInt128Type: {
+        CFSInt128Struct s;
+        memmove(&s, bytes, sizeof(CFSInt128Struct)); // the hard way because bytes might not be aligned
+        __int128_t val = (__int128_t)s.low + ((__int128_t)s.high << 64);
+        _CFBigNumInitWithInt128(r, val);
         return;
+    }
 #endif
     default:
         return;

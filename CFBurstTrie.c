@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*  CFBurstTrie.c
-    Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+    Copyright (c) 2008-2013, Apple Inc. All rights reserved.
     Responsibility: Jennifer Moore
 */
 
@@ -36,7 +36,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <limits.h>
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #include <unistd.h>
 #include <sys/param.h>
 #include <sys/mman.h>
@@ -282,7 +282,7 @@ typedef struct _TraverseContext {
     void (*callback)(void*, const UInt8*, uint32_t, uint32_t);
 } TraverseContext;
 
-bool foundKey(void *context, const uint8_t *key, uint32_t payload, bool exact)
+static bool foundKey(void *context, const uint8_t *key, uint32_t payload, bool exact)
 {
     if (context != NULL) {
         TraverseContext *ctx = (TraverseContext *)context;
@@ -317,8 +317,8 @@ static void finalizeCFBurstTrieList(ListNodeRef node);
 static int nodeWeightCompare(const void *a, const void *b);
 static int nodeStringCompare(const void *a, const void *b);
 
-bool foundKey(void *context, const uint8_t *key, uint32_t payload, bool exact);
-bool containsKey(void *context, const uint8_t *key, uint32_t payload, bool exact);
+static bool foundKey(void *context, const uint8_t *key, uint32_t payload, bool exact);
+static bool containsKey(void *context, const uint8_t *key, uint32_t payload, bool exact);
 
 static CFIndex burstTrieConvertCharactersToUTF8(UniChar *chars, CFIndex numChars, UInt8 *buffer);
 
@@ -329,27 +329,6 @@ static Boolean areMapCursorsEqual(const CompactMapCursor *lhs, const CompactMapC
 static void traverseFromMapCursor(CFBurstTrieRef trie, CompactMapCursor *cursor, UInt8* bytes, uint32_t capacity, uint32_t length, Boolean *stop, void *ctx, CFBurstTrieTraversalCallback callback);
 static Boolean getMapCursorPayloadFromPackedPageEntry(PageEntryPacked *entry, const CompactMapCursor *cursor, uint32_t *payload);
 static Boolean getMapCursorPayloadFromPageEntry(PageEntry *entry, const CompactMapCursor *cursor, uint32_t *payload);
-
-#if 0
-#pragma mark -
-#pragma mark Core Foundation boilerplate
-#endif
-
-static const void *_CFBurstTrieRetainCallback(CFAllocatorRef allocator, const void *value) {
-    CFBurstTrieRetain((CFBurstTrieRef)value);
-    return value;
-}
-
-static void _CFBurstTrieReleaseCallback(CFAllocatorRef allocator, const void *value) {
-    CFBurstTrieRelease((CFBurstTrieRef)value);
-}
-
-const CFDictionaryValueCallBacks kCFBurstTrieValueCallbacks = {0, _CFBurstTrieRetainCallback, _CFBurstTrieReleaseCallback, NULL, NULL};
-
-#if 0
-#pragma mark -
-#pragma mark Public Interface
-#endif
 
 CFBurstTrieRef CFBurstTrieCreateWithOptions(CFDictionaryRef options) {
     CFBurstTrieRef trie = NULL;
@@ -1891,7 +1870,7 @@ static void serializeCFBurstTrieList(CFBurstTrieRef trie, ListNodeRef listNode, 
     }
     
     char _buffer[MAX_BUFFER_SIZE];
-    char bufferSize = (sizeof(Page) + size * (sizeof(PageEntryPacked) + MAX_STRING_SIZE));
+    size_t bufferSize = (sizeof(Page) + size * (sizeof(PageEntryPacked) + MAX_STRING_SIZE));
     char *buffer = bufferSize < MAX_BUFFER_SIZE ? _buffer : (char *) malloc(bufferSize);
     
     Page *page = (Page *)buffer;
@@ -2058,7 +2037,7 @@ static int nodeStringCompare(const void *a, const void *b) {
     return result;
 }
 
-bool containsKey(void *context, const uint8_t *key, uint32_t payload, bool exact)
+static bool containsKey(void *context, const uint8_t *key, uint32_t payload, bool exact)
 {
     uint32_t *ctx = (uint32_t *)context;
     if (exact) *ctx = payload;

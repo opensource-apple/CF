@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFURL.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURL__)
@@ -38,7 +38,7 @@ CF_EXTERN_C_BEGIN
 
 typedef CF_ENUM(CFIndex, CFURLPathStyle) {
     kCFURLPOSIXPathStyle = 0,
-    kCFURLHFSPathStyle, /* The use of kCFURLHFSPathStyle is deprecated. The Carbon File Manager, which uses HFS style paths, is deprecated. HFS style paths are unreliable because they can arbitrarily refer to multiple volumes if those volumes have identical volume names. You should instead use kCFURLPOSIXPathStyle wherever possible. */
+    kCFURLHFSPathStyle CF_ENUM_DEPRECATED(10_0, 10_9, 2_0, 7_0), /* The use of kCFURLHFSPathStyle is deprecated. The Carbon File Manager, which uses HFS style paths, is deprecated. HFS style paths are unreliable because they can arbitrarily refer to multiple volumes if those volumes have identical volume names. You should instead use kCFURLPOSIXPathStyle wherever possible. */
     kCFURLWindowsPathStyle
 };
     
@@ -63,6 +63,11 @@ CFTypeID CFURLGetTypeID(void);
 
 /* encoding will be used both to interpret the bytes of URLBytes, and to */
 /* interpret any percent-escapes within the bytes. */
+/* Using a string encoding which isn't a superset of ASCII encoding is not */
+/* supported because CFURLGetBytes and CFURLGetByteRangeForComponent require */
+/* 7-bit ASCII characters to be stored in a single 8-bit byte. */
+/* CFStringEncodings which are a superset of ASCII encoding include MacRoman, */
+/* WindowsLatin1, ISOLatin1, NextStepLatin, ASCII, and UTF8. */
 CF_EXPORT
 CFURLRef CFURLCreateWithBytes(CFAllocatorRef allocator, const UInt8 *URLBytes, CFIndex length, CFStringEncoding encoding, CFURLRef baseURL);
 
@@ -87,7 +92,12 @@ CFURLRef CFURLCreateWithString(CFAllocatorRef allocator, CFStringRef URLString, 
 /* in relative portion, leading "../" components are removed from the */
 /* final URL's path, and if the relative portion contains only */
 /* resource specifier pieces (query, parameters, and fragment), then */
-/* the last path component of the base URL will not be deleted  */
+/* the last path component of the base URL will not be deleted.  */
+/* Using a string encoding which isn't a superset of ASCII encoding is not */
+/* supported because CFURLGetBytes and CFURLGetByteRangeForComponent require */
+/* 7-bit ASCII characters to be stored in a single 8-bit byte. */
+/* CFStringEncodings which are a superset of ASCII encoding include MacRoman, */
+/* WindowsLatin1, ISOLatin1, NextStepLatin, ASCII, and UTF8. */
 CF_EXPORT
 CFURLRef CFURLCreateAbsoluteURLWithBytes(CFAllocatorRef alloc, const UInt8 *relativeURLBytes, CFIndex length, CFStringEncoding encoding, CFURLRef baseURL, Boolean useCompatibilityMode);
 
@@ -411,6 +421,18 @@ CFStringRef CFURLCreateStringByAddingPercentEscapes(CFAllocatorRef allocator, CF
 
 #if (TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || CF_BUILDING_CF || NSBUILDINGFOUNDATION
 CF_IMPLICIT_BRIDGING_DISABLED
+
+/*
+    CFURLIsFileReferenceURL
+
+    Returns whether the URL is a file reference URL.
+
+    Parameters
+        url
+            The URL specifying the resource.
+ */
+CF_EXPORT
+Boolean CFURLIsFileReferenceURL(CFURLRef url) CF_AVAILABLE(10_9, 7_0);
 
 /*
     CFURLCreateFileReferenceURL
@@ -798,6 +820,10 @@ const CFStringRef kCFURLIsExcludedFromBackupKey CF_AVAILABLE(10_8, 5_1);
     /* true if resource should be excluded from backups, false otherwise (Read-write, value type CFBoolean). This property is only useful for excluding cache and other application support files which are not needed in a backup. Some operations commonly made to user documents will cause this property to be reset to false and so this property should not be used on user documents. */
 
 CF_EXPORT
+const CFStringRef kCFURLTagNamesKey CF_AVAILABLE(10_9, NA);
+    /* The array of Tag names (Read-write, value type CFArray of CFString) */
+    
+CF_EXPORT
 const CFStringRef kCFURLPathKey CF_AVAILABLE(10_8, 6_0);
     /* the URL's path as a file system path (Read-only, value type CFString) */
 
@@ -989,8 +1015,8 @@ const CFStringRef kCFURLUbiquitousItemHasUnresolvedConflictsKey CF_AVAILABLE(10_
     /* true if this item has conflicts outstanding. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
-const CFStringRef kCFURLUbiquitousItemIsDownloadedKey CF_AVAILABLE(10_7, 5_0);
-    /* true if there is local data present for this item. (Read-only, value type CFBoolean) */
+const CFStringRef kCFURLUbiquitousItemIsDownloadedKey CF_DEPRECATED(10_7, 10_9, 5_0, 7_0, "Use kCFURLUbiquitousItemDownloadingStatusKey instead");
+    /* Equivalent to NSURLUbiquitousItemDownloadingStatusKey == NSURLUbiquitousItemDownloadingStatusCurrent. Has never behaved as documented in earlier releases, hence deprecated. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
 const CFStringRef kCFURLUbiquitousItemIsDownloadingKey CF_AVAILABLE(10_7, 5_0);
@@ -1005,15 +1031,42 @@ const CFStringRef kCFURLUbiquitousItemIsUploadingKey CF_AVAILABLE(10_7, 5_0);
     /* true if data is being uploaded for this item. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
-const CFStringRef kCFURLUbiquitousItemPercentDownloadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0);
+const CFStringRef kCFURLUbiquitousItemPercentDownloadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0, "Use NSMetadataQuery and NSMetadataUbiquitousItemPercentDownloadedKey on NSMetadataItem instead");
     /* Use NSMetadataQuery and NSMetadataUbiquitousItemPercentDownloadedKey on NSMetadataItem instead */
 
 CF_EXPORT
-const CFStringRef kCFURLUbiquitousItemPercentUploadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0);
+const CFStringRef kCFURLUbiquitousItemPercentUploadedKey CF_DEPRECATED(10_7, 10_8, 5_0, 6_0, "Use NSMetadataQuery and NSMetadataUbiquitousItemPercentUploadedKey on NSMetadataItem instead");
     /* Use NSMetadataQuery and NSMetadataUbiquitousItemPercentUploadedKey on NSMetadataItem instead */
 
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemDownloadingStatusKey CF_AVAILABLE(10_9, 7_0);
+    /* Returns the download status of this item. (Read-only, value type CFString). Possible values below. */
+
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemDownloadingErrorKey CF_AVAILABLE(10_9, 7_0);
+    /* returns the error when downloading the item from iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. */
+
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemUploadingErrorKey CF_AVAILABLE(10_9, 7_0);
+    /* returns the error when uploading the item to iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. */
+
+/* The values returned for kCFURLUbiquitousItemDownloadingStatusKey
+ */
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemDownloadingStatusNotDownloaded CF_AVAILABLE(10_9, 7_0);
+    /* this item has not been downloaded yet. Use NSFileManager's startDownloadingUbiquitousItemAtURL:error: to download it */
+
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemDownloadingStatusDownloaded CF_AVAILABLE(10_9, 7_0);
+    /* there is a local version of this item available. The most current version will get downloaded as soon as possible. */
+
+CF_EXPORT
+const CFStringRef kCFURLUbiquitousItemDownloadingStatusCurrent CF_AVAILABLE(10_9, 7_0);
+    /* there is a local version of this item and it is the most up-to-date version known to this device. */
+
+
 typedef CF_OPTIONS(CFOptionFlags, CFURLBookmarkCreationOptions) {
-    kCFURLBookmarkCreationPreferFileIDResolutionMask = ( 1UL << 8 ),  // At resolution time, this alias will prefer resolving by the embedded fileID to the path
+    kCFURLBookmarkCreationPreferFileIDResolutionMask CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0, "kCFURLBookmarkCreationPreferFileIDResolutionMask does nothing and has no effect on bookmark resolution" ) = ( 1UL << 8 ),  // This option does nothing and has no effect on bookmark resolution
     kCFURLBookmarkCreationMinimalBookmarkMask = ( 1UL << 9 ), // Creates a bookmark with "less" information, which may be smaller but still be able to resolve in certain ways
     kCFURLBookmarkCreationSuitableForBookmarkFile = ( 1UL << 10 ), // includes in the created bookmark those properties which are needed for a bookmark/alias file
     kCFURLBookmarkCreationWithSecurityScope CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
@@ -1075,8 +1128,8 @@ CF_EXPORT
 CFURLRef CFURLCreateByResolvingBookmarkData ( CFAllocatorRef allocator, CFDataRef bookmark, CFURLBookmarkResolutionOptions options, CFURLRef relativeToURL, CFArrayRef resourcePropertiesToInclude, Boolean* isStale, CFErrorRef* error ) CF_AVAILABLE(10_6, 4_0);
 
 /*	@function	CFURLCreatePropertiesForKeysFromBookmarkData
-	@discussion	Given a bookmark, return a dictionary of properties ( all properties if propertiesToReturn == NULL ).
-				This returns only the properties stored within the bookmark and will not attempt to resolve the bookmark or do i/o.
+	@discussion	Given a bookmark, return a dictionary of properties .
+			This returns only the properties stored within the bookmark and will not attempt to resolve the bookmark or do i/o.
 	@param	allocator	 the CFAllocator to use to create this object
 	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
 	@param	propertiesToReturn a CFArrayRef of the properties of the bookmark data which the client would like returned.

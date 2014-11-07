@@ -15,18 +15,10 @@
 	<key>CFBundlePackageType</key>
 	<string>FMWK</string>
 	<key>CFBundleShortVersionString</key>
-	<string>6.8</string>
+	<string>6.9</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-        <key>CarbonLazyValues</key>
-        <dict>
-               <key>CodeFragmentManager</key>
-               <dict>
-                       <key>CoreFoundation</key>
-                       <string>CFMPriv_CoreFoundation</string>
-               </dict>
-        </dict>
 </dict>
 </plist>

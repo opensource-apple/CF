@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFXMLNode.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -139,7 +139,7 @@ static CFHashCode __CFXMLNodeHash(CFTypeRef  cf) {
 
 static CFStringRef __CFXMLNodeCopyDescription(CFTypeRef  cf) {
     struct __CFXMLNode *node = (struct __CFXMLNode *)cf;
-    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFXMLNode %p>{typeID = %d, string = %@}"), cf, node->dataTypeID, node->dataString);
+    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("CFXMLNode %p>{typeID = %ld, string = %@}"), cf, (unsigned long)node->dataTypeID, node->dataString);
 }
 
 static void __CFXMLNodeDeallocate(CFTypeRef  cf) {

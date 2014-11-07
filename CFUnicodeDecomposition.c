@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*    CFUnicodeDecomposition.c
-    Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+    Copyright (c) 1999-2013, Apple Inc. All rights reserved.
     Responsibility: Aki Inoue
 */
 
@@ -357,7 +357,7 @@ CF_INLINE void __CFUniCharMoveBufferFromEnd1(UTF32Char *convertedChars, CFIndex 
     while (convertedChars > limit) *(--dstP) = *(--convertedChars);
 }
 
-__private_extern__ CFIndex CFUniCharCompatibilityDecompose(UTF32Char *convertedChars, CFIndex length, CFIndex maxBufferLength) {
+CF_PRIVATE CFIndex CFUniCharCompatibilityDecompose(UTF32Char *convertedChars, CFIndex length, CFIndex maxBufferLength) {
     UTF32Char currentChar;
     UTF32Char buffer[MAX_COMP_DECOMP_LEN];
     const UTF32Char *bufferP;

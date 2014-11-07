@@ -21,28 +21,25 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-/*	CFUniCharPriv.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+/*	CFUtilities.h
+	Copyright (c) 2005-2013, Apple Inc. All rights reserved.
 */
 
-#if !defined(__COREFOUNDATION_CFUNICHARPRIV__)
-#define __COREFOUNDATION_CFUNICHARPRIV__ 1
+#if !defined(__COREFOUNDATION_CFUTILITIES__)
+#define __COREFOUNDATION_CFUTILITIES__ 1
 
 #include <CoreFoundation/CFBase.h>
-#include <CoreFoundation/CFUniChar.h>
+#include <CoreFoundation/CFString.h>
+#include <CoreFoundation/CFURL.h>
 
-#define kCFUniCharRecursiveDecompositionFlag	(1UL << 30)
-#define kCFUniCharNonBmpFlag			(1UL << 31)
-#define CFUniCharConvertCountToFlag(count)	((count & 0x1F) << 24)
-#define CFUniCharConvertFlagToCount(flag)	((flag >> 24) & 0x1F)
+CF_IMPLICIT_BRIDGING_ENABLED
+CF_EXTERN_C_BEGIN
 
-enum {
-    kCFUniCharCanonicalDecompMapping = (kCFUniCharCaseFold + 1),
-    kCFUniCharCanonicalPrecompMapping,
-    kCFUniCharCompatibilityDecompMapping
-};
+CF_EXPORT
+CFURLRef CFCopyHomeDirectoryURL(void) CF_AVAILABLE_IOS(5_0);
 
-CF_EXPORT const void *CFUniCharGetMappingData(uint32_t type);
+CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
-#endif /* ! __COREFOUNDATION_CFUNICHARPRIV__ */
+#endif /* ! __COREFOUNDATION_CFUTILITIES__ */
 

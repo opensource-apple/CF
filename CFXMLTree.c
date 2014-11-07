@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFXMLTree.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -55,7 +55,7 @@ CFXMLNodeRef CFXMLTreeGetNode(CFXMLTreeRef xmlNode) {
 }
 
 // We will probably ultimately want to export this under some public API name
-__private_extern__ Boolean CFXMLTreeEqual(CFXMLTreeRef xmlTree1, CFXMLTreeRef xmlTree2) {
+CF_PRIVATE Boolean CFXMLTreeEqual(CFXMLTreeRef xmlTree1, CFXMLTreeRef xmlTree2) {
     CFXMLNodeRef node1, node2;
     CFXMLTreeRef child1, child2;
     if (CFTreeGetChildCount(xmlTree1) != CFTreeGetChildCount(xmlTree2)) return false;
@@ -101,7 +101,7 @@ static void _CFAppendXML(CFMutableStringRef str, CFXMLTreeRef tree) {
     _CFAppendXMLEpilog(str, tree);
 }
 
-__private_extern__ void appendQuotedString(CFMutableStringRef str, CFStringRef strToQuote) {
+CF_PRIVATE void appendQuotedString(CFMutableStringRef str, CFStringRef strToQuote) {
     char quoteChar = CFStringFindWithOptions(strToQuote, CFSTR("\""), CFRangeMake(0, CFStringGetLength(strToQuote)), 0, NULL) ? '\'' : '\"';
     CFStringAppendFormat(str, NULL, CFSTR("%c%@%c"), quoteChar, strToQuote, quoteChar);
 }
@@ -158,7 +158,7 @@ static void _CFAppendXMLProlog(CFMutableStringRef str, const CFXMLTreeRef tree) 
             if (data->dataString) {
                 CFStringAppendFormat(str, NULL, CFSTR("<?%@ %@?>"), CFXMLNodeGetString(CFXMLTreeGetNode(tree)), data->dataString);
             } else {
-                CFStringAppendFormat(str, NULL, CFSTR("<?%@?>"));
+                CFStringAppendFormat(str, NULL, CFSTR("<?%@?>"), CFXMLNodeGetString(CFXMLTreeGetNode(tree)));
             }
             break;
         }

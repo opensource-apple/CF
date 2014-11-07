@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFURLPriv.h
-	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2013, Apple Inc. All rights reserved.
  */
 
 #if !defined(__COREFOUNDATION_CFURLPRIV__)
@@ -70,17 +70,10 @@ enum {
 
 
 /*
-    Error user dictionary keys
-*/
-CF_EXPORT
-const CFStringRef kCFURLKeyArrayErrorKey CF_AVAILABLE(10_6, 4_0);
-
-
-/*
     Private File System Property Keys
 */
-CF_EXPORT const CFStringRef _kCFURLPathKey CF_AVAILABLE(10_6, 4_0);
-    /* File system path (CFString) */
+CF_EXPORT const CFStringRef _kCFURLPathKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLPathKey or NSURLPathKey public property keys */
 
 CF_EXPORT const CFStringRef _kCFURLVolumeIDKey CF_AVAILABLE(10_6, 4_0);
     /* Volume ID (CFNumber) */
@@ -95,10 +88,10 @@ CF_EXPORT const CFStringRef _kCFURLParentDirectoryIDKey CF_AVAILABLE(10_6, 4_0);
     /* 64-bit file ID (for tracking a parent directory by ID. This may or may not be the inode number) (CFNumber) */
 
 CF_EXPORT const CFStringRef _kCFURLDistinctLocalizedNameKey CF_AVAILABLE(10_6, 4_0);
-    /* The localized name, if it is disnct from the real name. Otherwise, NULL (CFString) */
+    /* The localized name, if it is distinct from the real name. Otherwise, NULL (CFString) */
 
 CF_EXPORT const CFStringRef _kCFURLNameExtensionKey CF_AVAILABLE(10_6, 4_0);
-    /* The name extenison (CFString) */
+    /* The name extension (CFString) */
 
 CF_EXPORT const CFStringRef _kCFURLFinderInfoKey CF_AVAILABLE(10_6, 4_0);
     /* A 16-byte Finder Info structure immediately followed by a 16-byte Extended Finder Info structure (CFData) */
@@ -112,23 +105,23 @@ CF_EXPORT const CFStringRef _kCFURLIsApplicationKey CF_AVAILABLE(10_6, 4_0);
 CF_EXPORT const CFStringRef _kCFURLCanSetHiddenExtensionKey CF_AVAILABLE(10_6, 4_0);
     /* True if the filename extension can be hidden or unhidden (CFBoolean) */
 
-CF_EXPORT const CFStringRef _kCFURLIsReadableKey CF_AVAILABLE(10_6, 4_0);
-/* OBSOLETE */CF_EXPORT const CFStringRef _kCFURLUserCanReadKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
-    /* True if current user can read the resource (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLIsReadableKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLIsReadableKey or NSURLIsReadableKey public property keys */
+/* never implemented and scheduled for removal in 10.10/8.0 */CF_EXPORT const CFStringRef _kCFURLUserCanReadKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
 
-CF_EXPORT const CFStringRef _kCFURLIsWriteableKey CF_AVAILABLE(10_6, 4_0);
-/* OBSOLETE */CF_EXPORT const CFStringRef _kCFURLUserCanWriteKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
-    /* True if current user can write to the resource (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLIsWriteableKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLIsWritableKey or NSURLIsWritableKey public property keys */
+/* never implemented and scheduled for removal in 10.10/8.0 */CF_EXPORT const CFStringRef _kCFURLUserCanWriteKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
 
-CF_EXPORT const CFStringRef _kCFURLIsExecutableKey CF_AVAILABLE(10_6, 4_0);
-/* OBSOLETE */CF_EXPORT const CFStringRef _kCFURLUserCanExecuteKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
-    /* True if current user can execute a file resource or search a directory resource (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLIsExecutableKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLIsExecutableKey or NSURLIsExecutableKey public property keys */
+/* never implemented and scheduled for removal in 10.10/8.0 */CF_EXPORT const CFStringRef _kCFURLUserCanExecuteKey CF_DEPRECATED(10_0, 10_6, 2_0, 4_0);
 
 CF_EXPORT const CFStringRef _kCFURLParentDirectoryIsVolumeRootKey CF_AVAILABLE(10_6, 4_0);
     /* True if the parent directory is the root of a volume (CFBoolean) */
 
-CF_EXPORT const CFStringRef _kCFURLFileSecurityKey CF_AVAILABLE(10_6, 4_0); 
-    /* The file's security settings (FSFileSecurity, CarbonCore/Files.h) */
+CF_EXPORT const CFStringRef _kCFURLFileSecurityKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLFileSecurityKey or NSURLFileSecurityKey public property keys */
 
 CF_EXPORT const CFStringRef _kCFURLFileSizeOfResourceForkKey CF_AVAILABLE(10_6, 4_0);
     /* Size in bytes of the resource fork (CFNumber) */
@@ -154,14 +147,14 @@ CF_EXPORT const CFStringRef _kCFURLVersionKey CF_AVAILABLE(10_6, 4_0);
 CF_EXPORT const CFStringRef _kCFURLShortVersionStringKey CF_AVAILABLE(10_6, 4_0);
     /* If resource is a bundle, the bundle short version (CFBundleShortVersionString) as a string (CFString) */
 
-CF_EXPORT const CFStringRef _kCFURLOwnerIDKey CF_AVAILABLE(10_6, 4_0);
-    /* 32-bit owner ID (uid_t) (CFNumber) */
+CF_EXPORT const CFStringRef _kCFURLOwnerIDKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal later in 10.9/7.0 since it is unused - Use the kCFURLFileSecurityKey or NSURLFileSecurityKey public property keys and CFFileSecurityGetOwner() */
 
-CF_EXPORT const CFStringRef _kCFURLGroupIDKey CF_AVAILABLE(10_6, 4_0);
-    /* 32-bit group ID (gid_t) (CFNumber) */
+CF_EXPORT const CFStringRef _kCFURLGroupIDKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal later in 10.9/7.0 since it is unused - Use the kCFURLFileSecurityKey or NSURLFileSecurityKey public property keys and CFFileSecurityGetGroup() */
 
-CF_EXPORT const CFStringRef _kCFURLStatModeKey CF_AVAILABLE(10_6, 4_0);
-    /* 32-bit group ID (mode_t) (CFNumber) */
+CF_EXPORT const CFStringRef _kCFURLStatModeKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal later in 10.9/7.0 since it is unused - Use the kCFURLFileSecurityKey or NSURLFileSecurityKey public property keys and CFFileSecurityGetMode() */
 
 CF_EXPORT const CFStringRef _kCFURLLocalizedNameDictionaryKey CF_AVAILABLE(10_7, NA);
     /* For items with localized display names, the dictionary of all available localizations. The keys are the cannonical locale strings for the available localizations. (CFDictionary) */
@@ -181,43 +174,49 @@ CF_EXPORT const CFStringRef _kCFURLCanSetApplicationHighResolutionModeIsMagnifie
 CF_EXPORT const CFStringRef _kCFURLWriterBundleIdentifierKey CF_AVAILABLE(10_8, NA);
     /* The bundle identifier of the process writing to this object (Read-write, value type CFString) */
 
+CF_EXPORT const CFStringRef _kCFURLApplicationNapIsDisabledKey CF_AVAILABLE(10_9, NA);
+    /* True if app nap is disabled (Applications only, Per-user, CFBoolean) */
+
+CF_EXPORT const CFStringRef _kCFURLCanSetApplicationNapIsDisabledKey CF_AVAILABLE(10_9, NA);
+    /* True if the ApplicationNapIsDisabled property value can be changed (Applications only, Read only, CFBoolean) */
+
 /* Additional volume properties */
 
 CF_EXPORT const CFStringRef _kCFURLVolumeRefNumKey CF_AVAILABLE(10_6, 4_0);
     /* The Carbon File Manager's FSVolumeRefNum for the resource volume (CFNumber) */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeUUIDStringKey CF_AVAILABLE(10_6, 4_0);
-    /* The volume's persistent unique ID as a string, or NULL if not available (CFString) */
+CF_EXPORT const CFStringRef _kCFURLVolumeUUIDStringKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeUUIDStringKey or NSURLVolumeUUIDStringKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeCreationDateKey CF_AVAILABLE(10_6, 4_0);
-    /* Value type CFDate */
+CF_EXPORT const CFStringRef _kCFURLVolumeCreationDateKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeCreationDateKey or NSURLVolumeCreationDateKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsLocalKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume is on a locally connected device -- not a network volume (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsLocalKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsLocalKey or NSURLVolumeIsLocalKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsAutomountKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume was mounted by the automounter (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsAutomountKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsAutomountedKey or NSURLVolumeIsAutomountedKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeDontBrowseKey CF_AVAILABLE(10_6, 4_0);
-    /* Don't browse: generally, not shown to users (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeDontBrowseKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsBrowsableKey or NSURLVolumeIsBrowsableKey public property keys (Note: value is inverse of _kCFURLVolumeDontBrowseKey) */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsReadOnlyKey CF_AVAILABLE(10_6, 4_0);
-    /* Mounted read-only (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsReadOnlyKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsReadOnlyKey or NSURLVolumeIsReadOnlyKey public property keys */
 
 CF_EXPORT const CFStringRef _kCFURLVolumeIsQuarantinedKey CF_AVAILABLE(10_6, 4_0);
     /* Mounted quarantined (CFBoolean) */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsEjectableKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume is ejectable media (CD, DVD, etc) (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsEjectableKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsEjectableKey or NSURLVolumeIsEjectableKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsRemovableKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume can be disconnected (USB, FireWire) (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsRemovableKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsRemovableKey or NSURLVolumeIsRemovableKey public property keys */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsInternalKey CF_AVAILABLE(10_6, 4_0);
-    /* Device is on an internal bus/channel (Note: this has different behavior than the public VolumeIsInternal key) (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsInternalKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsInternalKey or NSURLVolumeIsInternalKey public property keys (Note: this has slightly different behavior than the public VolumeIsInternal key) */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsExternalKey CF_AVAILABLE(10_6, 4_0);
-    /* Device is on an external bus/channel (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsExternalKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeIsInternalKey or NSURLVolumeIsInternalKey public property keys (Note: this has slightly different behavior than the public VolumeIsInternal key) */
 
 CF_EXPORT const CFStringRef _kCFURLVolumeIsDiskImageKey CF_AVAILABLE(10_6, 4_0);
     /* Volume is a mounted disk image (CFBoolean) */
@@ -228,14 +227,14 @@ CF_EXPORT const CFStringRef _kCFURLDiskImageBackingURLKey CF_AVAILABLE(10_6, 4_0
 CF_EXPORT const CFStringRef _kCFURLVolumeIsFileVaultKey CF_AVAILABLE(10_6, 4_0);
     /* Volume uses File Vault encryption (CFBoolean) */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsiDiskKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume is an iDisk (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsiDiskKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - there are no more iDisks */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeiDiskUserNameKey CF_AVAILABLE(10_6, 4_0);
-    /* If volume is an iDisk, the base member name of the iDisk owner (CFString) */
+CF_EXPORT const CFStringRef _kCFURLVolumeiDiskUserNameKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - there are no more iDisks */
 
-CF_EXPORT const CFStringRef _kCFURLVolumeIsLocaliDiskMirrorKey CF_AVAILABLE(10_6, 4_0);
-    /* Volume is a local mirror of an iDisk (CFBoolean) */
+CF_EXPORT const CFStringRef _kCFURLVolumeIsLocaliDiskMirrorKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - there are no more iDisks */
 
 CF_EXPORT const CFStringRef _kCFURLVolumeIsiPodKey CF_AVAILABLE(10_6, 4_0);
     /* Volume is on an iPod (CFBoolean) */
@@ -252,25 +251,23 @@ CF_EXPORT const CFStringRef _kCFURLVolumeIsDeviceFileSystemKey CF_AVAILABLE(10_7
 CF_EXPORT const CFStringRef _kCFURLVolumeIsHFSStandardKey CF_AVAILABLE(10_6, 4_0);
     /* Volume is HFS standard (which includes AFP volumes). Directory IDs, but not file IDs, can be looked up. (CFBoolean) */
 
-/*  Keys specific to bookmarks at this time */
-CF_EXPORT const CFStringRef _kCFURLPropertyKeyFullPathString CF_AVAILABLE(10_6, 4_0);
-    /*	the full filesystem path of the item the bookmark was create against */
+CF_EXPORT const CFStringRef _kCFURLVolumeIOMediaIconFamilyNameKey CF_AVAILABLE(10_9, NA);
+    /* Volume's IOMediaIconFamilyName. (CFStringRef) */
 
-CF_EXPORT const CFStringRef _kCFURLURLString CF_AVAILABLE(10_6, 4_0);
-    /*	the url string ( possibly relative to a base url ) of the url this bookmark was created against. */
+CF_EXPORT const CFStringRef _kCFURLVolumeIOMediaIconBundleIdentifierKey CF_AVAILABLE(10_9, NA);
+    /* Volume's IOMediaIconBundleIdentifier. (CFStringRef) */
 
-CF_EXPORT const CFStringRef _kCFURLFileIDData CF_AVAILABLE(10_6, 4_0);			    
-    /*	the url string ( possibly relative to a base url ) of the url this bookmark was created against. */
+CF_EXPORT const CFStringRef _kCFURLResolvedFromBookmarkDataKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal later in 10.9/7.0 since it is unused (*/
 
-CF_EXPORT const CFStringRef _kCFURLResolvedFromBookmarkDataKey CF_AVAILABLE(10_6, 4_0);			    
-    /*	the bookmark data that was resolved to produce the URL, if any (CFData) */
-
-CF_EXPORT const CFStringRef _kCFURLVolumeMountPointStringKey CF_AVAILABLE(10_6, 4_0);			    
+CF_EXPORT const CFStringRef _kCFURLVolumeMountPointStringKey CF_AVAILABLE(10_6, 4_0);
     /*	the volume mountpoint string (Read-only, value type CFString) */
 
-CF_EXPORT const CFStringRef _kCFURLCompleteMountURLKey CF_AVAILABLE(10_6, 4_0);			    
-    /* the URL to mount the volume on which the resource is stored, if any (Read-only, value type CFURL) */
+CF_EXPORT const CFStringRef _kCFURLCompleteMountURLKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
+    /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeURLForRemountingKey or NSURLVolumeURLForRemountingKey public property keys */
 
+CF_EXPORT const CFStringRef _kCFURLUbiquitousItemDownloadRequestedKey CF_AVAILABLE(10_9, 7_0);
+/* Is this Ubiquity item scheduled for download? (this is also true for items that are already downloaded). Use startDownloadingUbiquitousItemAtURL:error: to make this true (Read-only, value type CFBoolean) */
 
 
 /*
@@ -290,7 +287,8 @@ enum {
     kCFURLResourceHasHiddenExtension    = 0x00000100,
     kCFURLResourceIsApplication         = 0x00000200,
     kCFURLResourceIsCompressed          = 0x00000400,
-    /* OBSOLETE */ kCFURLResourceIsSystemCompressed	= 0x00000400,  /* -> kCFURLResourceIsCompressed */
+    kCFURLResourceIsSystemCompressed CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0)
+                                        = 0x00000400,  /* Deprecated and scheduled for removal in 10.10/8.0 - Use kCFURLResourceIsCompressed */
     kCFURLCanSetHiddenExtension         = 0x00000800,
     kCFURLResourceIsReadable		= 0x00001000,
     kCFURLResourceIsWriteable		= 0x00002000,
@@ -377,12 +375,33 @@ typedef CF_OPTIONS(unsigned long long, CFURLVolumePropertyFlags) {
 	kCFURLVolumeIsExternal				=              0x100LL,
 	kCFURLVolumeIsDiskImage				=              0x200LL,
 	kCFURLVolumeIsFileVault				=              0x400LL,
-	kCFURLVolumeIsLocaliDiskMirror			=              0x800LL,
+	kCFURLVolumeIsLocaliDiskMirror CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0)
+                                                        =              0x800LL, // Deprecated and scheduled for removal in 10.10/8.0 - there are no more iDisks
 	kCFURLVolumeIsiPod				=             0x1000LL,
-	kCFURLVolumeIsiDisk                             =             0x2000LL,
+	kCFURLVolumeIsiDisk CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0)
+                                                        =             0x2000LL, // Deprecated and scheduled for removal in 10.10/8.0 - there are no more iDisks
 	kCFURLVolumeIsCD				=             0x4000LL,
 	kCFURLVolumeIsDVD				=             0x8000LL,
 	kCFURLVolumeIsDeviceFileSystem			=	     0x10000LL,
+        kCFURLVolumeIsTimeMachine CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	     0x20000LL,
+        kCFURLVolumeIsAirport CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	     0x40000LL,
+        kCFURLVolumeIsVideoDisk CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	     0x80000LL,
+        kCFURLVolumeIsDVDVideo CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	    0x100000LL,
+        kCFURLVolumeIsBDVideo CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	    0x200000LL,
+        kCFURLVolumeIsMobileTimeMachine CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	    0x400000LL,
+        kCFURLVolumeIsNetworkOptical CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	    0x800000LL,
+        kCFURLVolumeIsBeingRepaired CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	   0x1000000LL,
+        kCFURLVolumeIsBeingUnmounted CF_ENUM_AVAILABLE_MAC(10_9)
+                                                        =	   0x2000000LL,
+    
 // IMPORTANT: The values of the following flags must stay in sync with the
 // VolumeCapabilities flags in CarbonCore (FileIDTreeStorage.h)
 	kCFURLVolumeSupportsPersistentIDs		=        0x100000000LL,
@@ -427,6 +446,53 @@ typedef CF_OPTIONS(unsigned long long, CFURLVolumePropertyFlags) {
  */
 CF_EXPORT
 Boolean _CFURLGetVolumePropertyFlags(CFURLRef url, CFURLVolumePropertyFlags mask, CFURLVolumePropertyFlags *flags, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
+
+
+/*  _CFURLCopyResourcePropertyForKeyFromCache works like CFURLCopyResourcePropertyForKey
+    only it never causes I/O. If the property value requested is cached (or known
+    to be not available) for the resource, return TRUE and the property value. The
+    property value returned could be NULL meaning that property is not available
+    for the resource. If the property value requested is not cached or the resource,
+    FALSE is returned.
+
+    Only for use by DesktopServices!
+ */
+CF_EXPORT
+Boolean _CFURLCopyResourcePropertyForKeyFromCache(CFURLRef url, CFStringRef key, void *cfTypeRefValue) CF_AVAILABLE(10_8, NA);
+
+/*  _CFURLCopyResourcePropertiesForKeysFromCache works like CFURLCopyResourcePropertiesForKeys
+    only it never causes I/O. If the property values requested are cached (or known
+    to be not available) for the resource, return a CFDictionary. Property values
+    not available for the resource are not included in the CFDictionary.
+    If the values requested are not cached, return NULL.
+
+    Only for use by DesktopServices!
+ */
+CF_EXPORT
+CFDictionaryRef _CFURLCopyResourcePropertiesForKeysFromCache(CFURLRef url, CFArrayRef keys) CF_AVAILABLE(10_8, NA);
+
+/*  _CFURLCacheResourcePropertyForKey works like CFURLCopyResourcePropertyForKey
+    only it does not return the property value -- it just ensures the value is cached.
+    If no errors occur, TRUE is returned. If an error occurs, FALSE is returned
+    and the optional output error is set to a valid CFErrorRef (which must be
+    released by the caller.
+ 
+    Only for use by DesktopServices!
+ */
+CF_EXPORT
+Boolean _CFURLCacheResourcePropertyForKey(CFURLRef url, CFStringRef key, CFErrorRef *error) CF_AVAILABLE(10_8, NA);
+
+/*  _CFURLCacheResourcePropertiesForKeys works like CFURLCopyResourcePropertiesForKeys
+    only it does not return the property values -- it just ensures the values is cached.
+    If no errors occur, TRUE is returned. If an error occurs, FALSE is returned
+    and the optional output error is set to a valid CFErrorRef (which must be
+    released by the caller.
+
+    Only for use by DesktopServices!
+ */
+CF_EXPORT
+Boolean _CFURLCacheResourcePropertiesForKeys(CFURLRef url, CFArrayRef keys, CFErrorRef *error) CF_AVAILABLE(10_8, NA);
+
 
 /*
  _CFURLSetResourcePropertyForKeyAndUpdateFileCache - Works mostly like CFURLSetResourcePropertyForKey
@@ -477,9 +543,9 @@ CFArrayRef _CFURLCreateDisplayPathComponentsArray(CFURLRef url, CFErrorRef *erro
 CF_EXPORT
 Boolean _CFURLIsFileURL(CFURLRef url) CF_AVAILABLE(10_6, 4_0);
 
-/* Returns true for file URLs that use the file reference form */
+/* Deprecated and scheduled for removal in 10.10/8.0 - Use the public API CFURLIsFileReferenceURL() */
 CF_EXPORT
-Boolean _CFURLIsFileReferenceURL(CFURLRef url) CF_AVAILABLE(10_6, 4_0);
+Boolean _CFURLIsFileReferenceURL(CFURLRef url) CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
 
 /* For use by Core Services */
 CF_EXPORT 
@@ -488,27 +554,6 @@ void *__CFURLResourceInfoPtr(CFURLRef url) CF_AVAILABLE(10_6, 4_0);
 CF_EXPORT 
 void __CFURLSetResourceInfoPtr(CFURLRef url, void *ptr) CF_AVAILABLE(10_6, 4_0);
 
-#if TARGET_OS_MAC
-
-CF_EXPORT
-CFURLRef _CFURLCreateFileReferenceURLFromIDs( CFAllocatorRef allocator, fsid_t fsid, UInt64 inodeNumber ) CF_AVAILABLE(10_7, NA);
-
-/* _CFURLVolumeIdentifierGetVolumeRefNum is used by LaunchServices */
-CF_EXPORT
-SInt16 _CFURLVolumeIdentifierGetVolumeRefNum(UInt64 volumeIdentifier) CF_AVAILABLE(10_7, NA);
-
-CF_EXPORT
-CFURLRef _CFURLCreateFileReferenceURLFromFSRef(CFAllocatorRef allocator, const struct FSRef *ref) CF_AVAILABLE(10_7, NA);
-
-/* _CFURLGetFSRef is a very lightweight version of CFURLGetFSRef that assumes the CFURL is a file URL and the properties needed to create a FSRef are available in the file URL's cache. This is for use only by CarbonCore's FileOperations SPI and API. */
-CF_EXPORT
-Boolean _CFURLGetFSRef(CFURLRef url, struct FSRef *fsRef) CF_AVAILABLE(10_7, NA);
-
-/* _CFURLGetObjectInformationNoIO is used by LaunchServices */
-CF_EXPORT
-Boolean _CFURLGetObjectInformationNoIO(CFURLRef url, UInt64 * volumeIdentifier, UInt64 * objectIdentifier, UInt32 * statMode) CF_AVAILABLE(10_7, NA);
-
-#endif
 
 struct FSCatalogInfo;
 struct HFSUniStr255;
@@ -561,15 +606,9 @@ typedef CF_ENUM(CFIndex, CFURLBookmarkMatchResult) {
     kCFURLBookmarkComparisonExactMatch      = 0x0000f000    /* the two bookmarks are identical */
 };
 
-/*  Keys specific to bookmarks at this time */
-CF_EXPORT const CFStringRef _kCFURLPropertyKeyFullPathString;	    //	the full filesystem path of the item the bookmark was create against
-CF_EXPORT const CFStringRef _kCFURLURLString;			    //	the url string ( possibly relative to a base url ) of the url this bookmark was created against.
-CF_EXPORT const CFStringRef _kCFURLFileIDData;			    //	the url string ( possibly relative to a base url ) of the url this bookmark was created against.
-
-CFURLBookmarkMatchResult _CFURLCompareBookmarkData( CFDataRef bookmark1Ref, CFDataRef bookmark2Ref, CFURLRef relativeToURL, CFArrayRef* matchingPropertyKeys ) CF_AVAILABLE(10_7, NA);
-
+/* The relativeToURL and matchingPropertyKeys parameters are not used and are ignored */
 CF_EXPORT
-CFURLBookmarkMatchResult _CFURLBookmarkDataCompare(CFDataRef bookmark1Ref, CFDataRef bookmark2Ref, CFURLRef relativeToURL, CFArrayRef* matchingPropertyKeys) CF_AVAILABLE(10_7, NA); // Use _CFURLCompareBookmarkData() instead
+CFURLBookmarkMatchResult _CFURLBookmarkDataCompare(CFDataRef bookmark1Ref, CFDataRef bookmark2Ref, CFURLRef relativeToURL, CFArrayRef* matchingPropertyKeys) CF_AVAILABLE(10_7, NA);
 
 CF_EXPORT
 OSStatus _CFURLBookmarkDataToAliasHandle(CFDataRef bookmarkRef, void* aliasHandleP) CF_AVAILABLE(10_7, NA);

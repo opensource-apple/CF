@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -26,18 +26,18 @@
  *  CoreFoundation
  *
  *  Created by Aki Inoue on 07/12/05.
- *  Copyright (c) 2007-2012, Apple Inc. All rights reserved.
+ *  Copyright (c) 2007-2013, Apple Inc. All rights reserved.
  *
  */
 
 #include <CoreFoundation/CFString.h>
 
-__private_extern__ uint16_t __CFStringEncodingGetWindowsCodePage(CFStringEncoding encoding);
-__private_extern__ CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t codepage);
+CF_PRIVATE uint16_t __CFStringEncodingGetWindowsCodePage(CFStringEncoding encoding);
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t codepage);
 
-__private_extern__ bool __CFStringEncodingGetCanonicalName(CFStringEncoding encoding, char *buffer, CFIndex bufferSize);
-__private_extern__ CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *canonicalName);
+CF_PRIVATE bool __CFStringEncodingGetCanonicalName(CFStringEncoding encoding, char *buffer, CFIndex bufferSize);
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *canonicalName);
 
-__private_extern__ CFStringEncoding __CFStringEncodingGetMostCompatibleMacScript(CFStringEncoding encoding);
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetMostCompatibleMacScript(CFStringEncoding encoding);
 
-__private_extern__ const char *__CFStringEncodingGetName(CFStringEncoding encoding); // Returns simple non-localizd name
+CF_PRIVATE const char *__CFStringEncodingGetName(CFStringEncoding encoding); // Returns simple non-localizd name

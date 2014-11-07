@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingConverter.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -853,11 +853,11 @@ uint32_t CFStringEncodingBytesToUnicode(uint32_t encoding, uint32_t flags, const
     return theResult;
 }
 
-__private_extern__ bool CFStringEncodingIsValidEncoding(uint32_t encoding) {
+CF_PRIVATE bool CFStringEncodingIsValidEncoding(uint32_t encoding) {
     return (CFStringEncodingGetConverter(encoding) ? true : false);
 }
 
-__private_extern__ CFIndex CFStringEncodingCharLengthForBytes(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
+CF_PRIVATE CFIndex CFStringEncodingCharLengthForBytes(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
     const _CFEncodingConverter *converter = __CFGetConverter(encoding);
 
     if (converter) {
@@ -901,7 +901,7 @@ __private_extern__ CFIndex CFStringEncodingCharLengthForBytes(uint32_t encoding,
     return 0;
 }
 
-__private_extern__ CFIndex CFStringEncodingByteLengthForCharacters(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars) {
+CF_PRIVATE CFIndex CFStringEncodingByteLengthForCharacters(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars) {
     const _CFEncodingConverter *converter = __CFGetConverter(encoding);
 
     if (converter) {
@@ -925,7 +925,7 @@ __private_extern__ CFIndex CFStringEncodingByteLengthForCharacters(uint32_t enco
     return 0;
 }
 
-__private_extern__ void CFStringEncodingRegisterFallbackProcedures(uint32_t encoding, CFStringEncodingToBytesFallbackProc toBytes, CFStringEncodingToUnicodeFallbackProc toUnicode) {
+void CFStringEncodingRegisterFallbackProcedures(uint32_t encoding, CFStringEncodingToBytesFallbackProc toBytes, CFStringEncodingToUnicodeFallbackProc toUnicode) {
     _CFEncodingConverter *converter = (_CFEncodingConverter *)__CFGetConverter(encoding);
 
     if (NULL != converter) {
@@ -936,7 +936,7 @@ __private_extern__ void CFStringEncodingRegisterFallbackProcedures(uint32_t enco
     }
 }
 
-__private_extern__ const CFStringEncodingConverter *CFStringEncodingGetConverter(uint32_t encoding) {
+CF_PRIVATE const CFStringEncodingConverter *CFStringEncodingGetConverter(uint32_t encoding) {
     const _CFEncodingConverter *converter = __CFGetConverter(encoding);
 
     return ((NULL == converter) ? NULL : converter->definition);
@@ -984,7 +984,7 @@ static void __CFStringEncodingFliterDupes(CFStringEncoding *encodings, CFIndex n
     }
 }
 
-__private_extern__ const CFStringEncoding *CFStringEncodingListOfAvailableEncodings(void) {
+CF_PRIVATE const CFStringEncoding *CFStringEncodingListOfAvailableEncodings(void) {
     static const CFStringEncoding *encodings = NULL;
 
     if (NULL == encodings) {

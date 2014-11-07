@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFSystemDirectories.c
-	Copyright (c) 1997-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1997-2013, Apple Inc. All rights reserved.
 	Responsibility: Kevin Perry
 */
 
@@ -43,6 +43,7 @@
 #include <libc.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pwd.h>
 #include <NSSystemDirectories.h>
 
 CFSearchPathEnumerationState __CFStartSearchPathEnumeration(CFSearchPathDirectory dir, CFSearchPathDomainMask domainMask) {
@@ -103,6 +104,7 @@ CFArrayRef CFCopySearchPathForDirectoriesInDomains(CFSearchPathDirectory directo
 }
 
 #endif
+
 
 #undef numDirs
 #undef numApplicationDirs

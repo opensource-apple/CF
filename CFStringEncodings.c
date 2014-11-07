@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodings.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -57,7 +57,7 @@ Boolean (*__CFCharToUniCharFunc)(UInt32 flags, uint8_t ch, UniChar *unicodeChar)
 
 // To avoid early initialization issues, we just initialize this here
 // This should not be const as it is changed
-__private_extern__ UniChar __CFCharToUniCharTable[256] = {
+CF_PRIVATE UniChar __CFCharToUniCharTable[256] = {
   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
@@ -76,7 +76,7 @@ __private_extern__ UniChar __CFCharToUniCharTable[256] = {
 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
 };    
 
-__private_extern__ void __CFSetCharToUniCharFunc(Boolean (*func)(UInt32 flags, UInt8 ch, UniChar *unicodeChar)) {
+CF_PRIVATE void __CFSetCharToUniCharFunc(Boolean (*func)(UInt32 flags, UInt8 ch, UniChar *unicodeChar)) {
     if (__CFCharToUniCharFunc != func) {
         int ch;
         __CFCharToUniCharFunc = func;
@@ -91,7 +91,7 @@ __private_extern__ void __CFSetCharToUniCharFunc(Boolean (*func)(UInt32 flags, U
     }
 }
 
-__private_extern__ void __CFStrConvertBytesToUnicode(const uint8_t *bytes, UniChar *buffer, CFIndex numChars) {
+CF_PRIVATE void __CFStrConvertBytesToUnicode(const uint8_t *bytes, UniChar *buffer, CFIndex numChars) {
     CFIndex idx;
     for (idx = 0; idx < numChars; idx++) buffer[idx] = __CFCharToUniCharTable[bytes[idx]];
 }

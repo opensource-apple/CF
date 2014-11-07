@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPlatformConverters.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -59,7 +59,7 @@ static const CFStringEncodingConverter __CFPlatformBootstrap = {
     NULL /* toUnicodeFallback */, NULL /* toBytesPrecompose */, NULL, /* isValidCombiningChar */
 };
 
-__private_extern__ const CFStringEncodingConverter *__CFStringEncodingGetExternalConverter(uint32_t encoding) {
+CF_PRIVATE const CFStringEncodingConverter *__CFStringEncodingGetExternalConverter(uint32_t encoding) {
 
     // we prefer Text Encoding Converter ICU since it's more reliable
     if (__CFIsPlatformConverterAvailable(encoding)) {
@@ -75,7 +75,7 @@ __private_extern__ const CFStringEncodingConverter *__CFStringEncodingGetExterna
 }
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-__private_extern__ CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) {
+CF_PRIVATE CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) {
 
     return NULL;
 }
@@ -101,7 +101,7 @@ static char CALLBACK __CFWin32EnumCodePageProc(LPTSTR string) {
     return true;
 }
 
-__private_extern__ CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) {
+CF_PRIVATE CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) {
     CFStringEncoding *encodings;
 
     EnumSystemCodePages((CODEPAGE_ENUMPROC)&__CFWin32EnumCodePageProc, CP_INSTALLED);
@@ -117,10 +117,10 @@ __private_extern__ CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlat
     return encodings;
 }
 #else
-__private_extern__ CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) { return NULL; }
+CF_PRIVATE CFStringEncoding *__CFStringEncodingCreateListOfAvailablePlatformConverters(CFAllocatorRef allocator, CFIndex *numberOfConverters) { return NULL; }
 #endif
 
-__private_extern__ CFIndex __CFStringEncodingPlatformUnicodeToBytes(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars, CFIndex *usedCharLen, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen) {
+CF_PRIVATE CFIndex __CFStringEncodingPlatformUnicodeToBytes(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars, CFIndex *usedCharLen, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen) {
 
 #if DEPLOYMENT_TARGET_WINDOWS
     WORD dwFlags = 0;
@@ -171,7 +171,7 @@ __private_extern__ CFIndex __CFStringEncodingPlatformUnicodeToBytes(uint32_t enc
     return kCFStringEncodingConverterUnavailable;
 }
 
-__private_extern__ CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, CFIndex *usedByteLen, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen) {
+CF_PRIVATE CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, CFIndex *usedByteLen, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen) {
 
 #if DEPLOYMENT_TARGET_WINDOWS
     WORD dwFlags = 0;
@@ -216,12 +216,12 @@ __private_extern__ CFIndex __CFStringEncodingPlatformBytesToUnicode(uint32_t enc
     return kCFStringEncodingConverterUnavailable;
 }
 
-__private_extern__ CFIndex __CFStringEncodingPlatformCharLengthForBytes(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
+CF_PRIVATE CFIndex __CFStringEncodingPlatformCharLengthForBytes(uint32_t encoding, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
     CFIndex usedCharLen;
     return (__CFStringEncodingPlatformBytesToUnicode(encoding, flags, bytes, numBytes, NULL, NULL, 0, &usedCharLen) == kCFStringEncodingConversionSuccess ? usedCharLen : 0);
 }
 
-__private_extern__ CFIndex __CFStringEncodingPlatformByteLengthForCharacters(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars) {
+CF_PRIVATE CFIndex __CFStringEncodingPlatformByteLengthForCharacters(uint32_t encoding, uint32_t flags, const UniChar *characters, CFIndex numChars) {
     CFIndex usedByteLen;
     return (__CFStringEncodingPlatformUnicodeToBytes(encoding, flags, characters, numChars, NULL, NULL, 0, &usedByteLen) == kCFStringEncodingConversionSuccess ? usedByteLen : 0);
 }

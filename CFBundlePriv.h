@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBundlePriv.h
-	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLEPRIV__)
@@ -163,7 +163,7 @@ CFBundleRef _CFBundleCreateWithExecutableURLIfMightBeBundle(CFAllocatorRef alloc
 /* Functions for examining the structure of a bundle */
 
 CF_EXPORT
-CFURLRef _CFBundleCopyResourceForkURL(CFBundleRef bundle);
+CFURLRef _CFBundleCopyResourceForkURL(CFBundleRef bundle) CF_AVAILABLE_MAC(10_0);
 
 CF_EXPORT
 CFURLRef _CFBundleCopyInfoPlistURL(CFBundleRef bundle);
@@ -228,10 +228,10 @@ CF_EXPORT
 Boolean _CFBundleGetHasChanged(CFBundleRef bundle);
 
 CF_EXPORT
-void _CFBundleFlushCaches(void);
+void _CFBundleFlushCaches(void) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
-void _CFBundleFlushCachesForURL(CFURLRef url);
+void _CFBundleFlushCachesForURL(CFURLRef url) CF_DEPRECATED(10_0, 10_8, 2_0, 6_0);
 
 CF_EXPORT
 void _CFBundleFlushBundleCaches(CFBundleRef bundle);    // The previous two functions flush cached resource paths; this one also flushes bundle-specific caches such as the info dictionary and strings files
@@ -274,9 +274,6 @@ CFURLRef _CFBundleCopySharedSupportURL(CFBundleRef bundle);		// deprecated in fa
 
 CF_EXPORT
 CFURLRef _CFBundleCopyBuiltInPlugInsURL(CFBundleRef bundle);		// deprecated in favor of CFBundleCopyBuiltInPlugInsURL
-
-CF_EXPORT
-CFArrayRef _CFBundleCopyBundleRegionsArray(CFBundleRef bundle);		// deprecated in favor of CFBundleCopyBundleLocalizations
 
 CF_EXPORT
 CFURLRef _CFBundleCopyResourceURLForLanguage(CFBundleRef bundle, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subDirName, CFStringRef language);	 // deprecated in favor of CFBundleCopyResourceURLForLocalization

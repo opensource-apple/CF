@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFRuntime.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -70,7 +70,7 @@ __kCFReleaseEvent = 29
 #define FAKE_INSTRUMENTS 0
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-__private_extern__ void __CFOAInitializeNSObject(void);  // from NSObject.m
+CF_PRIVATE void __CFOAInitializeNSObject(void);  // from NSObject.m
 
 bool __CFOASafe = false;
 
@@ -199,10 +199,10 @@ static const CFRuntimeClass __CFTypeClass = {
 
 // the lock does not protect most reading of these; we just leak the old table to allow read-only accesses to continue to work
 static CFSpinLock_t __CFBigRuntimeFunnel = CFSpinLockInit;
-__private_extern__ CFRuntimeClass * __CFRuntimeClassTable[__CFRuntimeClassTableSize] = {0};
-__private_extern__ int32_t __CFRuntimeClassTableCount = 0;
+CF_PRIVATE CFRuntimeClass * __CFRuntimeClassTable[__CFRuntimeClassTableSize] = {0};
+CF_PRIVATE int32_t __CFRuntimeClassTableCount = 0;
 
-__private_extern__ uintptr_t __CFRuntimeObjCClassTable[__CFRuntimeClassTableSize] = {0};
+CF_PRIVATE uintptr_t __CFRuntimeObjCClassTable[__CFRuntimeClassTableSize] = {0};
 
 #if !defined(__CFObjCIsCollectable)
 bool (*__CFObjCIsCollectable)(void *) = NULL;
@@ -266,8 +266,8 @@ void _CFRuntimeUnregisterClassWithTypeID(CFTypeID typeID) {
 
 #if defined(DEBUG) || defined(ENABLE_ZOMBIES)
 
-__private_extern__ uint8_t __CFZombieEnabled = 0;
-__private_extern__ uint8_t __CFDeallocateZombies = 0;
+CF_PRIVATE uint8_t __CFZombieEnabled = 0;
+CF_PRIVATE uint8_t __CFDeallocateZombies = 0;
 
 extern void __CFZombifyNSObject(void);  // from NSObject.m
 
@@ -299,11 +299,11 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
         CFLog(kCFLogLevelWarning, CFSTR("*** _CFRuntimeCreateInstance() found inconsistent class '%s'."), cls->className);
         return NULL;
     }
-    if (customRC && kCFUseCollectableAllocator && (kCFAllocatorSystemDefaultGCRefZero == allocator || kCFAllocatorDefaultGCRefZero == allocator)) {
+    if (customRC && kCFUseCollectableAllocator && (0 || 0)) {
         CFLog(kCFLogLevelWarning, CFSTR("*** _CFRuntimeCreateInstance(): special zero-ref allocators cannot be used with class '%s' with custom ref counting."), cls->className);
         return NULL;
     }
-    CFAllocatorRef realAllocator = _CFConvertAllocatorToNonGCRefZeroEquivalent(allocator);
+    CFAllocatorRef realAllocator = (NULL == allocator) ? __CFGetDefaultAllocator() : allocator;
     if (kCFAllocatorNull == realAllocator) {
 	return NULL;
     }
@@ -330,10 +330,9 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
 	*(CFAllocatorRef *)((char *)memory) = (CFAllocatorRef)CFRetain(realAllocator);
 	memory = (CFRuntimeBase *)((char *)memory + sizeof(CFAllocatorRef));
     }
-    memory->_cfisa = __CFISAForTypeID(typeID);
     uint32_t rc = 0;
 #if __LP64__
-    if (!kCFUseCollectableAllocator || (kCFAllocatorSystemDefaultGCRefZero != allocator && kCFAllocatorDefaultGCRefZero != allocator)) {
+    if (!kCFUseCollectableAllocator || (1 && 1)) {
         memory->_rc = 1;
     }
     if (customRC) {
@@ -341,7 +340,7 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
         rc = 0xFF;
     }
 #else
-    if (!kCFUseCollectableAllocator || (kCFAllocatorSystemDefaultGCRefZero != allocator && kCFAllocatorDefaultGCRefZero != allocator)) {
+    if (!kCFUseCollectableAllocator || (1 && 1)) {
         rc = 1;
     }
     if (customRC) {
@@ -350,6 +349,7 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
 #endif
     uint32_t *cfinfop = (uint32_t *)&(memory->_cfinfo);
     *cfinfop = (uint32_t)((rc << 24) | (customRC ? 0x800000 : 0x0) | ((uint32_t)typeID << 8) | (usesSystemDefaultAllocator ? 0x80 : 0x00));
+    memory->_cfisa = 0;
     if (NULL != cls->init) {
 	(cls->init)(memory);
     }
@@ -366,12 +366,12 @@ void _CFRuntimeInitStaticInstance(void *ptr, CFTypeID typeID) {
         return;
     }
     CFRuntimeBase *memory = (CFRuntimeBase *)ptr;
-    memory->_cfisa = __CFISAForTypeID(typeID);
     uint32_t *cfinfop = (uint32_t *)&(memory->_cfinfo);
     *cfinfop = (uint32_t)(((customRC ? 0xFF : 0) << 24) | (customRC ? 0x800000 : 0x0) | ((uint32_t)typeID << 8) | 0x80);
 #if __LP64__
     memory->_rc = customRC ? 0xFFFFFFFFU : 0x0;
 #endif
+    memory->_cfisa = 0;
     if (NULL != cfClass->init) {
        (cfClass->init)(memory);
     }
@@ -395,6 +395,10 @@ void _CFRuntimeSetInstanceTypeID(CFTypeRef cf, CFTypeID newTypeID) {
     // transferred and there will probably be a crash later when the
     // object is freed too early.
     *cfinfop = (*cfinfop & 0xFFF000FFU) | ((uint32_t)newTypeID << 8);
+}
+
+CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newTypeID) {
+    _CFRuntimeSetInstanceTypeID(cf, newTypeID);
 }
 
 
@@ -453,68 +457,6 @@ CF_EXPORT uintptr_t __CFDoExternRefOperation(uintptr_t op, id obj) {
     return 0;
 }
 
-static void __CFExternRefNullFreeCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-}
-    
-static uintptr_t __CFExternRefNullRetainValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    return stack_value;
-}
-
-static uintptr_t __CFExternRefNullRetainKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    return stack_key;
-}
-
-static void __CFExternRefNullReleaseValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-}
-
-static void __CFExternRefNullReleaseKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-}
-
-static Boolean __CFExternRefNullEquateValues(CFConstBasicHashRef ht, uintptr_t coll_value1, uintptr_t stack_value2) {
-    return coll_value1 == stack_value2;
-}
-
-static Boolean __CFExternRefNullEquateKeys(CFConstBasicHashRef ht, uintptr_t coll_key1, uintptr_t stack_key2) {
-    return coll_key1 == stack_key2;
-}
-
-static uintptr_t __CFExternRefNullHashKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    return stack_key;
-}
-
-static uintptr_t __CFExternRefNullGetIndirectKey(CFConstBasicHashRef ht, uintptr_t coll_value) {
-    return 0;
-}
-
-static CFStringRef __CFExternRefNullCopyValueDescription(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_value);
-}
-
-static CFStringRef __CFExternRefNullCopyKeyDescription(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_key);
-}
-
-static CFBasicHashCallbacks *__CFExternRefNullCopyCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb);
-
-static const CFBasicHashCallbacks CFExternRefCallbacks = {
-    __CFExternRefNullCopyCallbacks,
-    __CFExternRefNullFreeCallbacks,
-    __CFExternRefNullRetainValue,
-    __CFExternRefNullRetainKey,
-    __CFExternRefNullReleaseValue,
-    __CFExternRefNullReleaseKey,
-    __CFExternRefNullEquateValues,
-    __CFExternRefNullEquateKeys,
-    __CFExternRefNullHashKey,
-    __CFExternRefNullGetIndirectKey,
-    __CFExternRefNullCopyValueDescription,
-    __CFExternRefNullCopyKeyDescription
-};
-
-static CFBasicHashCallbacks *__CFExternRefNullCopyCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-    return (CFBasicHashCallbacks *)&CFExternRefCallbacks;
-}
-
 CF_EXPORT CFTypeID CFNumberGetTypeID(void);
 
 CF_INLINE CFTypeID __CFGenericTypeID_inline(const void *cf) {
@@ -532,7 +474,7 @@ CFTypeID CFTypeGetTypeID(void) {
     return __kCFTypeTypeID;
 }
 
-__private_extern__ void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char *func) {
+CF_PRIVATE void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char *func) {
     if (cf && CF_IS_OBJC(type, cf)) return;
     CFAssert2((cf != NULL) && (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]) && (__kCFNotATypeTypeID != __CFGenericTypeID_inline(cf)) && (__kCFTypeTypeID != __CFGenericTypeID_inline(cf)), __kCFLogAssertion, "%s(): pointer %p is not a CF object", func, cf); \
     CFAssert3(__CFGenericTypeID_inline(cf) == type, __kCFLogAssertion, "%s(): pointer %p is not a %s", func, cf, __CFRuntimeClassTable[type]->className);	\
@@ -571,6 +513,11 @@ CFTypeRef CFRetain(CFTypeRef cf) {
     return _CFRetain(cf, false);
 }
 
+CFTypeRef CFAutorelease(CFTypeRef __attribute__((cf_consumed)) cf) {
+    if (NULL == cf) { CRSetCrashLogMessage("*** CFAutorelease() called with NULL ***"); HALT; }
+    return cf;
+}
+
 static void _CFRelease(CFTypeRef cf);
 
 void CFRelease(CFTypeRef cf) {
@@ -591,18 +538,21 @@ void CFRelease(CFTypeRef cf) {
 }
 
 
-__private_extern__ void __CFAllocatorDeallocate(CFTypeRef cf);
+CF_PRIVATE void __CFAllocatorDeallocate(CFTypeRef cf);
 
-__private_extern__ const void *__CFStringCollectionCopy(CFAllocatorRef allocator, const void *ptr) {
+CF_PRIVATE const void *__CFStringCollectionCopy(CFAllocatorRef allocator, const void *ptr) {
     if (NULL == ptr) { CRSetCrashLogMessage("*** __CFStringCollectionCopy() called with NULL ***"); HALT; }
     CFStringRef theString = (CFStringRef)ptr;
-    CFStringRef result = CFStringCreateCopy(_CFConvertAllocatorToGCRefZeroEquivalent(allocator), theString);
+    CFStringRef result = CFStringCreateCopy((allocator), theString);
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
+        result = (CFStringRef)CFMakeCollectable(result);
+    }
     return (const void *)result;
 }
 
 extern void CFCollection_non_gc_storage_error(void);
 
-__private_extern__ const void *__CFTypeCollectionRetain(CFAllocatorRef allocator, const void *ptr) {
+CF_PRIVATE const void *__CFTypeCollectionRetain(CFAllocatorRef allocator, const void *ptr) {
     if (NULL == ptr) { CRSetCrashLogMessage("*** __CFTypeCollectionRetain() called with NULL; likely a collection has been corrupted ***"); HALT; }
     CFTypeRef cf = (CFTypeRef)ptr;
     // only collections allocated in the GC zone can opt-out of reference counting.
@@ -637,7 +587,7 @@ __private_extern__ const void *__CFTypeCollectionRetain(CFAllocatorRef allocator
 }
 
 
-__private_extern__ void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *ptr) {
+CF_PRIVATE void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *ptr) {
     if (NULL == ptr) { CRSetCrashLogMessage("*** __CFTypeCollectionRelease() called with NULL; likely a collection has been corrupted ***"); HALT; }
     CFTypeRef cf = (CFTypeRef)ptr;
     // only collections allocated in the GC zone can opt-out of reference counting.
@@ -775,7 +725,7 @@ CFStringRef CFCopyDescription(CFTypeRef cf) {
 }
 
 // Definition: if type produces a formatting description, return that string, otherwise NULL
-__private_extern__ CFStringRef __CFCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
+CF_PRIVATE CFStringRef __CFCopyFormattingDescription(CFTypeRef cf, CFDictionaryRef formatOptions) {
     if (NULL == cf) return NULL;
     __CFGenericAssertIsCF(cf);
     if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->copyFormattingDesc) {
@@ -821,14 +771,15 @@ extern void __CFPlugInInstanceInitialize(void);
 extern void __CFUUIDInitialize(void);
 extern void __CFBinaryHeapInitialize(void);
 extern void __CFBitVectorInitialize(void);
+CF_PRIVATE void __CFDateInitialize(void);
 #if DEPLOYMENT_TARGET_LINUX
-__private_extern__ void __CFTSDLinuxInitialize();
+CF_PRIVATE void __CFTSDLinuxInitialize();
 #endif
 #if DEPLOYMENT_TARGET_WINDOWS
 // From CFPlatform.c
-__private_extern__ void __CFTSDWindowsInitialize(void);
-__private_extern__ void __CFTSDWindowsCleanup(void);
-__private_extern__ void __CFFinalizeWindowsThreadData();
+CF_PRIVATE void __CFTSDWindowsInitialize(void);
+CF_PRIVATE void __CFTSDWindowsCleanup(void);
+CF_PRIVATE void __CFFinalizeWindowsThreadData();
 #endif
 extern void __CFStreamInitialize(void);
 extern void __CFCalendarInitialize();
@@ -842,10 +793,10 @@ extern void __CFXPreferencesInitialize(void);
 #endif
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-__private_extern__ uint8_t __CF120290 = false;
-__private_extern__ uint8_t __CF120291 = false;
-__private_extern__ uint8_t __CF120293 = false;
-__private_extern__ char * __crashreporter_info__ = NULL; // Keep this symbol, since it was exported and other things may be linking against it, like GraphicsServices.framework on iOS
+CF_PRIVATE uint8_t __CF120290 = false;
+CF_PRIVATE uint8_t __CF120291 = false;
+CF_PRIVATE uint8_t __CF120293 = false;
+CF_PRIVATE char * __crashreporter_info__ = NULL; // Keep this symbol, since it was exported and other things may be linking against it, like GraphicsServices.framework on iOS
 asm(".desc ___crashreporter_info__, 0x10");
 
 static void __01121__(void) {
@@ -872,7 +823,7 @@ static void __01123__(void) {
 #define EXEC_WARNING_STRING_1 "The process has forked and you cannot use this CoreFoundation functionality safely. You MUST exec().\n"
 #define EXEC_WARNING_STRING_2 "Break on __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__() to debug.\n"
 
-__private_extern__ void __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__(void) {
+CF_PRIVATE void __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__(void) {
     write(2, EXEC_WARNING_STRING_1, sizeof(EXEC_WARNING_STRING_1) - 1);
     write(2, EXEC_WARNING_STRING_2, sizeof(EXEC_WARNING_STRING_2) - 1);
 //    HALT;
@@ -882,7 +833,7 @@ __private_extern__ void __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOU
 
 CF_EXPORT const void *__CFArgStuff;
 const void *__CFArgStuff = NULL;
-__private_extern__ void *__CFAppleLanguages = NULL;
+CF_PRIVATE void *__CFAppleLanguages = NULL;
 
 // do not cache CFFIXED_USER_HOME or HOME, there are situations where they can change
 
@@ -915,14 +866,19 @@ static struct {
     {"__CFPREFERENCES_LOG_FAILURES", NULL},
     {"CFNumberDisableCache", NULL},
     {"__CFPREFERENCES_AVOID_DAEMON", NULL},
+    {"APPLE_FRAMEWORKS_ROOT", NULL},
     {NULL, NULL}, // the last one is for optional "COMMAND_MODE" "legacy", do not use this slot, insert before
 };
 
-__private_extern__ const char *__CFgetenv(const char *n) {
+CF_PRIVATE const char *__CFgetenv(const char *n) {
     for (CFIndex idx = 0; idx < sizeof(__CFEnv) / sizeof(__CFEnv[0]); idx++) {
 	if (__CFEnv[idx].name && 0 == strcmp(n, __CFEnv[idx].name)) return __CFEnv[idx].value;
     }
     return getenv(n);
+}
+
+CF_PRIVATE Boolean __CFProcessIsRestricted() {
+    return issetugid();
 }
 
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -932,16 +888,26 @@ __private_extern__ const char *__CFgetenv(const char *n) {
 #endif
 
 
-CF_EXPORT pthread_t _CFMainPThread;
-pthread_t _CFMainPThread = kNilPthreadT;
-
 #undef kCFUseCollectableAllocator
 CF_EXPORT bool kCFUseCollectableAllocator;
 bool kCFUseCollectableAllocator = false;
 
-__private_extern__ Boolean __CFProphylacticAutofsAccess = false;
-__private_extern__ Boolean __CFInitializing = 0;
-__private_extern__ Boolean __CFInitialized = 0;
+CF_PRIVATE Boolean __CFProphylacticAutofsAccess = false;
+CF_PRIVATE Boolean __CFInitializing = 0;
+CF_PRIVATE Boolean __CFInitialized = 0;
+
+// move the next 2 lines down into the #if below, and make it static, after Foundation gets off this symbol on other platforms
+CF_EXPORT pthread_t _CFMainPThread;
+pthread_t _CFMainPThread = kNilPthreadT;
+#if DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_IPHONESIMULATOR
+
+CF_EXPORT pthread_t _CF_pthread_main_thread_np(void);
+pthread_t _CF_pthread_main_thread_np(void) {
+    return _CFMainPThread;
+}
+#define pthread_main_thread_np() _CF_pthread_main_thread_np()
+
+#endif
 
 #if DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
 static void __CFInitialize(void) __attribute__ ((constructor));
@@ -955,11 +921,11 @@ void __CFInitialize(void) {
     if (!__CFInitialized && !__CFInitializing) {
         __CFInitializing = 1;
 
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
-	if (!pthread_main_np()) HALT;	// CoreFoundation must be initialized on the main thread
+#if DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_IPHONESIMULATOR
+        if (!pthread_main_np()) HALT;   // CoreFoundation must be initialized on the main thread
 #endif
-
-	_CFMainPThread = pthread_self();
+	// move this next line up into the #if above after Foundation gets off this symbol
+        _CFMainPThread = pthread_self();
 
 #if DEPLOYMENT_TARGET_WINDOWS
         // Must not call any CF functions
@@ -1022,7 +988,8 @@ void __CFInitialize(void) {
         CFBagGetTypeID();
 
 	for (CFIndex idx = 0; idx < NUM_EXTERN_TABLES; idx++) {
-	    __NSRetainCounters[idx].table = CFBasicHashCreate(kCFAllocatorSystemDefault, kCFBasicHashHasCounts | kCFBasicHashLinearHashing | kCFBasicHashAggressiveGrowth, &CFExternRefCallbacks);
+            CFBasicHashCallbacks callbacks = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+	    __NSRetainCounters[idx].table = CFBasicHashCreate(kCFAllocatorSystemDefault, kCFBasicHashHasCounts | kCFBasicHashLinearHashing | kCFBasicHashAggressiveGrowth, &callbacks);
 	    CFBasicHashSetCapacity(__NSRetainCounters[idx].table, 40);
 	    __NSRetainCounters[idx].lock = CFSpinLockInit;
 	}
@@ -1070,6 +1037,9 @@ void __CFInitialize(void) {
 #if DEPLOYMENT_TARGET_WINDOWS
         __CFWindowsNamedPipeInitialize();
 #endif
+        
+        __CFDateInitialize();
+
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
         __CFRunLoopInitialize();
         __CFRunLoopObserverInitialize();
@@ -1086,8 +1056,8 @@ void __CFInitialize(void) {
 #endif
 
         {
-            CFIndex idx, cnt;
-            char **args;
+            CFIndex idx, cnt = 0;
+            char **args = NULL;
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
             args = *_NSGetArgv();
             cnt = *_NSGetArgc();
@@ -1152,10 +1122,10 @@ void __CFInitialize(void) {
 
 #if DEPLOYMENT_TARGET_WINDOWS
 
-__private_extern__ void __CFStringCleanup(void);
-__private_extern__ void __CFSocketCleanup(void);
-__private_extern__ void __CFUniCharCleanup(void);
-__private_extern__ void __CFStreamCleanup(void);
+CF_PRIVATE void __CFStringCleanup(void);
+CF_PRIVATE void __CFSocketCleanup(void);
+CF_PRIVATE void __CFUniCharCleanup(void);
+CF_PRIVATE void __CFStreamCleanup(void);
 
 static CFBundleRef RegisterCoreFoundationBundle(void) {
 #ifdef _DEBUG
@@ -1345,13 +1315,17 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
 // Never called under GC, only called via ARR weak subsystem; a return of NULL is failure
 CFTypeRef _CFTryRetain(CFTypeRef cf) {
     if (NULL == cf) return NULL;
-    if (CF_IS_TAGGED_OBJ(cf)) return cf; // success
+#if OBJC_HAVE_TAGGED_POINTERS
+    if (_objc_isTaggedPointer(cf)) return cf; // success
+#endif
     return _CFRetain(cf, true);
 }
 
 Boolean _CFIsDeallocating(CFTypeRef cf) {
     if (NULL == cf) return false;
-    if (CF_IS_TAGGED_OBJ(cf)) return false;
+#if OBJC_HAVE_TAGGED_POINTERS
+    if (_objc_isTaggedPointer(cf)) return false;
+#endif
     uint32_t cfinfo = *(uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     if (cfinfo & 0x800000) { // custom ref counting for object
         return true;   // lie for now; this weak references to these objects cannot be formed

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFRuntime.h
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFRUNTIME__)
@@ -40,54 +40,18 @@ CF_EXTERN_C_BEGIN
 CF_EXPORT bool kCFUseCollectableAllocator;
 CF_EXPORT bool (*__CFObjCIsCollectable)(void *);
 
-// Only CoreFoundation and Foundation should use these *GCRefZero constants;
-// do not listen to anyone who tells you otherwise.
-
-CF_EXPORT
-const CFAllocatorRef kCFAllocatorSystemDefaultGCRefZero; // DO NOT USE THIS
-CF_EXPORT
-const CFAllocatorRef kCFAllocatorDefaultGCRefZero; // DO NOT USE THIS
-
-CF_INLINE CFAllocatorRef _CFConvertAllocatorToNonGCRefZeroEquivalent(CFAllocatorRef allocator) {
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
-        allocator = kCFAllocatorSystemDefault;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator || NULL == allocator || kCFAllocatorDefault == allocator) {
-        allocator = CFAllocatorGetDefault();
-    }
-    return allocator;
-}
-
-CF_INLINE CFAllocatorRef _CFConvertAllocatorToGCRefZeroEquivalent(CFAllocatorRef allocator) { // DO NOT USE THIS
-    if (!kCFUseCollectableAllocator) return allocator;
-    if (kCFAllocatorDefault == allocator || NULL == allocator) {
-        allocator = CFAllocatorGetDefault();
-    }
-    if (kCFAllocatorSystemDefault == allocator) {
-        allocator = kCFAllocatorSystemDefaultGCRefZero;
-    } else if (CFAllocatorGetDefault() == allocator) {
-        allocator = kCFAllocatorDefaultGCRefZero;
-    }
-    return allocator;
-}
-
 CF_INLINE Boolean _CFAllocatorIsSystemDefault(CFAllocatorRef allocator) {
-    if (allocator == kCFAllocatorSystemDefaultGCRefZero || allocator == kCFAllocatorSystemDefault) return true;
-    if (kCFAllocatorDefaultGCRefZero == allocator || NULL == allocator || kCFAllocatorDefault == allocator) {
+    if (allocator == kCFAllocatorSystemDefault) return true;
+    if (NULL == allocator || kCFAllocatorDefault == allocator) {
         return (kCFAllocatorSystemDefault == CFAllocatorGetDefault());
     }
     return false;
 }
 
-CF_INLINE Boolean _CFAllocatorIsGCRefZero(CFAllocatorRef allocator) {
-    // not intended as a literal test, but as a behavioral test
-    if (!kCFUseCollectableAllocator) return false;
-    return (kCFAllocatorSystemDefaultGCRefZero == allocator || kCFAllocatorDefaultGCRefZero == allocator);
-}
-
 // is GC on?
 #define CF_USING_COLLECTABLE_MEMORY (kCFUseCollectableAllocator)
 // is GC on and is this the GC allocator?
-#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) (kCFUseCollectableAllocator && (NULL == (allocator) || kCFAllocatorSystemDefault == (allocator) || _CFAllocatorIsGCRefZero(allocator)))
+#define CF_IS_COLLECTABLE_ALLOCATOR(allocator) (kCFUseCollectableAllocator && (NULL == (allocator) || kCFAllocatorSystemDefault == (allocator) || 0))
 // is this allocated by the collector?
 #define CF_IS_COLLECTABLE(obj) (__CFObjCIsCollectable ? __CFObjCIsCollectable((void*)obj) : false)
 
@@ -95,11 +59,6 @@ CF_INLINE Boolean _CFAllocatorIsGCRefZero(CFAllocatorRef allocator) {
 
 #define kCFUseCollectableAllocator 0
 #define __CFObjCIsCollectable 0
-#define kCFAllocatorSystemDefaultGCRefZero kCFAllocatorSystemDefault
-#define kCFAllocatorDefaultGCRefZero kCFAllocatorDefault
-
-#define _CFConvertAllocatorToNonGCRefZeroEquivalent(A) (A)
-#define _CFConvertAllocatorToGCRefZeroEquivalent(A) (A)
 
 CF_INLINE Boolean _CFAllocatorIsSystemDefault(CFAllocatorRef allocator) {
     if (allocator == kCFAllocatorSystemDefault) return true;
@@ -109,7 +68,6 @@ CF_INLINE Boolean _CFAllocatorIsSystemDefault(CFAllocatorRef allocator) {
     return false;
 }
 
-#define _CFAllocatorIsGCRefZero(A) (0)
 #define CF_USING_COLLECTABLE_MEMORY 0
 #define CF_IS_COLLECTABLE_ALLOCATOR(allocator) 0
 #define CF_IS_COLLECTABLE(obj) 0

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,7 +23,7 @@
 
 /*	
     CFWindowsUtilities.c
-    Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+    Copyright (c) 2008-2013, Apple Inc. All rights reserved.
     Responsibility: Tony Parker
 */
 

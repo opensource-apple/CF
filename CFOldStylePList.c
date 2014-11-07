@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFOldStylePList.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -42,10 +42,10 @@
 //
 
 CF_INLINE void __CFPListRelease(CFTypeRef cf, CFAllocatorRef allocator) {
-    if (cf && !_CFAllocatorIsGCRefZero(allocator)) CFRelease(cf);
+    if (cf && !(0)) CFRelease(cf);
 }
 
-__private_extern__ CFErrorRef __CFPropertyListCreateError(CFIndex code, CFStringRef debugString, ...);
+CF_PRIVATE CFErrorRef __CFPropertyListCreateError(CFIndex code, CFStringRef debugString, ...);
 
 typedef struct {
     const UniChar *begin;
@@ -171,7 +171,7 @@ static UniChar getSlashedChar(_CFStringsFileParseInfo *pInfo) {
 }
 
 static CFStringRef _uniqueStringForCharacters(_CFStringsFileParseInfo *pInfo, const UniChar *base, CFIndex length) {
-    if (0 == length) return !_CFAllocatorIsGCRefZero(pInfo->allocator) ? (CFStringRef)CFRetain(CFSTR("")) : CFSTR("");
+    if (0 == length) return !(0) ? (CFStringRef)CFRetain(CFSTR("")) : CFSTR("");
     // This is to avoid having to promote the buffers of all the strings compared against
     // during the set probe; if a Unicode string is passed in, that's what happens.
     CFStringRef stringToUnique = NULL;
@@ -198,7 +198,7 @@ static CFStringRef _uniqueStringForCharacters(_CFStringsFileParseInfo *pInfo, co
 	uniqued = stringToUnique;
     }
     __CFPListRelease(stringToUnique, pInfo->allocator);
-    if (uniqued && !_CFAllocatorIsGCRefZero(pInfo->allocator)) CFRetain(uniqued);
+    if (uniqued && !(0)) CFRetain(uniqued);
     return uniqued;
 }
 
@@ -209,7 +209,7 @@ static CFStringRef _uniqueStringForString(_CFStringsFileParseInfo *pInfo, CFStri
         CFSetAddValue(pInfo->stringSet, uniqued);
         __CFTypeCollectionRelease(pInfo->allocator, uniqued);
     }
-    if (uniqued && !_CFAllocatorIsGCRefZero(pInfo->allocator)) CFRetain(uniqued);
+    if (uniqued && !(0)) CFRetain(uniqued);
     return uniqued;
 }
 
@@ -532,7 +532,7 @@ static CFTypeRef parsePlistObject(_CFStringsFileParseInfo *pInfo, bool requireOb
 
 // CFAllocatorRef allocator, CFDataRef xmlData, CFStringRef originalString, CFStringEncoding guessedEncoding, CFOptionFlags option, CFErrorRef *outError, Boolean allowNewTypes, CFPropertyListFormat *format, CFSetRef keyPaths
 
-__private_extern__ CFTypeRef __CFParseOldStylePropertyListOrStringsFile(CFAllocatorRef allocator, CFDataRef xmlData, CFStringRef originalString, CFStringEncoding guessedEncoding, CFOptionFlags option, CFErrorRef *outError,CFPropertyListFormat *format) {
+CF_PRIVATE CFTypeRef __CFCreateOldStylePropertyListOrStringsFile(CFAllocatorRef allocator, CFDataRef xmlData, CFStringRef originalString, CFStringEncoding guessedEncoding, CFOptionFlags option, CFErrorRef *outError,CFPropertyListFormat *format) {
     
     // Convert the string to UTF16 for parsing old-style
     if (originalString) {
@@ -622,8 +622,8 @@ __private_extern__ CFTypeRef __CFParseOldStylePropertyListOrStringsFile(CFAlloca
     
     if (result && format) *format = kCFPropertyListOpenStepFormat;
     
-    if (createdBuffer && !_CFAllocatorIsGCRefZero(allocator)) CFAllocatorDeallocate(allocator, buf);
-    if (!_CFAllocatorIsGCRefZero(allocator)) CFRelease(stringsPInfo.stringSet);
+    if (createdBuffer && !(0)) CFAllocatorDeallocate(allocator, buf);
+    CFRelease(stringsPInfo.stringSet);
     CFRelease(originalString);
     return result;
 }

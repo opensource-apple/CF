@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFCharacterSet.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -145,7 +145,7 @@ CF_INLINE void __CFCSetPutIsInverted(CFMutableCharacterSetRef cset, Boolean isIn
 CF_INLINE void __CFCSetPutHasHashValue(CFMutableCharacterSetRef cset, Boolean hasHash) {(hasHash ? (cset->_base._cfinfo[CF_INFO_BITS] |= __kCFCharSetHasHashValue) : (cset->_base._cfinfo[CF_INFO_BITS] &= ~__kCFCharSetHasHashValue));}
 CF_INLINE void __CFCSetPutClassType(CFMutableCharacterSetRef cset, UInt32 classType) {cset->_base._cfinfo[CF_INFO_BITS] &= ~__kCFCharSetClassTypeMask;  cset->_base._cfinfo[CF_INFO_BITS] |= classType;}
 
-__private_extern__ Boolean __CFCharacterSetIsMutable(CFCharacterSetRef cset) {return __CFCSetIsMutable(cset);}
+CF_PRIVATE Boolean __CFCharacterSetIsMutable(CFCharacterSetRef cset) {return __CFCSetIsMutable(cset);}
 
 /* Inline contents accessor macros
 */
@@ -911,7 +911,7 @@ static Boolean __CFCharacterSetEqual(CFTypeRef cf1, CFTypeRef cf2) {
     if (__CFCSetHasHashValue((CFCharacterSetRef)cf1) && __CFCSetHasHashValue((CFCharacterSetRef)cf2) && ((CFCharacterSetRef)cf1)->_hashValue != ((CFCharacterSetRef)cf2)->_hashValue) return false;
     if (__CFCSetIsEmpty((CFCharacterSetRef)cf1) && __CFCSetIsEmpty((CFCharacterSetRef)cf2) && !isInvertStateIdentical) return false;
 
-    if (__CFCSetClassType((CFCharacterSetRef)cf1) == __CFCSetClassType((CFCharacterSetRef)cf2)) { // Types are identical, we can do it fast
+    if ((__CFCSetClassType((CFCharacterSetRef)cf1) == __CFCSetClassType((CFCharacterSetRef)cf2)) && !__CFCSetIsCompactBitmap((CFCharacterSetRef)cf1)) { // Types are identical, we can do it fast
         switch (__CFCSetClassType((CFCharacterSetRef)cf1)) {
             case __kCFCharSetClassBuiltin:
                 return (__CFCSetBuiltinType((CFCharacterSetRef)cf1) == __CFCSetBuiltinType((CFCharacterSetRef)cf2) && isInvertStateIdentical ? true : false);
@@ -920,12 +920,21 @@ static Boolean __CFCharacterSetEqual(CFTypeRef cf1, CFTypeRef cf2) {
                 return (__CFCSetRangeFirstChar((CFCharacterSetRef)cf1) == __CFCSetRangeFirstChar((CFCharacterSetRef)cf2) && __CFCSetRangeLength((CFCharacterSetRef)cf1) && __CFCSetRangeLength((CFCharacterSetRef)cf2) && isInvertStateIdentical ? true : false);
 
             case __kCFCharSetClassString:
-                if (__CFCSetStringLength((CFCharacterSetRef)cf1) == __CFCSetStringLength((CFCharacterSetRef)cf2) && isInvertStateIdentical) {
+                if (isInvertStateIdentical) {
                     const UniChar *buf1 = __CFCSetStringBuffer((CFCharacterSetRef)cf1);
+                    const UniChar *buf1End = buf1 + __CFCSetStringLength((CFCharacterSetRef)cf1);
                     const UniChar *buf2 = __CFCSetStringBuffer((CFCharacterSetRef)cf2);
-                    CFIndex length = __CFCSetStringLength((CFCharacterSetRef)cf1);
+                    const UniChar *buf2End = buf2 + __CFCSetStringLength((CFCharacterSetRef)cf2);
 
-                    while (length--) if (*buf1++ != *buf2++) return false;
+                    while ((buf1 < buf1End) && (buf2 < buf2End)) {
+                        UniChar char1 = *buf1;
+                        UniChar char2 = *buf2;
+
+                        if (char1 != char2) return false;
+
+                        do { ++buf1; } while ((buf1 < buf1End) && (char1 == *buf1));
+                        do { ++buf2; } while ((buf2 < buf2End) && (char2 == *buf2));
+                    }
                 } else {
                     return false;
                 }
@@ -1232,7 +1241,7 @@ static CFStringRef  __CFCharacterSetCopyDescription(CFTypeRef cf) {
             break;
 
         case __kCFCharSetClassRange:
-            return CFStringCreateWithFormat(CFGetAllocator((CFCharacterSetRef)cf), NULL, CFSTR("<CFCharacterSet Range(%d, %d)>"), __CFCSetRangeFirstChar((CFCharacterSetRef)cf), __CFCSetRangeLength((CFCharacterSetRef)cf));
+            return CFStringCreateWithFormat(CFGetAllocator((CFCharacterSetRef)cf), NULL, CFSTR("<CFCharacterSet Range(%u, %ld)>"), (unsigned int)__CFCSetRangeFirstChar((CFCharacterSetRef)cf), (long)__CFCSetRangeLength((CFCharacterSetRef)cf));
 
         case __kCFCharSetClassString: {
             CFStringRef format = CFSTR("<CFCharacterSet Items(");
@@ -1241,7 +1250,7 @@ static CFStringRef  __CFCharacterSetCopyDescription(CFTypeRef cf) {
             string = CFStringCreateMutable(CFGetAllocator(cf), CFStringGetLength(format) + 7 * length + 2); // length of format + "U+XXXX "(7) * length + ")>"(2)
             CFStringAppend(string, format);
             for (idx = 0;idx < length;idx++) {
-                CFStringAppendFormat(string, NULL, CFSTR("%sU+%04X"), (idx > 0 ? " " : ""), (UInt32)((__CFCSetStringBuffer((CFCharacterSetRef)cf))[idx]));
+                CFStringAppendFormat(string, NULL, CFSTR("%sU+%04X"), (idx > 0 ? " " : ""), (unsigned int)((__CFCSetStringBuffer((CFCharacterSetRef)cf))[idx]));
             }
             CFStringAppend(string, CFSTR(")>"));
             return string;
@@ -1288,7 +1297,7 @@ static const CFRuntimeClass __CFCharacterSetClass = {
 
 static bool __CFCheckForExapendedSet = false;
 
-__private_extern__ void __CFCharacterSetInitialize(void) {
+CF_PRIVATE void __CFCharacterSetInitialize(void) {
     const char *checkForExpandedSet = __CFgetenv("__CF_DEBUG_EXPANDED_SET");
 
     __kCFCharacterSetTypeID = _CFRuntimeRegisterClass(&__CFCharacterSetClass);
@@ -2064,6 +2073,14 @@ void CFCharacterSetAddCharactersInRange(CFMutableCharacterSetRef theSet, CFRange
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
     __CFCSetValidateRange(theRange, __PRETTY_FUNCTION__);
 
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
+
     if (!theRange.length || (__CFCSetIsInverted(theSet) && __CFCSetIsEmpty(theSet))) return; // Inverted && empty set contains all char
 
     if (!__CFCSetIsInverted(theSet)) {
@@ -2121,6 +2138,14 @@ void CFCharacterSetRemoveCharactersInRange(CFMutableCharacterSetRef theSet, CFRa
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
     __CFCSetValidateRange(theRange, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     if (!theRange.length || (!__CFCSetIsInverted(theSet) && __CFCSetIsEmpty(theSet))) return; // empty set
 
@@ -2187,6 +2212,14 @@ void CFCharacterSetAddCharactersInString(CFMutableCharacterSetRef theSet,  CFStr
     CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, addCharactersInString:(NSString *)theString);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     if ((__CFCSetIsEmpty(theSet) && __CFCSetIsInverted(theSet)) || !(length = CFStringGetLength(theString))) return;
 
@@ -2271,6 +2304,14 @@ void CFCharacterSetRemoveCharactersInString(CFMutableCharacterSetRef theSet, CFS
     CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, removeCharactersInString:(NSString *)theString);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     if ((__CFCSetIsEmpty(theSet) && !__CFCSetIsInverted(theSet)) || !(length = CFStringGetLength(theString))) return;
 
@@ -2347,6 +2388,14 @@ void CFCharacterSetUnion(CFMutableCharacterSetRef theSet, CFCharacterSetRef theO
     CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, formUnionWithCharacterSet:(NSCharacterSet *)theOtherSet);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     if (__CFCSetIsEmpty(theSet) && __CFCSetIsInverted(theSet)) return; // Inverted empty set contains all char
 
@@ -2470,6 +2519,14 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
     CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, formIntersectionWithCharacterSet:(NSCharacterSet *)theOtherSet);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     if (__CFCSetIsEmpty(theSet) && !__CFCSetIsInverted(theSet)) return; // empty set
 
@@ -2569,7 +2626,9 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                 for (idx = 1;idx <= MAX_ANNEX_PLANE;idx++) {
                     if ((otherSetPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theOtherSet, idx))) {
                         annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         CFCharacterSetIntersect(annexPlane, otherSetPlane);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         if (__CFCSetIsEmpty(annexPlane) && !__CFCSetIsInverted(annexPlane)) __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
                     } else if (__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx)) {
                         __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
@@ -2618,7 +2677,9 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                 for (idx = 1;idx <= MAX_ANNEX_PLANE;idx++) {
                     if ((otherSetPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSetNoAlloc(tempOtherSet, idx))) {
                         annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         CFCharacterSetIntersect(annexPlane, otherSetPlane);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         if (__CFCSetIsEmpty(annexPlane) && !__CFCSetIsInverted(annexPlane)) __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
                     } else if (__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx)) {
                         __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
@@ -2651,6 +2712,14 @@ void CFCharacterSetInvert(CFMutableCharacterSetRef theSet) {
     CF_OBJC_FUNCDISPATCHV(__kCFCharacterSetTypeID, void, (NSMutableCharacterSet *)theSet, invert);
 
     __CFCSetValidateTypeAndMutability(theSet, __PRETTY_FUNCTION__);
+    
+    if (__CFCSetIsBuiltin((CFCharacterSetRef)theSet) && !__CFCSetIsMutable((CFCharacterSetRef)theSet) && !__CFCSetIsInverted((CFCharacterSetRef)theSet)) {
+        CFCharacterSetRef sharedSet = CFCharacterSetGetPredefined(__CFCSetBuiltinType((CFCharacterSetRef)theSet));
+        if (sharedSet == theSet) { // We're trying to dealloc the builtin set
+            CFAssert1(0, __kCFLogAssertion, "%s: Trying to mutable predefined set.", __PRETTY_FUNCTION__);
+            return; // We don't mutate builtin set
+        }
+    }
 
     __CFCSetPutHasHashValue(theSet, false);
 

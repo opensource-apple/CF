@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBitVector.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -176,24 +176,24 @@ static CFStringRef __CFBitVectorCopyDescription(CFTypeRef cf) {
     cnt = __CFBitVectorCount(bv);
     buckets = bv->_buckets;
     result = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
-    CFStringAppendFormat(result, NULL, CFSTR("<CFBitVector %p [%p]>{count = %u, capacity = %u, objects = (\n"), cf, CFGetAllocator(bv), cnt, __CFBitVectorCapacity(bv));
+    CFStringAppendFormat(result, NULL, CFSTR("<CFBitVector %p [%p]>{count = %lu, capacity = %lu, objects = (\n"), cf, CFGetAllocator(bv), (unsigned long)cnt, __CFBitVectorCapacity(bv));
     for (idx = 0; idx < (cnt / 64); idx++) {	/* Print groups of 64 */
 	CFIndex idx2;
-	CFStringAppendFormat(result, NULL, CFSTR("\t%u : "), (idx * 64));
+	CFStringAppendFormat(result, NULL, CFSTR("\t%lu : "), (unsigned long)(idx * 64));
 	for (idx2 = 0; idx2 < 64; idx2 += 4) {
 	    CFIndex bucketIdx = (idx << 6) + idx2;
-	    CFStringAppendFormat(result, NULL, CFSTR("%d%d%d%d"),
-		__CFBitVectorBit(buckets, bucketIdx + 0),
-		__CFBitVectorBit(buckets, bucketIdx + 1),
-		__CFBitVectorBit(buckets, bucketIdx + 2),
-		__CFBitVectorBit(buckets, bucketIdx + 3));
+	    CFStringAppendFormat(result, NULL, CFSTR("%u%u%u%u"),
+		(unsigned int)__CFBitVectorBit(buckets, bucketIdx + 0),
+		(unsigned int)__CFBitVectorBit(buckets, bucketIdx + 1),
+		(unsigned int)__CFBitVectorBit(buckets, bucketIdx + 2),
+		(unsigned int)__CFBitVectorBit(buckets, bucketIdx + 3));
 	}
 	CFStringAppend(result, CFSTR("\n"));
     }
     if (idx * 64 < cnt) {
-	CFStringAppendFormat(result, NULL, CFSTR("\t%u : "), (idx * 64));
+	CFStringAppendFormat(result, NULL, CFSTR("\t%lu : "), (unsigned long)(idx * 64));
 	for (idx = (idx * 64); idx < cnt; idx++) {	/* Print remainder */
-	    CFStringAppendFormat(result, NULL, CFSTR("%d"), __CFBitVectorBit(buckets, idx));
+	    CFStringAppendFormat(result, NULL, CFSTR("%u"), (unsigned int)__CFBitVectorBit(buckets, idx));
 	}
     }
     CFStringAppend(result, CFSTR("\n)}"));
@@ -225,7 +225,7 @@ static const CFRuntimeClass __CFBitVectorClass = {
     __CFBitVectorCopyDescription
 };
 
-__private_extern__ void __CFBitVectorInitialize(void) {
+CF_PRIVATE void __CFBitVectorInitialize(void) {
     __kCFBitVectorTypeID = _CFRuntimeRegisterClass(&__CFBitVectorClass);
 }
 

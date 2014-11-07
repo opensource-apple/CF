@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFDate.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -34,6 +34,8 @@
 #include <CoreFoundation/CFNumber.h>
 #include "CFInternal.h"
 #include <math.h>
+#include <dispatch/dispatch.h>
+
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #include <sys/time.h>
 #endif
@@ -48,16 +50,43 @@
 const CFTimeInterval kCFAbsoluteTimeIntervalSince1970 = 978307200.0L;
 const CFTimeInterval kCFAbsoluteTimeIntervalSince1904 = 3061152000.0L;
 
-__private_extern__ double __CFTSRRate = 0.0;
+CF_PRIVATE double __CFTSRRate = 0.0;
 static double __CF1_TSRRate = 0.0;
 
-__private_extern__ int64_t __CFTimeIntervalToTSR(CFTimeInterval ti) {
+CF_PRIVATE uint64_t __CFTimeIntervalToTSR(CFTimeInterval ti) {
     if ((ti * __CFTSRRate) > INT64_MAX / 2) return (INT64_MAX / 2);
-    return (int64_t)(ti * __CFTSRRate);
+    return (uint64_t)(ti * __CFTSRRate);
 }
 
-__private_extern__ CFTimeInterval __CFTSRToTimeInterval(int64_t tsr) {
+CF_PRIVATE CFTimeInterval __CFTSRToTimeInterval(uint64_t tsr) {
     return (CFTimeInterval)((double)tsr * __CF1_TSRRate);
+}
+
+CF_PRIVATE CFTimeInterval __CFTimeIntervalUntilTSR(uint64_t tsr) {
+    CFDateGetTypeID();
+    uint64_t now = mach_absolute_time();
+    if (tsr >= now) {
+        return __CFTSRToTimeInterval(tsr - now);
+    } else {
+        return -__CFTSRToTimeInterval(now - tsr);
+    }
+}
+
+// Technically this is 'TSR units' not a strict 'TSR' absolute time
+CF_PRIVATE uint64_t __CFTSRToNanoseconds(uint64_t tsr) {
+    double tsrInNanoseconds = floor(tsr * __CF1_TSRRate * NSEC_PER_SEC);
+    uint64_t ns = (uint64_t)tsrInNanoseconds;
+    return ns;
+}
+
+CF_PRIVATE dispatch_time_t __CFTSRToDispatchTime(uint64_t tsr) {
+    uint64_t tsrInNanoseconds = __CFTSRToNanoseconds(tsr);
+    
+    // It's important to clamp this value to INT64_MAX or it will become interpreted by dispatch_time as a relative value instead of absolute time
+    if (tsrInNanoseconds > INT64_MAX - 1) tsrInNanoseconds = INT64_MAX - 1;
+    
+    // 2nd argument of dispatch_time is a value in nanoseconds, but tsr does not equal nanoseconds on all platforms.
+    return dispatch_time(1, (int64_t)tsrInNanoseconds);
 }
 
 CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
@@ -69,7 +98,7 @@ CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
     return ret;
 }
 
-__private_extern__ void __CFDateInitialize(void) {
+CF_PRIVATE void __CFDateInitialize(void) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     struct mach_timebase_info info;
     mach_timebase_info(&info);
@@ -84,7 +113,7 @@ __private_extern__ void __CFDateInitialize(void) {
     __CF1_TSRRate = 1.0 / __CFTSRRate;
 #elif DEPLOYMENT_TARGET_LINUX
     struct timespec res;
-    if (!clock_getres(CLOCK_MONOTONIC, &res)) {
+    if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
         HALT;
     }
     __CFTSRRate = res.tv_sec + (1000000000 * res.tv_nsec);

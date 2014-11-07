@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBasicHashFindBucket.m
-	Copyright (c) 2009-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2009-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -132,7 +132,7 @@ FIND_BUCKET_NAME (CFConstBasicHashRef ht, uintptr_t stack_key
             if (__CFBasicHashSubABOne == curr_key) curr_key = ~0UL;
 #if FIND_BUCKET_FOR_INDIRECT_KEY
             // curr_key holds the value coming in here
-            curr_key = ht->callbacks->getIndirectKey(ht, curr_key);
+            curr_key = __CFBasicHashGetIndirectKey(ht, curr_key);
 #endif
             if (curr_key == stack_key || ((!hashes || hashes[probe] == hash_code) && __CFBasicHashTestEqualKey(ht, curr_key, stack_key))) {
                 COCOA_HASHTABLE_PROBING_END(ht, idx + 1);

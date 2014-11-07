@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFNumberFormatter.c
-	Copyright (c) 2002-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -31,8 +31,7 @@
 #include <CoreFoundation/CFBigNumber.h>
 #include "CFInternal.h"
 #include "CFLocaleInternal.h"
-#include <unicode/unum.h>
-#include <unicode/ucurr.h>
+#include "CFICULogging.h"
 #include <math.h>
 #include <float.h>
 
@@ -55,6 +54,7 @@ struct __CFNumberFormatter {
     CFStringRef _zeroSym;
     Boolean _isLenient;
     Boolean _userSetMultiplier;
+    Boolean _usesCharacterDirection;
 };
 
 static CFStringRef __CFNumberFormatterCopyDescription(CFTypeRef cf) {
@@ -64,7 +64,7 @@ static CFStringRef __CFNumberFormatterCopyDescription(CFTypeRef cf) {
 
 static void __CFNumberFormatterDeallocate(CFTypeRef cf) {
     CFNumberFormatterRef formatter = (CFNumberFormatterRef)cf;
-    if (formatter->_nf) unum_close(formatter->_nf);
+    if (formatter->_nf) __cficu_unum_close(formatter->_nf);
     if (formatter->_locale) CFRelease(formatter->_locale);
     if (formatter->_format) CFRelease(formatter->_format);
     if (formatter->_defformat) CFRelease(formatter->_defformat);
@@ -115,6 +115,7 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     memory->_zeroSym = NULL;
     memory->_isLenient = false;
     memory->_userSetMultiplier = false;
+    memory->_usesCharacterDirection = false;
     if (NULL == locale) locale = CFLocaleGetSystem();
     memory->_style = style;
     uint32_t ustyle;
@@ -144,7 +145,7 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
 	return NULL;
     }
     UErrorCode status = U_ZERO_ERROR;
-    memory->_nf = unum_open((UNumberFormatStyle)ustyle, NULL, 0, cstr, NULL, &status);
+    memory->_nf = __cficu_unum_open((UNumberFormatStyle)ustyle, NULL, 0, cstr, NULL, &status);
     CFAssert2(memory->_nf, __kCFLogAssertion, "%s(): error (%d) creating number formatter", __PRETTY_FUNCTION__, status);
     if (NULL == memory->_nf) {
 	CFRelease(memory);
@@ -154,16 +155,16 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     if (kCFNumberFormatterNoStyle == style) {
         status = U_ZERO_ERROR;
 	ubuff[0] = '#'; ubuff[1] = ';'; ubuff[2] = '#';
-        unum_applyPattern(memory->_nf, false, ubuff, 3, NULL, &status);
-	unum_setAttribute(memory->_nf, UNUM_MAX_INTEGER_DIGITS, 42);
-	unum_setAttribute(memory->_nf, UNUM_MAX_FRACTION_DIGITS, 0);
+        __cficu_unum_applyPattern(memory->_nf, false, ubuff, 3, NULL, &status);
+	__cficu_unum_setAttribute(memory->_nf, UNUM_MAX_INTEGER_DIGITS, 42);
+	__cficu_unum_setAttribute(memory->_nf, UNUM_MAX_FRACTION_DIGITS, 0);
     }
     memory->_locale = locale ? CFLocaleCreateCopy(allocator, locale) : CFLocaleGetSystem();
     __CFNumberFormatterCustomize(memory);
     if (kCFNumberFormatterSpellOutStyle != memory->_style && kCFNumberFormatterOrdinalStyle != memory->_style && kCFNumberFormatterDurationStyle != memory->_style) {
 	UChar ubuffer[BUFFER_SIZE];
 	status = U_ZERO_ERROR;
-	int32_t ret = unum_toPattern(memory->_nf, false, ubuffer, BUFFER_SIZE, &status);
+	int32_t ret = __cficu_unum_toPattern(memory->_nf, false, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
 	    memory->_format = CFStringCreateWithCharacters(allocator, (const UniChar *)ubuffer, ret);
 	}
@@ -171,13 +172,13 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
     memory->_defformat = memory->_format ? (CFStringRef)CFRetain(memory->_format) : NULL;
     memory->_compformat = memory->_format ? __CFNumberFormatterCreateCompressedString(memory->_format, true, NULL) : NULL;
     if (kCFNumberFormatterSpellOutStyle != memory->_style && kCFNumberFormatterOrdinalStyle != memory->_style && kCFNumberFormatterDurationStyle != memory->_style) {
-	int32_t n = unum_getAttribute(memory->_nf, UNUM_MULTIPLIER);
+	int32_t n = __cficu_unum_getAttribute(memory->_nf, UNUM_MULTIPLIER);
 	if (1 != n) {
 	    memory->_multiplier = CFNumberCreate(allocator, kCFNumberSInt32Type, &n);
-	    unum_setAttribute(memory->_nf, UNUM_MULTIPLIER, 1);
+	    __cficu_unum_setAttribute(memory->_nf, UNUM_MULTIPLIER, 1);
 	}
     }
-    unum_setAttribute(memory->_nf, UNUM_LENIENT_PARSE, 0);
+    __cficu_unum_setAttribute(memory->_nf, UNUM_LENIENT_PARSE, 0);
     return (CFNumberFormatterRef)memory;
 }
 
@@ -225,15 +226,15 @@ static void __substituteFormatStringFromPrefsNF(CFNumberFormatterRef formatter) 
 		if (CFStringGetCString(localeName, buffer, BUFFER_SIZE, kCFStringEncodingASCII)) cstr = buffer;
 	    }
 	    UErrorCode status = U_ZERO_ERROR;
-	    UNumberFormat *nf = unum_open((UNumberFormatStyle)icustyle, NULL, 0, cstr, NULL, &status);
+	    UNumberFormat *nf = __cficu_unum_open((UNumberFormatStyle)icustyle, NULL, 0, cstr, NULL, &status);
 	    if (NULL != nf) {
 		UChar ubuffer[BUFFER_SIZE];
 		status = U_ZERO_ERROR;
-		int32_t number_len = unum_toPattern(nf, false, ubuffer, BUFFER_SIZE, &status);
+		int32_t number_len = __cficu_unum_toPattern(nf, false, ubuffer, BUFFER_SIZE, &status);
 		if (U_SUCCESS(status) && number_len <= BUFFER_SIZE) {
 		    CFStringRef numberString = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)ubuffer, number_len);
 		    status = U_ZERO_ERROR;
-		    int32_t formatter_len = unum_toPattern(formatter->_nf, false, ubuffer, BUFFER_SIZE, &status);
+		    int32_t formatter_len = __cficu_unum_toPattern(formatter->_nf, false, ubuffer, BUFFER_SIZE, &status);
 		    if (U_SUCCESS(status) && formatter_len <= BUFFER_SIZE) {
 			CFMutableStringRef formatString = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
 			CFStringAppendCharacters(formatString, (const UniChar *)ubuffer, formatter_len);
@@ -247,7 +248,7 @@ static void __substituteFormatStringFromPrefsNF(CFNumberFormatterRef formatter) 
 		    }
 		    CFRelease(numberString);
 		}
-		unum_close(nf);
+		__cficu_unum_close(nf);
 	    }
 	}
     }
@@ -301,7 +302,7 @@ static void __CFNumberFormatterApplySymbolPrefs(const void *key, const void *val
 	    item_ustr = item_buffer;
 	}
 	UErrorCode status = U_ZERO_ERROR;
-	unum_setSymbol(formatter->_nf, sym, item_ustr, item_cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, sym, item_ustr, item_cnt, &status);
    }
 }
 
@@ -318,21 +319,21 @@ static UErrorCode __CFNumberFormatterApplyPattern(CFNumberFormatterRef formatter
 	ustr = ubuffer;
     }
     UErrorCode status = U_ZERO_ERROR;
-    unum_applyPattern(formatter->_nf, false, ustr, cnt, NULL, &status);
+    __cficu_unum_applyPattern(formatter->_nf, false, ustr, cnt, NULL, &status);
 
-    // unum_applyPattern() may have magically changed other attributes based on
+    // __cficu_unum_applyPattern() may have magically changed other attributes based on
     // the contents of the format string; we simply expose that ICU behavior, except
     // for UNUM_MULTIPLIER, which we re-read and reset, like we did at initialization
     // time though any user-set multiplier state takes precedence.
     if (formatter->_userSetMultiplier) {
-	unum_setAttribute(formatter->_nf, UNUM_MULTIPLIER, 1);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MULTIPLIER, 1);
     } else {
 	if (formatter->_multiplier) CFRelease(formatter->_multiplier);
         formatter->_multiplier = NULL;
-        int32_t n = unum_getAttribute(formatter->_nf, UNUM_MULTIPLIER);
+        int32_t n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MULTIPLIER);
         if (1 != n) {
 	    formatter->_multiplier = CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
-	    unum_setAttribute(formatter->_nf, UNUM_MULTIPLIER, 1);
+	    __cficu_unum_setAttribute(formatter->_nf, UNUM_MULTIPLIER, 1);
         }
     }
     return status;
@@ -365,7 +366,7 @@ CFStringRef CFNumberFormatterGetFormat(CFNumberFormatterRef formatter) {
     UChar ubuffer[BUFFER_SIZE];
     CFStringRef newString = NULL;
     UErrorCode status = U_ZERO_ERROR;
-    int32_t ret = unum_toPattern(formatter->_nf, false, ubuffer, BUFFER_SIZE, &status);
+    int32_t ret = __cficu_unum_toPattern(formatter->_nf, false, ubuffer, BUFFER_SIZE, &status);
     if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
 	newString = CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, ret);
     }
@@ -397,7 +398,7 @@ void CFNumberFormatterSetFormat(CFNumberFormatterRef formatter, CFStringRef form
 	if (U_SUCCESS(status)) {
 	    UChar ubuffer2[BUFFER_SIZE];
 	    status = U_ZERO_ERROR;
-	    int32_t ret = unum_toPattern(formatter->_nf, false, ubuffer2, BUFFER_SIZE, &status);
+	    int32_t ret = __cficu_unum_toPattern(formatter->_nf, false, ubuffer2, BUFFER_SIZE, &status);
 	    if (U_SUCCESS(status) && ret <= BUFFER_SIZE) {
 	        if (formatter->_format) CFRelease(formatter->_format);
 		formatter->_format = CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer2, ret);
@@ -425,6 +426,7 @@ CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CF
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(number, CFNumberGetTypeID());
+    // The values of CFNumbers with large unsigned 64-bit ints don't survive well through this
     CFNumberType type = CFNumberGetType(number);
     char buffer[64];
     CFNumberGetValue(number, type, buffer);
@@ -438,12 +440,12 @@ CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CF
 		value = (T)(value * multiplier);                     \
 	}								\
 	status = U_ZERO_ERROR;						\
-	used = FUNC(formatter->_nf, value, ubuffer, cnt, NULL, &status); \
+	used = FUNC(formatter->_nf, value, ubuffer + 1, cnt, NULL, &status); \
 	if (status == U_BUFFER_OVERFLOW_ERROR || cnt < used) {		\
-	    cnt = used + 1;						\
+	    cnt = used + 1 + 1;						\
 	    ustr = (UChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UChar) * cnt, 0); \
 	    status = U_ZERO_ERROR;					\
-	    used = FUNC(formatter->_nf, value, ustr, cnt, NULL, &status); \
+	    used = FUNC(formatter->_nf, value, ustr + 1, cnt, NULL, &status); \
 	}
 
 #define FORMAT_INT(T, FUN)                                                   \
@@ -454,15 +456,15 @@ CFStringRef CFNumberFormatterCreateStringWithNumber(CFAllocatorRef allocator, CF
         }                                                           \
         _CFBigNum bignum;                                           \
         FUN(&bignum, value);                                        \
-        char buffer[BUFFER_SIZE];                                           \
+        char buffer[BUFFER_SIZE + 1];                                           \
         _CFBigNumToCString(&bignum, false, true, buffer, BUFFER_SIZE);      \
         status = U_ZERO_ERROR;                                      \
-        used = unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ubuffer, BUFFER_SIZE, NULL, &status);     \
+        used = __cficu_unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ubuffer + 1, BUFFER_SIZE, NULL, &status);     \
         if (status == U_BUFFER_OVERFLOW_ERROR || cnt < used) {      \
-            cnt = used + 1;                                         \
+            cnt = used + 1 + 1;                                         \
             ustr = (UChar *)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(UChar) * cnt, 0);                 \
             status = U_ZERO_ERROR;                                  \
-            used = unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ustr, cnt, NULL, &status);            \
+            used = __cficu_unum_formatDecimal(formatter->_nf, buffer, strlen(buffer), ustr + 1, cnt, NULL, &status);            \
         }                                                           \
 
 CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFNumberFormatterRef formatter, CFNumberType numberType, const void *valuePtr) {
@@ -470,13 +472,13 @@ CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFN
     __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     GET_MULTIPLIER;
-    UChar *ustr = NULL, ubuffer[BUFFER_SIZE];
+    UChar *ustr = NULL, ubuffer[BUFFER_SIZE + 1];
     UErrorCode status = U_ZERO_ERROR;
     CFIndex used, cnt = BUFFER_SIZE;
     if (numberType == kCFNumberFloat64Type || numberType == kCFNumberDoubleType) {
-	FORMAT_FLT(double, unum_formatDouble)
+	FORMAT_FLT(double, __cficu_unum_formatDouble)
     } else if (numberType == kCFNumberFloat32Type || numberType == kCFNumberFloatType) {
-	FORMAT_FLT(float, unum_formatDouble)
+	FORMAT_FLT(float, __cficu_unum_formatDouble)
     } else if (numberType == kCFNumberSInt64Type || numberType == kCFNumberLongLongType) {
 	FORMAT_INT(int64_t, _CFBigNumInitWithInt64)
     } else if (numberType == kCFNumberLongType || numberType == kCFNumberCFIndexType) {
@@ -497,7 +499,16 @@ CFStringRef CFNumberFormatterCreateStringWithValue(CFAllocatorRef allocator, CFN
     }
     CFStringRef string = NULL;
     if (U_SUCCESS(status)) {
-	string = CFStringCreateWithCharacters(allocator, ustr ? (const UniChar *)ustr : (const UniChar *)ubuffer, used);
+        UniChar *bufferToUse = ustr ? (UniChar *)ustr : (UniChar *)ubuffer;
+        if (formatter->_usesCharacterDirection && CFLocaleGetLanguageCharacterDirection(CFLocaleGetIdentifier(formatter->_locale)) == kCFLocaleLanguageDirectionRightToLeft) {
+            // Insert Unicode RTL marker
+            bufferToUse[0] = 0x200F;
+            used++;
+        } else {
+            // Move past direction marker
+            bufferToUse++;
+        }
+        string = CFStringCreateWithCharacters(allocator, bufferToUse, used);
     }
     if (ustr) CFAllocatorDeallocate(kCFAllocatorSystemDefault, ustr);
     return string;
@@ -606,7 +617,7 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
         } else {
             range.length = CFStringGetLength(stringToParse);
         }
-        // unum_parse chokes on leading whitespace
+        // __cficu_unum_parse chokes on leading whitespace
         CFCharacterSetRef whitespace = CFCharacterSetGetPredefined(kCFCharacterSetWhitespace);
         while(range.length > 0 && CFCharacterSetIsCharacterMember(whitespace, CFStringGetCharacterAtIndex(stringToParse, range.location))) {
             range.location++;
@@ -644,10 +655,10 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
     case kCFNumberSInt32Type: case kCFNumberIntType:
     case kCFNumberLongType: case kCFNumberCFIndexType:
     case kCFNumberSInt64Type: case kCFNumberLongLongType:
-	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 1); // ignored by ICU for rule-based formatters
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 1); // ignored by ICU for rule-based formatters
 	break;
     default:
-	unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 0); // ignored by ICU for rule-based formatters
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_PARSE_INT_ONLY, 0); // ignored by ICU for rule-based formatters
 	integerOnly = 0;
 	break;
     }
@@ -660,7 +671,7 @@ Boolean CFNumberFormatterGetValueFromString(CFNumberFormatterRef formatter, CFSt
     } else {
 	char buffer[1024];
         memset(buffer, 0, sizeof(buffer));
-	int32_t len = unum_parseDecimal(formatter->_nf, ustr, range.length, &dpos, buffer, sizeof(buffer), &status);
+	int32_t len = __cficu_unum_parseDecimal(formatter->_nf, ustr, range.length, &dpos, buffer, sizeof(buffer), &status);
         if (!U_FAILURE(status) && 0 < len && integerOnly) {
 	    char *endptr = NULL;
 	    errno = 0;
@@ -766,37 +777,37 @@ void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef ke
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_CURRENCY_CODE, ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_CURRENCY_CODE, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterDecimalSeparatorKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_DECIMAL_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_DECIMAL_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterCurrencyDecimalSeparatorKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_MONETARY_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_MONETARY_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterAlwaysShowDecimalSeparatorKey == key) {
 	__CFGenericValidateType(value, CFBooleanGetTypeID());
-	unum_setAttribute(formatter->_nf, UNUM_DECIMAL_ALWAYS_SHOWN, (kCFBooleanTrue == value));
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_DECIMAL_ALWAYS_SHOWN, (kCFBooleanTrue == value));
     } else if (kCFNumberFormatterGroupingSeparatorKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_GROUPING_SEPARATOR_SYMBOL, (const UChar *)ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_GROUPING_SEPARATOR_SYMBOL, (const UChar *)ubuffer, cnt, &status);
     } else if (kCFNumberFormatterUseGroupingSeparatorKey == key) {
 	__CFGenericValidateType(value, CFBooleanGetTypeID());
-	unum_setAttribute(formatter->_nf, UNUM_GROUPING_USED, (kCFBooleanTrue == value));
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_GROUPING_USED, (kCFBooleanTrue == value));
     } else if (kCFNumberFormatterPercentSymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_PERCENT_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_PERCENT_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterZeroSymbolKey == key) {
         __CFGenericValidateType(value, CFStringGetTypeID());
         CFStringRef old = formatter->_zeroSym;
@@ -807,83 +818,83 @@ void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef ke
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_NAN_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_NAN_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterInfinitySymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_INFINITY_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_INFINITY_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterMinusSignKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_MINUS_SIGN_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_MINUS_SIGN_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterPlusSignKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_PLUS_SIGN_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_PLUS_SIGN_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterCurrencySymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_CURRENCY_SYMBOL, (const UChar *)ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_CURRENCY_SYMBOL, (const UChar *)ubuffer, cnt, &status);
     } else if (kCFNumberFormatterExponentSymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setSymbol(formatter->_nf, UNUM_EXPONENTIAL_SYMBOL, ubuffer, cnt, &status);
+	__cficu_unum_setSymbol(formatter->_nf, UNUM_EXPONENTIAL_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterMinIntegerDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MIN_INTEGER_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MIN_INTEGER_DIGITS, n);
     } else if (kCFNumberFormatterMaxIntegerDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MAX_INTEGER_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MAX_INTEGER_DIGITS, n);
     } else if (kCFNumberFormatterMinFractionDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MIN_FRACTION_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MIN_FRACTION_DIGITS, n);
     } else if (kCFNumberFormatterMaxFractionDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MAX_FRACTION_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MAX_FRACTION_DIGITS, n);
     } else if (kCFNumberFormatterGroupingSizeKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_GROUPING_SIZE, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_GROUPING_SIZE, n);
     } else if (kCFNumberFormatterSecondaryGroupingSizeKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_SECONDARY_GROUPING_SIZE, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_SECONDARY_GROUPING_SIZE, n);
     } else if (kCFNumberFormatterRoundingModeKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_ROUNDING_MODE, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_ROUNDING_MODE, n);
     } else if (kCFNumberFormatterRoundingIncrementKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberDoubleType, &d);
-	unum_setDoubleAttribute(formatter->_nf, UNUM_ROUNDING_INCREMENT, d);
+	__cficu_unum_setDoubleAttribute(formatter->_nf, UNUM_ROUNDING_INCREMENT, d);
     } else if (kCFNumberFormatterFormatWidthKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_FORMAT_WIDTH, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_FORMAT_WIDTH, n);
     } else if (kCFNumberFormatterPaddingPositionKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_PADDING_POSITION, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_PADDING_POSITION, n);
     } else if (kCFNumberFormatterPaddingCharacterKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_PADDING_CHARACTER, ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_PADDING_CHARACTER, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterDefaultFormatKey == key) {
 	// read-only attribute
     } else if (kCFNumberFormatterMultiplierKey == key) {
@@ -897,65 +908,68 @@ void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef ke
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_POSITIVE_PREFIX, ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_POSITIVE_PREFIX, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterPositiveSuffixKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_POSITIVE_SUFFIX, (const UChar *)ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_POSITIVE_SUFFIX, (const UChar *)ubuffer, cnt, &status);
     } else if (kCFNumberFormatterNegativePrefixKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_NEGATIVE_PREFIX, ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_NEGATIVE_PREFIX, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterNegativeSuffixKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
 	cnt = CFStringGetLength((CFStringRef)value);
 	if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
 	CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-	unum_setTextAttribute(formatter->_nf, UNUM_NEGATIVE_SUFFIX, (const UChar *)ubuffer, cnt, &status);
+	__cficu_unum_setTextAttribute(formatter->_nf, UNUM_NEGATIVE_SUFFIX, (const UChar *)ubuffer, cnt, &status);
     } else if (kCFNumberFormatterPerMillSymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
         cnt = CFStringGetLength((CFStringRef)value);
         if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
         CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-        unum_setSymbol(formatter->_nf, UNUM_PERMILL_SYMBOL, ubuffer, cnt, &status);
+        __cficu_unum_setSymbol(formatter->_nf, UNUM_PERMILL_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterInternationalCurrencySymbolKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
         cnt = CFStringGetLength((CFStringRef)value);
         if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
         CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-        unum_setSymbol(formatter->_nf, UNUM_INTL_CURRENCY_SYMBOL, ubuffer, cnt, &status);
+        __cficu_unum_setSymbol(formatter->_nf, UNUM_INTL_CURRENCY_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterCurrencyGroupingSeparatorKey == key) {
 	__CFGenericValidateType(value, CFStringGetTypeID());
         cnt = CFStringGetLength((CFStringRef)value);
         if (BUFFER_SIZE < cnt) cnt = BUFFER_SIZE;
         CFStringGetCharacters((CFStringRef)value, CFRangeMake(0, cnt), (UniChar *)ubuffer);
-        unum_setSymbol(formatter->_nf, UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
+        __cficu_unum_setSymbol(formatter->_nf, UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL, ubuffer, cnt, &status);
     } else if (kCFNumberFormatterIsLenientKey == key) {
 	__CFGenericValidateType(value, CFBooleanGetTypeID());
 	formatter->_isLenient = (kCFBooleanTrue == value);
-	unum_setAttribute(formatter->_nf, UNUM_LENIENT_PARSE, (kCFBooleanTrue == value));
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_LENIENT_PARSE, (kCFBooleanTrue == value));
     } else if (kCFNumberFormatterUseSignificantDigitsKey == key) {
 	__CFGenericValidateType(value, CFBooleanGetTypeID());
-	unum_setAttribute(formatter->_nf, UNUM_SIGNIFICANT_DIGITS_USED, (kCFBooleanTrue == value));
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_SIGNIFICANT_DIGITS_USED, (kCFBooleanTrue == value));
     } else if (kCFNumberFormatterMinSignificantDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MIN_SIGNIFICANT_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MIN_SIGNIFICANT_DIGITS, n);
     } else if (kCFNumberFormatterMaxSignificantDigitsKey == key) {
 	__CFGenericValidateType(value, CFNumberGetTypeID());
 	CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
-	unum_setAttribute(formatter->_nf, UNUM_MAX_SIGNIFICANT_DIGITS, n);
+	__cficu_unum_setAttribute(formatter->_nf, UNUM_MAX_SIGNIFICANT_DIGITS, n);
+    } else if (kCFNumberFormatterUsesCharacterDirectionKey == key) {
+        __CFGenericValidateType(value, CFBooleanGetTypeID());
+        formatter->_usesCharacterDirection = value == kCFBooleanTrue;
     } else {
 	CFAssert3(0, __kCFLogAssertion, "%s(): unknown key %p (%@)", __PRETTY_FUNCTION__, key, key);
     }
     if (_CFExecutableLinkedOnOrAfter(CFSystemVersionSnowLeopard)) {
         // do a dummy call to CFNumberFormatterGetFormat() after changing an attribute because
         // ICU sometimes changes the pattern due to a property change, and we need to poke
-        // unum_toPattern() and also update our own variables
+        // __cficu_unum_toPattern() and also update our own variables
         CFNumberFormatterGetFormat(formatter);
     }
 }
@@ -973,7 +987,7 @@ CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFString
     if (kCFNumberFormatterOrdinalStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
     if (kCFNumberFormatterDurationStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
     if (kCFNumberFormatterCurrencyCodeKey == key) {
-	cnt = unum_getTextAttribute(formatter->_nf, UNUM_CURRENCY_CODE, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_CURRENCY_CODE, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt == 0) {
 	    CFStringRef localeName = CFLocaleGetIdentifier(formatter->_locale);
 	    char buffer[BUFFER_SIZE];
@@ -985,129 +999,129 @@ CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFString
 	        return NULL;
 	    }
 	    UErrorCode status = U_ZERO_ERROR;
-	    UNumberFormat *nf = unum_open(UNUM_CURRENCY, NULL, 0, cstr, NULL, &status);
+	    UNumberFormat *nf = __cficu_unum_open(UNUM_CURRENCY, NULL, 0, cstr, NULL, &status);
 	    if (NULL != nf) {
-		cnt = unum_getTextAttribute(nf, UNUM_CURRENCY_CODE, ubuffer, BUFFER_SIZE, &status);
-		unum_close(nf);
+		cnt = __cficu_unum_getTextAttribute(nf, UNUM_CURRENCY_CODE, ubuffer, BUFFER_SIZE, &status);
+		__cficu_unum_close(nf);
 	    }
 	}
 	if (U_SUCCESS(status) && 0 < cnt && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterDecimalSeparatorKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_DECIMAL_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_DECIMAL_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterCurrencyDecimalSeparatorKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_MONETARY_SEPARATOR_SYMBOL, (UChar *)ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_MONETARY_SEPARATOR_SYMBOL, (UChar *)ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterAlwaysShowDecimalSeparatorKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_DECIMAL_ALWAYS_SHOWN);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_DECIMAL_ALWAYS_SHOWN);
 	if (1) {
 	    return CFRetain(n ? kCFBooleanTrue : kCFBooleanFalse);
 	}
     } else if (kCFNumberFormatterGroupingSeparatorKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_GROUPING_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_GROUPING_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterUseGroupingSeparatorKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_GROUPING_USED);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_GROUPING_USED);
 	if (1) {
 	    return CFRetain(n ? kCFBooleanTrue : kCFBooleanFalse);
 	}
    } else if (kCFNumberFormatterPercentSymbolKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_PERCENT_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_PERCENT_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterZeroSymbolKey == key) {
         return formatter->_zeroSym ? CFRetain(formatter->_zeroSym) : NULL;
     } else if (kCFNumberFormatterNaNSymbolKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_NAN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_NAN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterInfinitySymbolKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_INFINITY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_INFINITY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterMinusSignKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_MINUS_SIGN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_MINUS_SIGN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterPlusSignKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_PLUS_SIGN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_PLUS_SIGN_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterCurrencySymbolKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_CURRENCY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_CURRENCY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterExponentSymbolKey == key) {
-	cnt = unum_getSymbol(formatter->_nf, UNUM_EXPONENTIAL_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_EXPONENTIAL_SYMBOL, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
     } else if (kCFNumberFormatterMinIntegerDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MIN_INTEGER_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MIN_INTEGER_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterMaxIntegerDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MAX_INTEGER_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MAX_INTEGER_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterMinFractionDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MIN_FRACTION_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MIN_FRACTION_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterMaxFractionDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MAX_FRACTION_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MAX_FRACTION_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterGroupingSizeKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_GROUPING_SIZE);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_GROUPING_SIZE);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterSecondaryGroupingSizeKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_SECONDARY_GROUPING_SIZE);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_SECONDARY_GROUPING_SIZE);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterRoundingModeKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_ROUNDING_MODE);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_ROUNDING_MODE);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterRoundingIncrementKey == key) {
-	d = unum_getDoubleAttribute(formatter->_nf, UNUM_ROUNDING_INCREMENT);
+	d = __cficu_unum_getDoubleAttribute(formatter->_nf, UNUM_ROUNDING_INCREMENT);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberDoubleType, &d);
 	}
     } else if (kCFNumberFormatterFormatWidthKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_FORMAT_WIDTH);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_FORMAT_WIDTH);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterPaddingPositionKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_PADDING_POSITION);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_PADDING_POSITION);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterPaddingCharacterKey == key) {
-	cnt = unum_getTextAttribute(formatter->_nf, UNUM_PADDING_CHARACTER, ubuffer, BUFFER_SIZE, &status);
+	cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_PADDING_CHARACTER, ubuffer, BUFFER_SIZE, &status);
 	if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
 	    return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
 	}
@@ -1116,55 +1130,55 @@ CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFString
     } else if (kCFNumberFormatterMultiplierKey == key) {
         return formatter->_multiplier ? CFRetain(formatter->_multiplier) : NULL;
     } else if (kCFNumberFormatterPositivePrefixKey == key) {
-        cnt = unum_getTextAttribute(formatter->_nf, UNUM_POSITIVE_PREFIX, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_POSITIVE_PREFIX, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterPositiveSuffixKey == key) {
-        cnt = unum_getTextAttribute(formatter->_nf, UNUM_POSITIVE_SUFFIX, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_POSITIVE_SUFFIX, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterNegativePrefixKey == key) {
-        cnt = unum_getTextAttribute(formatter->_nf, UNUM_NEGATIVE_PREFIX, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_NEGATIVE_PREFIX, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterNegativeSuffixKey == key) {
-        cnt = unum_getTextAttribute(formatter->_nf, UNUM_NEGATIVE_SUFFIX, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getTextAttribute(formatter->_nf, UNUM_NEGATIVE_SUFFIX, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterPerMillSymbolKey == key) {
-        cnt = unum_getSymbol(formatter->_nf, UNUM_PERMILL_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_PERMILL_SYMBOL, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterInternationalCurrencySymbolKey == key) {
-        cnt = unum_getSymbol(formatter->_nf, UNUM_INTL_CURRENCY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_INTL_CURRENCY_SYMBOL, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterCurrencyGroupingSeparatorKey == key) {
-        cnt = unum_getSymbol(formatter->_nf, UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
+        cnt = __cficu_unum_getSymbol(formatter->_nf, UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL, ubuffer, BUFFER_SIZE, &status);
         if (U_SUCCESS(status) && cnt <= BUFFER_SIZE) {
             return CFStringCreateWithCharacters(CFGetAllocator(formatter), (const UniChar *)ubuffer, cnt);
         }
     } else if (kCFNumberFormatterIsLenientKey == key) {
-	// unum_getAttribute(, UNUM_LENIENT_PARSE) is undefined.
+	// __cficu_unum_getAttribute(, UNUM_LENIENT_PARSE) is undefined.
 	return CFRetain(formatter->_isLenient ? kCFBooleanTrue : kCFBooleanFalse);
     } else if (kCFNumberFormatterUseSignificantDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_SIGNIFICANT_DIGITS_USED);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_SIGNIFICANT_DIGITS_USED);
 	if (1) {
 	    return CFRetain(n ? kCFBooleanTrue : kCFBooleanFalse);
 	}
     } else if (kCFNumberFormatterMinSignificantDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MIN_SIGNIFICANT_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MIN_SIGNIFICANT_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
     } else if (kCFNumberFormatterMaxSignificantDigitsKey == key) {
-	n = unum_getAttribute(formatter->_nf, UNUM_MAX_SIGNIFICANT_DIGITS);
+	n = __cficu_unum_getAttribute(formatter->_nf, UNUM_MAX_SIGNIFICANT_DIGITS);
 	if (1) {
 	    return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
 	}
@@ -1182,8 +1196,8 @@ Boolean CFNumberFormatterGetDecimalInfoForCurrencyCode(CFStringRef currencyCode,
     CFStringGetCharacters(currencyCode, CFRangeMake(0, 3), (UniChar *)ubuffer);
     ubuffer[3] = 0;
     UErrorCode icuStatus = U_ZERO_ERROR;
-    if (defaultFractionDigits) *defaultFractionDigits = ucurr_getDefaultFractionDigits(ubuffer, &icuStatus);
-    if (roundingIncrement) *roundingIncrement = ucurr_getRoundingIncrement(ubuffer, &icuStatus);
+    if (defaultFractionDigits) *defaultFractionDigits = __cficu_ucurr_getDefaultFractionDigits(ubuffer, &icuStatus);
+    if (roundingIncrement) *roundingIncrement = __cficu_ucurr_getRoundingIncrement(ubuffer, &icuStatus);
     if (U_FAILURE(icuStatus))
         return false;
     return (!defaultFractionDigits || 0 <= *defaultFractionDigits) && (!roundingIncrement || 0.0 <= *roundingIncrement);

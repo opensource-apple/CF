@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFApplicationPreferences.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -106,7 +106,7 @@ CF_EXPORT Boolean CFPreferencesAppBooleanValue(CFStringRef key, CFStringRef appN
     return result;
 }
 
-__private_extern__ CFIndex CFPreferencesAppIntegerValue(CFStringRef key, CFStringRef appName, Boolean *keyExistsAndHasValidFormat) {
+CF_PRIVATE CFIndex CFPreferencesAppIntegerValue(CFStringRef key, CFStringRef appName, Boolean *keyExistsAndHasValidFormat) {
     CFPropertyListRef value;
     CFIndex result;
     CFTypeID typeID = 0;
@@ -303,7 +303,7 @@ void _CFApplicationPreferencesUpdate(_CFApplicationPreferences *self) {
 
 CF_EXPORT CFDictionaryRef _CFApplicationPreferencesCopyRepresentation(_CFApplicationPreferences *self);
 
-__private_extern__ CFDictionaryRef __CFApplicationPreferencesCopyCurrentState(void) {
+CF_PRIVATE CFDictionaryRef __CFApplicationPreferencesCopyCurrentState(void) {
     _CFApplicationPreferences *self = _CFStandardApplicationPreferences(kCFPreferencesCurrentApplication);
     CFDictionaryRef result = _CFApplicationPreferencesCopyRepresentation(self);
     return result;
@@ -436,7 +436,7 @@ void _CFApplicationPreferencesSetStandardSearchList(_CFApplicationPreferences *a
 #undef ADD_DOMAIN
 
 
-__private_extern__ _CFApplicationPreferences *_CFStandardApplicationPreferences(CFStringRef appName) {
+CF_PRIVATE _CFApplicationPreferences *_CFStandardApplicationPreferences(CFStringRef appName) {
     _CFApplicationPreferences *appPreferences;
 //    CFAssert(appName != kCFPreferencesAnyApplication, __kCFLogAssertion, "Cannot use any of the CFPreferences...App... functions with an appName of kCFPreferencesAnyApplication");
     __CFSpinLock(&__CFApplicationPreferencesLock);

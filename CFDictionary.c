@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFDictionary.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 	Machine generated from Notes/HashingCode.template
 */
@@ -47,7 +47,6 @@
 const CFDictionaryKeyCallBacks kCFTypeDictionaryKeyCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryKeyCallBacks kCFCopyStringDictionaryKeyCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryValueCallBacks kCFTypeDictionaryValueCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual};
-__private_extern__ const CFDictionaryValueCallBacks kCFTypeDictionaryValueCompactableCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual};
 static const CFDictionaryKeyCallBacks __kCFNullDictionaryKeyCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
 static const CFDictionaryValueCallBacks __kCFNullDictionaryValueCallBacks = {0, NULL, NULL, NULL, NULL};
 
@@ -133,328 +132,131 @@ CFTypeID CFDictionaryGetTypeID(void) {
     return __kCFDictionaryTypeID;
 }
 
-#define GCRETAIN(A, B) kCFTypeSetCallBacks.retain(A, B)
-#define GCRELEASE(A, B) kCFTypeSetCallBacks.release(A, B)
-
-static uintptr_t __CFDictionaryStandardRetainValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0100) return stack_value;
-    return (CFBasicHashHasStrongValues(ht)) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)stack_value) : (uintptr_t)CFRetain((CFTypeRef)stack_value);
-}
-
-static uintptr_t __CFDictionaryStandardRetainKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0001) return stack_key;
-    return (CFBasicHashHasStrongKeys(ht)) ? (uintptr_t)GCRETAIN(kCFAllocatorSystemDefault, (CFTypeRef)stack_key) : (uintptr_t)CFRetain((CFTypeRef)stack_key);
-}
-
-static void __CFDictionaryStandardReleaseValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0200) return;
-    if (CFBasicHashHasStrongValues(ht)) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)stack_value); else CFRelease((CFTypeRef)stack_value);
-}
-
-static void __CFDictionaryStandardReleaseKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0002) return;
-    if (CFBasicHashHasStrongKeys(ht)) GCRELEASE(kCFAllocatorSystemDefault, (CFTypeRef)stack_key); else CFRelease((CFTypeRef)stack_key);
-}
-
-static Boolean __CFDictionaryStandardEquateValues(CFConstBasicHashRef ht, uintptr_t coll_value1, uintptr_t stack_value2) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0400) return coll_value1 == stack_value2;
-    return CFEqual((CFTypeRef)coll_value1, (CFTypeRef)stack_value2);
-}
-
-static Boolean __CFDictionaryStandardEquateKeys(CFConstBasicHashRef ht, uintptr_t coll_key1, uintptr_t stack_key2) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0004) return coll_key1 == stack_key2;
-    return CFEqual((CFTypeRef)coll_key1, (CFTypeRef)stack_key2);
-}
-
-static uintptr_t __CFDictionaryStandardHashKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0008) return stack_key;
-    return (uintptr_t)CFHash((CFTypeRef)stack_key);
-}
-
-static uintptr_t __CFDictionaryStandardGetIndirectKey(CFConstBasicHashRef ht, uintptr_t coll_value) {
-    return 0;
-}
-
-static CFStringRef __CFDictionaryStandardCopyValueDescription(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0800) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_value);
-    return CFCopyDescription((CFTypeRef)stack_value);
-}
-
-static CFStringRef __CFDictionaryStandardCopyKeyDescription(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    if (CFBasicHashGetSpecialBits(ht) & 0x0010) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_key);
-    return CFCopyDescription((CFTypeRef)stack_key);
-}
-
-static CFBasicHashCallbacks *__CFDictionaryStandardCopyCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb);
-static void __CFDictionaryStandardFreeCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb);
-
-static const CFBasicHashCallbacks CFDictionaryStandardCallbacks = {
-    __CFDictionaryStandardCopyCallbacks,
-    __CFDictionaryStandardFreeCallbacks,
-    __CFDictionaryStandardRetainValue,
-    __CFDictionaryStandardRetainKey,
-    __CFDictionaryStandardReleaseValue,
-    __CFDictionaryStandardReleaseKey,
-    __CFDictionaryStandardEquateValues,
-    __CFDictionaryStandardEquateKeys,
-    __CFDictionaryStandardHashKey,
-    __CFDictionaryStandardGetIndirectKey,
-    __CFDictionaryStandardCopyValueDescription,
-    __CFDictionaryStandardCopyKeyDescription
-};
-
-static CFBasicHashCallbacks *__CFDictionaryStandardCopyCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-    return (CFBasicHashCallbacks *)&CFDictionaryStandardCallbacks;
-}
-
-static void __CFDictionaryStandardFreeCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-}
-    
-
-static CFBasicHashCallbacks *__CFDictionaryCopyCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-    CFBasicHashCallbacks *newcb = NULL;
-    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
-        newcb = (CFBasicHashCallbacks *)auto_zone_allocate_object(objc_collectableZone(), sizeof(CFBasicHashCallbacks) + 10 * sizeof(void *), AUTO_MEMORY_UNSCANNED, false, false);
-    } else {
-        newcb = (CFBasicHashCallbacks *)CFAllocatorAllocate(allocator, sizeof(CFBasicHashCallbacks) + 10 * sizeof(void *), 0);
-    }
-    if (!newcb) return NULL;
-    memmove(newcb, (void *)cb, sizeof(CFBasicHashCallbacks) + 10 * sizeof(void *));
-    return newcb;
-}
-
-static void __CFDictionaryFreeCallbacks(CFConstBasicHashRef ht, CFAllocatorRef allocator, CFBasicHashCallbacks *cb) {
-    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
-    } else {
-       CFAllocatorDeallocate(allocator, cb);
-    }
-}
-    
-static uintptr_t __CFDictionaryRetainValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    const_any_pointer_t (*value_retain)(CFAllocatorRef, const_any_pointer_t) = (const_any_pointer_t (*)(CFAllocatorRef, const_any_pointer_t))cb->context[0];
-    if (NULL == value_retain) return stack_value;
-    return (uintptr_t)INVOKE_CALLBACK2(value_retain, CFGetAllocator(ht), (const_any_pointer_t)stack_value);
-}
-
-static uintptr_t __CFDictionaryRetainKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    const_any_pointer_t (*key_retain)(CFAllocatorRef, const_any_pointer_t) = (const_any_pointer_t (*)(CFAllocatorRef, const_any_pointer_t))cb->context[1];
-    if (NULL == key_retain) return stack_key;
-    return (uintptr_t)INVOKE_CALLBACK2(key_retain, CFGetAllocator(ht), (const_any_pointer_t)stack_key);
-}
-
-static void __CFDictionaryReleaseValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    void (*value_release)(CFAllocatorRef, const_any_pointer_t) = (void (*)(CFAllocatorRef, const_any_pointer_t))cb->context[2];
-    if (NULL != value_release) INVOKE_CALLBACK2(value_release, CFGetAllocator(ht), (const_any_pointer_t) stack_value);
-}
-
-static void __CFDictionaryReleaseKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    void (*key_release)(CFAllocatorRef, const_any_pointer_t) = (void (*)(CFAllocatorRef, const_any_pointer_t))cb->context[3];
-    if (NULL != key_release) INVOKE_CALLBACK2(key_release, CFGetAllocator(ht), (const_any_pointer_t) stack_key);
-}
-
-static Boolean __CFDictionaryEquateValues(CFConstBasicHashRef ht, uintptr_t coll_value1, uintptr_t stack_value2) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    Boolean (*value_equal)(const_any_pointer_t, const_any_pointer_t) = (Boolean (*)(const_any_pointer_t, const_any_pointer_t))cb->context[4];
-    if (NULL == value_equal) return (coll_value1 == stack_value2);
-    return INVOKE_CALLBACK2(value_equal, (const_any_pointer_t) coll_value1, (const_any_pointer_t) stack_value2) ? 1 : 0;
-}
-
-static Boolean __CFDictionaryEquateKeys(CFConstBasicHashRef ht, uintptr_t coll_key1, uintptr_t stack_key2) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    Boolean (*key_equal)(const_any_pointer_t, const_any_pointer_t) = (Boolean (*)(const_any_pointer_t, const_any_pointer_t))cb->context[5];
-    if (NULL == key_equal) return (coll_key1 == stack_key2);
-    return INVOKE_CALLBACK2(key_equal, (const_any_pointer_t) coll_key1, (const_any_pointer_t) stack_key2) ? 1 : 0;
-}
-
-static uintptr_t __CFDictionaryHashKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    CFHashCode (*hash)(const_any_pointer_t) = (CFHashCode (*)(const_any_pointer_t))cb->context[6];
-    if (NULL == hash) return stack_key;
-    return (uintptr_t)INVOKE_CALLBACK1(hash, (const_any_pointer_t) stack_key);
-}
-
-static uintptr_t __CFDictionaryGetIndirectKey(CFConstBasicHashRef ht, uintptr_t coll_value) {
-    return 0;
-}
-
-static CFStringRef __CFDictionaryCopyValueDescription(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    CFStringRef (*value_describe)(const_any_pointer_t) = (CFStringRef (*)(const_any_pointer_t))cb->context[8];
-    if (NULL == value_describe) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (const_any_pointer_t) stack_value);
-    return (CFStringRef)INVOKE_CALLBACK1(value_describe, (const_any_pointer_t) stack_value);
-}
-
-static CFStringRef __CFDictionaryCopyKeyDescription(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    const CFBasicHashCallbacks *cb = CFBasicHashGetCallbacks(ht);
-    CFStringRef (*key_describe)(const_any_pointer_t) = (CFStringRef (*)(const_any_pointer_t))cb->context[9];
-    if (NULL == key_describe) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (const_any_pointer_t) stack_key);
-    return (CFStringRef)INVOKE_CALLBACK1(key_describe, (const_any_pointer_t) stack_key);
-}
 
 static CFBasicHashRef __CFDictionaryCreateGeneric(CFAllocatorRef allocator, const CFHashKeyCallBacks *keyCallBacks, const CFHashValueCallBacks *valueCallBacks, Boolean useValueCB) {
     CFOptionFlags flags = kCFBasicHashLinearHashing; // kCFBasicHashExponentialHashing
     flags |= (CFDictionary ? kCFBasicHashHasKeys : 0) | (CFBag ? kCFBasicHashHasCounts : 0);
 
-    CFBasicHashCallbacks *cb = NULL;
-    Boolean std_cb = false;
-    uint16_t specialBits = 0;
-    const_any_pointer_t (*key_retain)(CFAllocatorRef, const_any_pointer_t) = NULL;
-    void (*key_release)(CFAllocatorRef, const_any_pointer_t) = NULL;
-    const_any_pointer_t (*value_retain)(CFAllocatorRef, const_any_pointer_t) = NULL;
-    void (*value_release)(CFAllocatorRef, const_any_pointer_t) = NULL;
+    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) { // all this crap is just for figuring out two flags for GC in the way done historically; it probably simplifies down to three lines, but we let the compiler worry about that
+        Boolean set_cb = false;
+        Boolean std_cb = false;
+        const_any_pointer_t (*key_retain)(CFAllocatorRef, const_any_pointer_t) = NULL;
+        void (*key_release)(CFAllocatorRef, const_any_pointer_t) = NULL;
+        const_any_pointer_t (*value_retain)(CFAllocatorRef, const_any_pointer_t) = NULL;
+        void (*value_release)(CFAllocatorRef, const_any_pointer_t) = NULL;
 
-    if ((NULL == keyCallBacks || 0 == keyCallBacks->version) && (!useValueCB || NULL == valueCallBacks || 0 == valueCallBacks->version)) {
-        Boolean keyRetainNull = NULL == keyCallBacks || NULL == keyCallBacks->retain;
-        Boolean keyReleaseNull = NULL == keyCallBacks || NULL == keyCallBacks->release;
-        Boolean keyEquateNull = NULL == keyCallBacks || NULL == keyCallBacks->equal;
-        Boolean keyHashNull = NULL == keyCallBacks || NULL == keyCallBacks->hash;
-        Boolean keyDescribeNull = NULL == keyCallBacks || NULL == keyCallBacks->copyDescription;
+	if ((NULL == keyCallBacks || 0 == keyCallBacks->version) && (!useValueCB || NULL == valueCallBacks || 0 == valueCallBacks->version)) {
+	    Boolean keyRetainNull = NULL == keyCallBacks || NULL == keyCallBacks->retain;
+	    Boolean keyReleaseNull = NULL == keyCallBacks || NULL == keyCallBacks->release;
+	    Boolean keyEquateNull = NULL == keyCallBacks || NULL == keyCallBacks->equal;
+	    Boolean keyHashNull = NULL == keyCallBacks || NULL == keyCallBacks->hash;
+	    Boolean keyDescribeNull = NULL == keyCallBacks || NULL == keyCallBacks->copyDescription;
 
-        Boolean valueRetainNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->retain)) || (!useValueCB && keyRetainNull);
-        Boolean valueReleaseNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->release)) || (!useValueCB && keyReleaseNull);
-        Boolean valueEquateNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->equal)) || (!useValueCB && keyEquateNull);
-        Boolean valueDescribeNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->copyDescription)) || (!useValueCB && keyDescribeNull);
+	    Boolean valueRetainNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->retain)) || (!useValueCB && keyRetainNull);
+	    Boolean valueReleaseNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->release)) || (!useValueCB && keyReleaseNull);
+	    Boolean valueEquateNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->equal)) || (!useValueCB && keyEquateNull);
+	    Boolean valueDescribeNull = (useValueCB && (NULL == valueCallBacks || NULL == valueCallBacks->copyDescription)) || (!useValueCB && keyDescribeNull);
 
-        Boolean keyRetainStd = keyRetainNull || __CFTypeCollectionRetain == keyCallBacks->retain;
-        Boolean keyReleaseStd = keyReleaseNull || __CFTypeCollectionRelease == keyCallBacks->release;
-        Boolean keyEquateStd = keyEquateNull || CFEqual == keyCallBacks->equal;
-        Boolean keyHashStd = keyHashNull || CFHash == keyCallBacks->hash;
-        Boolean keyDescribeStd = keyDescribeNull || CFCopyDescription == keyCallBacks->copyDescription;
+	    Boolean keyRetainStd = keyRetainNull || __CFTypeCollectionRetain == keyCallBacks->retain;
+	    Boolean keyReleaseStd = keyReleaseNull || __CFTypeCollectionRelease == keyCallBacks->release;
+	    Boolean keyEquateStd = keyEquateNull || CFEqual == keyCallBacks->equal;
+	    Boolean keyHashStd = keyHashNull || CFHash == keyCallBacks->hash;
+	    Boolean keyDescribeStd = keyDescribeNull || CFCopyDescription == keyCallBacks->copyDescription;
 
-        Boolean valueRetainStd = (useValueCB && (valueRetainNull || __CFTypeCollectionRetain == valueCallBacks->retain)) || (!useValueCB && keyRetainStd);
-        Boolean valueReleaseStd = (useValueCB && (valueReleaseNull || __CFTypeCollectionRelease == valueCallBacks->release)) || (!useValueCB && keyReleaseStd);
-        Boolean valueEquateStd = (useValueCB && (valueEquateNull || CFEqual == valueCallBacks->equal)) || (!useValueCB && keyEquateStd);
-        Boolean valueDescribeStd = (useValueCB && (valueDescribeNull || CFCopyDescription == valueCallBacks->copyDescription)) || (!useValueCB && keyDescribeStd);
+	    Boolean valueRetainStd = (useValueCB && (valueRetainNull || __CFTypeCollectionRetain == valueCallBacks->retain)) || (!useValueCB && keyRetainStd);
+	    Boolean valueReleaseStd = (useValueCB && (valueReleaseNull || __CFTypeCollectionRelease == valueCallBacks->release)) || (!useValueCB && keyReleaseStd);
+	    Boolean valueEquateStd = (useValueCB && (valueEquateNull || CFEqual == valueCallBacks->equal)) || (!useValueCB && keyEquateStd);
+	    Boolean valueDescribeStd = (useValueCB && (valueDescribeNull || CFCopyDescription == valueCallBacks->copyDescription)) || (!useValueCB && keyDescribeStd);
 
-        if (keyRetainStd && keyReleaseStd && keyEquateStd && keyHashStd && keyDescribeStd && valueRetainStd && valueReleaseStd && valueEquateStd && valueDescribeStd) {
-            cb = (CFBasicHashCallbacks *)&CFDictionaryStandardCallbacks;
-            if (!(keyRetainNull || keyReleaseNull || keyEquateNull || keyHashNull || keyDescribeNull || valueRetainNull || valueReleaseNull || valueEquateNull || valueDescribeNull)) {
-                std_cb = true;
+	    if (keyRetainStd && keyReleaseStd && keyEquateStd && keyHashStd && keyDescribeStd && valueRetainStd && valueReleaseStd && valueEquateStd && valueDescribeStd) {
+		set_cb = true;
+		if (!(keyRetainNull || keyReleaseNull || keyEquateNull || keyHashNull || keyDescribeNull || valueRetainNull || valueReleaseNull || valueEquateNull || valueDescribeNull)) {
+		    std_cb = true;
+		} else {
+		    // just set these to tickle the GC Strong logic below in a way that mimics past practice
+		    key_retain = keyCallBacks ? keyCallBacks->retain : NULL;
+		    key_release = keyCallBacks ? keyCallBacks->release : NULL;
+		    if (useValueCB) {
+			value_retain = valueCallBacks ? valueCallBacks->retain : NULL;
+			value_release = valueCallBacks ? valueCallBacks->release : NULL;
+		    } else {
+			value_retain = key_retain;
+			value_release = key_release;
+		    }
+		}
+	    }
+	}
+
+        if (!set_cb) {
+            key_retain = keyCallBacks ? keyCallBacks->retain : NULL;
+            key_release = keyCallBacks ? keyCallBacks->release : NULL;
+            if (useValueCB) {
+                value_retain = valueCallBacks ? valueCallBacks->retain : NULL;
+                value_release = valueCallBacks ? valueCallBacks->release : NULL;
             } else {
-                // just set these to tickle the GC Strong logic below in a way that mimics past practice
-                key_retain = keyCallBacks ? keyCallBacks->retain : NULL;
-                key_release = keyCallBacks ? keyCallBacks->release : NULL;
-                if (useValueCB) {
-                    value_retain = valueCallBacks ? valueCallBacks->retain : NULL;
-                    value_release = valueCallBacks ? valueCallBacks->release : NULL;
-                } else {
-                    value_retain = key_retain;
-                    value_release = key_release;
-                }
+                value_retain = key_retain;
+                value_release = key_release;
             }
-            if (keyRetainNull) specialBits |= 0x0001;
-            if (keyReleaseNull) specialBits |= 0x0002;
-            if (keyEquateNull) specialBits |= 0x0004;
-            if (keyHashNull) specialBits |= 0x0008;
-            if (keyDescribeNull) specialBits |= 0x0010;
-            if (valueRetainNull) specialBits |= 0x0100;
-            if (valueReleaseNull) specialBits |= 0x0200;
-            if (valueEquateNull) specialBits |= 0x0400;
-            if (valueDescribeNull) specialBits |= 0x0800;
         }
-    }
 
-    if (!cb) {
-        Boolean (*key_equal)(const_any_pointer_t, const_any_pointer_t) = NULL;
-        Boolean (*value_equal)(const_any_pointer_t, const_any_pointer_t) = NULL;
-        CFStringRef (*key_describe)(const_any_pointer_t) = NULL;
-        CFStringRef (*value_describe)(const_any_pointer_t) = NULL;
-        CFHashCode (*hash_key)(const_any_pointer_t) = NULL;
-        key_retain = keyCallBacks ? keyCallBacks->retain : NULL;
-        key_release = keyCallBacks ? keyCallBacks->release : NULL;
-        key_equal = keyCallBacks ? keyCallBacks->equal : NULL;
-        key_describe = keyCallBacks ? keyCallBacks->copyDescription : NULL;
-        if (useValueCB) {
-            value_retain = valueCallBacks ? valueCallBacks->retain : NULL;
-            value_release = valueCallBacks ? valueCallBacks->release : NULL;
-            value_equal = valueCallBacks ? valueCallBacks->equal : NULL;
-            value_describe = valueCallBacks ? valueCallBacks->copyDescription : NULL;
-        } else {
-            value_retain = key_retain;
-            value_release = key_release;
-            value_equal = key_equal;
-            value_describe = key_describe;
-        }
-        hash_key = keyCallBacks ? keyCallBacks->hash : NULL;
-
-        CFBasicHashCallbacks *newcb = NULL;
-        if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
-            newcb = (CFBasicHashCallbacks *)auto_zone_allocate_object(objc_collectableZone(), sizeof(CFBasicHashCallbacks) + 10 * sizeof(void *), AUTO_MEMORY_UNSCANNED, false, false);
-        } else {
-            newcb = (CFBasicHashCallbacks *)CFAllocatorAllocate(allocator, sizeof(CFBasicHashCallbacks) + 10 * sizeof(void *), 0);
-        }
-        if (!newcb) return NULL;
-        newcb->copyCallbacks = __CFDictionaryCopyCallbacks;
-        newcb->freeCallbacks = __CFDictionaryFreeCallbacks;
-        newcb->retainValue = __CFDictionaryRetainValue;
-        newcb->retainKey = __CFDictionaryRetainKey;
-        newcb->releaseValue = __CFDictionaryReleaseValue;
-        newcb->releaseKey = __CFDictionaryReleaseKey;
-        newcb->equateValues = __CFDictionaryEquateValues;
-        newcb->equateKeys = __CFDictionaryEquateKeys;
-        newcb->hashKey = __CFDictionaryHashKey;
-        newcb->getIndirectKey = __CFDictionaryGetIndirectKey;
-        newcb->copyValueDescription = __CFDictionaryCopyValueDescription;
-        newcb->copyKeyDescription = __CFDictionaryCopyKeyDescription;
-        newcb->context[0] = (uintptr_t)value_retain;
-        newcb->context[1] = (uintptr_t)key_retain;
-        newcb->context[2] = (uintptr_t)value_release;
-        newcb->context[3] = (uintptr_t)key_release;
-        newcb->context[4] = (uintptr_t)value_equal;
-        newcb->context[5] = (uintptr_t)key_equal;
-        newcb->context[6] = (uintptr_t)hash_key;
-        newcb->context[8] = (uintptr_t)value_describe;
-        newcb->context[9] = (uintptr_t)key_describe;
-        cb = newcb;
-    }
-
-    if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
         if (std_cb || value_retain != NULL || value_release != NULL) {
             flags |= kCFBasicHashStrongValues;
         }
         if (std_cb || key_retain != NULL || key_release != NULL) {
             flags |= kCFBasicHashStrongKeys;
         }
-#if CFDictionary
-        if (valueCallBacks == &kCFTypeDictionaryValueCompactableCallBacks) {
-            // Foundation allocated collections will have compactable values
-            flags |= kCFBasicHashCompactableValues;
-        }
-#endif
     }
 
-    CFBasicHashRef ht = CFBasicHashCreate(allocator, flags, cb);
-    if (ht) CFBasicHashSetSpecialBits(ht, specialBits);
-    if (!ht && !CF_IS_COLLECTABLE_ALLOCATOR(allocator)) CFAllocatorDeallocate(allocator, cb);
+
+    CFBasicHashCallbacks callbacks;
+    callbacks.retainKey = keyCallBacks ? (uintptr_t (*)(CFAllocatorRef, uintptr_t))keyCallBacks->retain : NULL;
+    callbacks.releaseKey = keyCallBacks ? (void (*)(CFAllocatorRef, uintptr_t))keyCallBacks->release : NULL;
+    callbacks.equateKeys = keyCallBacks ? (Boolean (*)(uintptr_t, uintptr_t))keyCallBacks->equal : NULL;
+    callbacks.hashKey = keyCallBacks ? (CFHashCode (*)(uintptr_t))keyCallBacks->hash : NULL;
+    callbacks.getIndirectKey = NULL;
+    callbacks.copyKeyDescription = keyCallBacks ? (CFStringRef (*)(uintptr_t))keyCallBacks->copyDescription : NULL;
+    callbacks.retainValue = useValueCB ? (valueCallBacks ? (uintptr_t (*)(CFAllocatorRef, uintptr_t))valueCallBacks->retain : NULL) : (callbacks.retainKey);
+    callbacks.releaseValue = useValueCB ? (valueCallBacks ? (void (*)(CFAllocatorRef, uintptr_t))valueCallBacks->release : NULL) : (callbacks.releaseKey);
+    callbacks.equateValues = useValueCB ? (valueCallBacks ? (Boolean (*)(uintptr_t, uintptr_t))valueCallBacks->equal : NULL) : (callbacks.equateKeys);
+    callbacks.copyValueDescription = useValueCB ? (valueCallBacks ? (CFStringRef (*)(uintptr_t))valueCallBacks->copyDescription : NULL) : (callbacks.copyKeyDescription);
+
+    CFBasicHashRef ht = CFBasicHashCreate(allocator, flags, &callbacks);
     return ht;
 }
 
 #if CFDictionary
-__private_extern__ CFHashRef __CFDictionaryCreateTransfer(CFAllocatorRef allocator, const_any_pointer_t *klist, const_any_pointer_t *vlist, CFIndex numValues) {
+CF_PRIVATE CFHashRef __CFDictionaryCreateTransfer(CFAllocatorRef allocator, const_any_pointer_t *klist, const_any_pointer_t *vlist, CFIndex numValues) {
 #endif
 #if CFSet || CFBag
-__private_extern__ CFHashRef __CFDictionaryCreateTransfer(CFAllocatorRef allocator, const_any_pointer_t *klist, CFIndex numValues) {
+CF_PRIVATE CFHashRef __CFDictionaryCreateTransfer(CFAllocatorRef allocator, const_any_pointer_t *klist, CFIndex numValues) {
     const_any_pointer_t *vlist = klist;
 #endif
     CFTypeID typeID = CFDictionaryGetTypeID();
     CFAssert2(0 <= numValues, __kCFLogAssertion, "%s(): numValues (%ld) cannot be less than zero", __PRETTY_FUNCTION__, numValues);
     CFOptionFlags flags = kCFBasicHashLinearHashing; // kCFBasicHashExponentialHashing
     flags |= (CFDictionary ? kCFBasicHashHasKeys : 0) | (CFBag ? kCFBasicHashHasCounts : 0);
-    CFBasicHashCallbacks *cb = (CFBasicHashCallbacks *)&CFDictionaryStandardCallbacks;
-    CFBasicHashRef ht = CFBasicHashCreate(allocator, flags, cb);
-    CFBasicHashSetSpecialBits(ht, 0x0303);
+
+    CFBasicHashCallbacks callbacks;
+    callbacks.retainKey = (uintptr_t (*)(CFAllocatorRef, uintptr_t))kCFTypeDictionaryKeyCallBacks.retain;
+    callbacks.releaseKey = (void (*)(CFAllocatorRef, uintptr_t))kCFTypeDictionaryKeyCallBacks.release;
+    callbacks.equateKeys = (Boolean (*)(uintptr_t, uintptr_t))kCFTypeDictionaryKeyCallBacks.equal;
+    callbacks.hashKey = (CFHashCode (*)(uintptr_t))kCFTypeDictionaryKeyCallBacks.hash;
+    callbacks.getIndirectKey = NULL;
+    callbacks.copyKeyDescription = (CFStringRef (*)(uintptr_t))kCFTypeDictionaryKeyCallBacks.copyDescription;
+    callbacks.retainValue = CFDictionary ? (uintptr_t (*)(CFAllocatorRef, uintptr_t))kCFTypeDictionaryValueCallBacks.retain : callbacks.retainKey;
+    callbacks.releaseValue = CFDictionary ? (void (*)(CFAllocatorRef, uintptr_t))kCFTypeDictionaryValueCallBacks.release : callbacks.releaseKey;
+    callbacks.equateValues = CFDictionary ? (Boolean (*)(uintptr_t, uintptr_t))kCFTypeDictionaryValueCallBacks.equal : callbacks.equateKeys;
+    callbacks.copyValueDescription = CFDictionary ? (CFStringRef (*)(uintptr_t))kCFTypeDictionaryValueCallBacks.copyDescription : callbacks.copyKeyDescription;
+
+    CFBasicHashRef ht = CFBasicHashCreate(allocator, flags, &callbacks);
+    CFBasicHashSuppressRC(ht);
     if (0 < numValues) CFBasicHashSetCapacity(ht, numValues);
     for (CFIndex idx = 0; idx < numValues; idx++) {
         CFBasicHashAddValue(ht, (uintptr_t)klist[idx], (uintptr_t)vlist[idx]);
     }
-    CFBasicHashSetSpecialBits(ht, 0x0000);
+    CFBasicHashUnsuppressRC(ht);
     CFBasicHashMakeImmutable(ht);
-    *(uintptr_t *)ht = __CFISAForTypeID(typeID);
-    _CFRuntimeSetInstanceTypeID(ht, typeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (immutable)");
     return (CFHashRef)ht;
 }
@@ -476,8 +278,7 @@ CFHashRef CFDictionaryCreate(CFAllocatorRef allocator, const_any_pointer_t *klis
         CFBasicHashAddValue(ht, (uintptr_t)klist[idx], (uintptr_t)vlist[idx]);
     }
     CFBasicHashMakeImmutable(ht);
-    *(uintptr_t *)ht = __CFISAForTypeID(typeID);
-    _CFRuntimeSetInstanceTypeID(ht, typeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (immutable)");
     return (CFHashRef)ht;
 }
@@ -493,8 +294,7 @@ CFMutableHashRef CFDictionaryCreateMutable(CFAllocatorRef allocator, CFIndex cap
     CFAssert2(0 <= capacity, __kCFLogAssertion, "%s(): capacity (%ld) cannot be less than zero", __PRETTY_FUNCTION__, capacity);
     CFBasicHashRef ht = __CFDictionaryCreateGeneric(allocator, keyCallBacks, valueCallBacks, CFDictionary);
     if (!ht) return NULL;
-    *(uintptr_t *)ht = __CFISAForTypeID(typeID);
-    _CFRuntimeSetInstanceTypeID(ht, typeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (mutable)");
     return (CFMutableHashRef)ht;
 }
@@ -528,8 +328,7 @@ CFHashRef CFDictionaryCreateCopy(CFAllocatorRef allocator, CFHashRef other) {
     }
     if (!ht) return NULL;
     CFBasicHashMakeImmutable(ht);
-    *(uintptr_t *)ht = __CFISAForTypeID(typeID);
-    _CFRuntimeSetInstanceTypeID(ht, typeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (immutable)");
     return (CFHashRef)ht;
 }
@@ -563,8 +362,7 @@ CFMutableHashRef CFDictionaryCreateMutableCopy(CFAllocatorRef allocator, CFIndex
         ht = CFBasicHashCreateCopy(allocator, (CFBasicHashRef)other);
     }
     if (!ht) return NULL;
-    *(uintptr_t *)ht = __CFISAForTypeID(typeID);
-    _CFRuntimeSetInstanceTypeID(ht, typeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (mutable)");
     return (CFMutableHashRef)ht;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFUserNotification.c
-	Copyright (c) 2000-2012, Apple Inc.  All rights reserved.
+	Copyright (c) 2000-2013, Apple Inc.  All rights reserved.
 	Original Author: Doug Davidson
 	Responsibility: Kevin Perry
 */
@@ -128,7 +128,7 @@ static const CFRuntimeClass __CFUserNotificationClass = {
     __CFUserNotificationCopyDescription
 };
 
-__private_extern__ void __CFUserNotificationInitialize(void) {
+CF_PRIVATE void __CFUserNotificationInitialize(void) {
     __kCFUserNotificationTypeID = _CFRuntimeRegisterClass(&__CFUserNotificationClass);
 }
 
@@ -257,12 +257,17 @@ static SInt32 _CFUserNotificationSendRequest(CFAllocatorRef allocator, CFStringR
     return retval;
 }
 
+static SInt32 _getNextToken() {
+    static uint16_t tokenCounter = 0;
+    SInt32 token = ((getpid() << 16) | (tokenCounter++));
+    return token;
+}
+
 CFUserNotificationRef CFUserNotificationCreate(CFAllocatorRef allocator, CFTimeInterval timeout, CFOptionFlags flags, SInt32 *error, CFDictionaryRef dictionary) {
     CHECK_FOR_FORK();
     CFUserNotificationRef userNotification = NULL;
     SInt32 retval = ERR_SUCCESS;
-    static uint16_t tokenCounter = 0;
-    SInt32 token = ((getpid() << 16) | (tokenCounter++));
+    SInt32 token = _getNextToken();
     CFStringRef sessionID = (dictionary ? CFDictionaryGetValue(dictionary, kCFUserNotificationSessionIDKey) : NULL);
     mach_port_t replyPort = MACH_PORT_NULL;
 
@@ -412,7 +417,6 @@ CFRunLoopSourceRef CFUserNotificationCreateRunLoopSource(CFAllocatorRef allocato
 
 SInt32 CFUserNotificationDisplayNotice(CFTimeInterval timeout, CFOptionFlags flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL, CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef defaultButtonTitle) {
     CHECK_FOR_FORK();
-    CFUserNotificationRef userNotification;
     SInt32 retval = ERR_SUCCESS;
     CFMutableDictionaryRef dict = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (iconURL) CFDictionaryAddValue(dict, kCFUserNotificationIconURLKey, iconURL);
@@ -421,8 +425,10 @@ SInt32 CFUserNotificationDisplayNotice(CFTimeInterval timeout, CFOptionFlags fla
     if (alertHeader) CFDictionaryAddValue(dict, kCFUserNotificationAlertHeaderKey, alertHeader);
     if (alertMessage) CFDictionaryAddValue(dict, kCFUserNotificationAlertMessageKey, alertMessage);
     if (defaultButtonTitle) CFDictionaryAddValue(dict, kCFUserNotificationDefaultButtonTitleKey, defaultButtonTitle);
-    userNotification = CFUserNotificationCreate(kCFAllocatorSystemDefault, timeout, flags, &retval, dict);
-    if (userNotification) CFRelease(userNotification);
+    retval = _CFUserNotificationSendRequest(__CFGetDefaultAllocator(), NULL, MACH_PORT_NULL, _getNextToken(), timeout, flags, dict);
+    if (ERR_SUCCESS != retval) {
+        CFUserNotificationLog(alertHeader, alertMessage);
+    }
     CFRelease(dict);
     return retval;
 }

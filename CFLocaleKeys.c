@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFLocaleKeys.c
-	Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -80,6 +80,7 @@ CONST_STRING_DECL(kCFDateFormatterVeryShortStandaloneMonthSymbolsKey, "kCFDateFo
 CONST_STRING_DECL(kCFDateFormatterVeryShortStandaloneWeekdaySymbolsKey, "kCFDateFormatterVeryShortStandaloneWeekdaySymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterVeryShortWeekdaySymbolsKey, "kCFDateFormatterVeryShortWeekdaySymbolsKey");
 CONST_STRING_DECL(kCFDateFormatterWeekdaySymbolsKey, "kCFDateFormatterWeekdaySymbolsKey");
+CONST_STRING_DECL(kCFDateFormatterUsesCharacterDirectionKey, "kCFDateFormatterUsesCharacterDirectionKey");
 
 CONST_STRING_DECL(kCFNumberFormatterAlwaysShowDecimalSeparatorKey, "kCFNumberFormatterAlwaysShowDecimalSeparatorKey");
 CONST_STRING_DECL(kCFNumberFormatterCurrencyCodeKey, "kCFNumberFormatterCurrencyCodeKey");
@@ -119,6 +120,7 @@ CONST_STRING_DECL(kCFNumberFormatterSecondaryGroupingSizeKey, "kCFNumberFormatte
 CONST_STRING_DECL(kCFNumberFormatterUseGroupingSeparatorKey, "kCFNumberFormatterUseGroupingSeparatorKey");
 CONST_STRING_DECL(kCFNumberFormatterUseSignificantDigitsKey, "kCFNumberFormatterUseSignificantDigitsKey");
 CONST_STRING_DECL(kCFNumberFormatterZeroSymbolKey, "kCFNumberFormatterZeroSymbolKey");
+CONST_STRING_DECL(kCFNumberFormatterUsesCharacterDirectionKey, "kCFNumberFormatterUsesCharacterDirectionKey");
 
 CONST_STRING_DECL(kCFCalendarIdentifierGregorian, "gregorian");
 CONST_STRING_DECL(kCFCalendarIdentifierBuddhist, "buddhist");
@@ -233,6 +235,8 @@ CF_EXPORT CFStringRef const kCFNumberFormatterSecondaryGroupingSize __attribute_
 CF_EXPORT CFStringRef const kCFNumberFormatterUseGroupingSeparator __attribute__((alias ("kCFNumberFormatterUseGroupingSeparatorKey")));
 CF_EXPORT CFStringRef const kCFNumberFormatterUseSignificantDigits __attribute__((alias ("kCFNumberFormatterUseSignificantDigitsKey")));
 CF_EXPORT CFStringRef const kCFNumberFormatterZeroSymbol __attribute__((alias ("kCFNumberFormatterZeroSymbolKey")));
+CF_EXPORT CFStringRef const kCFNumberFormatterUsesCharacterDirection __attribute__((alias ("kCFNumberFormatterUsesCharacterDirectionKey")));
+CF_EXPORT CFStringRef const kCFDateFormatterUsesCharacterDirection __attribute__((alias ("kCFDateFormatterUsesCharacterDirectionKey")));
 CF_EXPORT CFStringRef const kCFDateFormatterCalendarName __attribute__((alias ("kCFDateFormatterCalendarIdentifierKey")));
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringEncodingDatabase.c
-	Copyright (c) 2005-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -393,7 +393,7 @@ static inline CFIndex __CFGetEncodingIndex(CFStringEncoding encoding) {
     return kCFNotFound;
 }
 
-__private_extern__ uint16_t __CFStringEncodingGetWindowsCodePage(CFStringEncoding encoding) {
+CF_PRIVATE uint16_t __CFStringEncodingGetWindowsCodePage(CFStringEncoding encoding) {
     CFStringEncoding encodingBase = encoding & 0x0F00;
 
     if (0x0100 == encodingBase) { // UTF
@@ -416,7 +416,7 @@ __private_extern__ uint16_t __CFStringEncodingGetWindowsCodePage(CFStringEncodin
     return 0;
 }
 
-__private_extern__ CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t codepage) {
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t codepage) {
     switch (codepage) {
         case 65001: return kCFStringEncodingUTF8;
         case 1200: return kCFStringEncodingUTF16;
@@ -453,7 +453,7 @@ __private_extern__ CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uin
     return kCFStringEncodingInvalidId;
 }
 
-__private_extern__ bool __CFStringEncodingGetCanonicalName(CFStringEncoding encoding, char *buffer, CFIndex bufferSize) {
+CF_PRIVATE bool __CFStringEncodingGetCanonicalName(CFStringEncoding encoding, char *buffer, CFIndex bufferSize) {
     const char *format = "%s";
     const char *name = NULL;
     uint32_t value = 0;
@@ -523,7 +523,7 @@ static CFHashCode __CFCanonicalNameHash(const void *value) {
     return code * (name - (const char *)value);
 }
 
-__private_extern__ CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *canonicalName) {
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *canonicalName) {
     CFStringEncoding encoding;
     CFIndex prefixLength;
     static CFMutableDictionaryRef mappingTable = NULL;
@@ -797,7 +797,7 @@ static const char *__CFOtherNameList[] = {
 };
 #endif /* DEPLOYMENT_TARGET_MACOSX */
 
-__private_extern__ CFStringEncoding __CFStringEncodingGetMostCompatibleMacScript(CFStringEncoding encoding) {
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetMostCompatibleMacScript(CFStringEncoding encoding) {
 #if DEPLOYMENT_TARGET_MACOSX
     switch (encoding & 0x0F00) {
         case 0: return encoding & 0xFF; break; // Mac scripts
@@ -822,7 +822,7 @@ __private_extern__ CFStringEncoding __CFStringEncodingGetMostCompatibleMacScript
     return kCFStringEncodingInvalidId;
 }
 
-__private_extern__ const char *__CFStringEncodingGetName(CFStringEncoding encoding) {
+CF_PRIVATE const char *__CFStringEncodingGetName(CFStringEncoding encoding) {
     switch (encoding) {
         case kCFStringEncodingUTF8: return "Unicode (UTF-8)"; break;
         case kCFStringEncodingUTF16: return "Unicode (UTF-16)"; break;

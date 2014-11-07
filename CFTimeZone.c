@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFTimeZone.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -479,7 +479,7 @@ static const CFRuntimeClass __CFTimeZoneClass = {
     __CFTimeZoneCopyDescription
 };
 
-__private_extern__ void __CFTimeZoneInitialize(void) {
+CF_PRIVATE void __CFTimeZoneInitialize(void) {
     __kCFTimeZoneTypeID = _CFRuntimeRegisterClass(&__CFTimeZoneClass);
 }
 

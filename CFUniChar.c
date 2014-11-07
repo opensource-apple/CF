@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFUniChar.c
-	Copyright (c) 2001-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2001-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -76,7 +76,30 @@ CF_INLINE uint32_t __CFUniCharMapCompatibilitySetID(uint32_t cset) { return ((cs
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 
+extern const void* unicode_csbitmaps_section_start      __asm("section$start$__UNICODE$__csbitmaps");
+extern const void* unicode_csbitmaps_section_end        __asm("section$end$__UNICODE$__csbitmaps");
+extern const void* unicode_properties_section_start     __asm("section$start$__UNICODE$__properties");
+extern const void* unicode_properties_section_end       __asm("section$end$__UNICODE$__properties");
+extern const void* unicode_data_section_start           __asm("section$start$__UNICODE$__data");
+extern const void* unicode_data_section_end             __asm("section$end$__UNICODE$__data");
+
 static const void *__CFGetSectDataPtr(const char *segname, const char *sectname, uint64_t *sizep) {
+    // special case three common sections to have fast access
+    if ( strcmp(segname, "__UNICODE") == 0 ) {
+        if ( strcmp(sectname, "__csbitmaps") == 0)  {
+            if (sizep) *sizep = &unicode_csbitmaps_section_end - &unicode_csbitmaps_section_start;
+            return &unicode_csbitmaps_section_start;
+        }
+        else if ( strcmp(sectname, "__properties") == 0 ) {
+            if (sizep) *sizep = &unicode_properties_section_end - &unicode_properties_section_start;
+            return &unicode_properties_section_start;
+        }
+        else if ( strcmp(sectname, "__data") == 0 ) {
+            if (sizep) *sizep = &unicode_data_section_end - &unicode_data_section_start;
+            return &unicode_data_section_start;
+        }
+    }
+    
     uint32_t idx, cnt = _dyld_image_count();
     for (idx = 0; idx < cnt; idx++) {
        void *mh = (void *)_dyld_get_image_header(idx);
@@ -247,7 +270,11 @@ static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes, i
     char cpath[MAXPATHLEN];
     __CFUniCharCharacterSetPath(cpath);
     strlcat(cpath, bitmapName, MAXPATHLEN);
-    return __CFUniCharLoadBytesFromFile(cpath, bytes, fileSize);
+    Boolean needToFree = false;
+    const char *possiblyFrameworkRootedCPath = CFPathRelativeToAppleFrameworksRoot(cpath, &needToFree);
+    bool result = __CFUniCharLoadBytesFromFile(possiblyFrameworkRootedCPath, bytes, fileSize);
+    if (needToFree) free((void *)possiblyFrameworkRootedCPath);
+    return result;
 #elif DEPLOYMENT_TARGET_WINDOWS
     wchar_t wpath[MAXPATHLEN];
     __CFUniCharCharacterSetPath(wpath);
@@ -403,7 +430,7 @@ static bool __CFUniCharLoadBitmapData(void) {
     return true;
 }
 
-__private_extern__ const char *__CFUniCharGetUnicodeVersionString(void) {
+CF_PRIVATE const char *__CFUniCharGetUnicodeVersionString(void) {
     if (NULL == __CFUniCharBitmapDataArray) __CFUniCharLoadBitmapData();
     return __CFUniCharUnicodeVersionString;
 }
@@ -473,7 +500,7 @@ const uint8_t *CFUniCharGetBitmapPtrForPlane(uint32_t charset, uint32_t plane) {
     return NULL;
 }
 
-__private_extern__ uint8_t CFUniCharGetBitmapForPlane(uint32_t charset, uint32_t plane, void *bitmap, bool isInverted) {
+CF_PRIVATE uint8_t CFUniCharGetBitmapForPlane(uint32_t charset, uint32_t plane, void *bitmap, bool isInverted) {
     const uint8_t *src = CFUniCharGetBitmapPtrForPlane(charset, plane);
     int numBytes = (8 * 1024);
 
@@ -601,7 +628,7 @@ __private_extern__ uint8_t CFUniCharGetBitmapForPlane(uint32_t charset, uint32_t
     return (isInverted ? kCFUniCharBitmapAll : kCFUniCharBitmapEmpty);
 }
 
-__private_extern__ uint32_t CFUniCharGetNumberOfPlanes(uint32_t charset) {
+CF_PRIVATE uint32_t CFUniCharGetNumberOfPlanes(uint32_t charset) {
     if ((charset == kCFUniCharControlCharacterSet) || (charset == kCFUniCharControlAndFormatterCharacterSet)) {
         return 15; // 0 to 14
     } else if (charset < kCFUniCharDecimalDigitCharacterSet) {
@@ -656,7 +683,7 @@ static CFSpinLock_t __CFUniCharMappingTableLock = CFSpinLockInit;
 #error Unknown or unspecified DEPLOYMENT_TARGET
 #endif
 
-__private_extern__ const void *CFUniCharGetMappingData(uint32_t type) {
+CF_PRIVATE const void *CFUniCharGetMappingData(uint32_t type) {
 
     __CFSpinLock(&__CFUniCharMappingTableLock);
 
@@ -1070,7 +1097,7 @@ CF_INLINE bool __CFUniCharIsAfter_i(UTF16Char *buffer, CFIndex length) {
     return true;
 }
 
-__private_extern__ uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char theChar, UTF16Char *buffer, CFIndex currentIndex, CFIndex length, uint32_t type, const uint8_t *langCode, uint32_t lastFlags) {
+CF_PRIVATE uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char theChar, UTF16Char *buffer, CFIndex currentIndex, CFIndex length, uint32_t type, const uint8_t *langCode, uint32_t lastFlags) {
     if (theChar == 0x03A3) { // GREEK CAPITAL LETTER SIGMA
         if ((type == kCFUniCharToLowercase) && (currentIndex > 0)) {
             UTF16Char *start = buffer;
@@ -1110,10 +1137,12 @@ __private_extern__ uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char th
                 return (__CFUniCharIsAfter_i(buffer, currentIndex) ? kCFUniCharCaseMapAfter_i : 0);
             } else if (type == kCFUniCharToLowercase) {
                 if ((theChar == 0x0049) || (theChar == 0x004A) || (theChar == 0x012E)) {
-                    return (__CFUniCharIsMoreAbove(buffer + (++currentIndex), length - currentIndex) ? kCFUniCharCaseMapMoreAbove : 0);
+                    ++currentIndex;
+                    return (__CFUniCharIsMoreAbove(buffer + currentIndex, length - currentIndex) ? kCFUniCharCaseMapMoreAbove : 0);
                 }
             } else if ((theChar == 'i') || (theChar == 'j')) {
-                return (__CFUniCharIsMoreAbove(buffer + (++currentIndex), length - currentIndex) ? (kCFUniCharCaseMapAfter_i|kCFUniCharCaseMapMoreAbove) : 0);
+                ++currentIndex;
+                return (__CFUniCharIsMoreAbove(buffer + currentIndex, length - currentIndex) ? (kCFUniCharCaseMapAfter_i|kCFUniCharCaseMapMoreAbove) : 0);
             }
         } else if ((*((const uint16_t *)langCode) == TURKISH_LANG_CODE) || (*((const uint16_t *)langCode) == AZERI_LANG_CODE)) {
             if (type == kCFUniCharToLowercase) {
@@ -1139,7 +1168,7 @@ __private_extern__ uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char th
             }
         }
         if (((theChar >= 0x0370) && (theChar < 0x0400)) || ((theChar >= 0x1F00) && (theChar < 0x2000))) { // Greek/Coptic & Greek extended ranges
-            if (((type == kCFUniCharToUppercase) || (type == kCFUniCharToTitlecase))&& (CFUniCharIsMemberOf(theChar, kCFUniCharLetterCharacterSet))) return kCFUniCharCaseMapGreekTonos;
+            if ((type == kCFUniCharToUppercase) && (CFUniCharIsMemberOf(theChar, kCFUniCharLetterCharacterSet))) return kCFUniCharCaseMapGreekTonos;
         }
     }
     return 0;
@@ -1238,12 +1267,12 @@ const void *CFUniCharGetUnicodePropertyDataForPlane(uint32_t propertyType, uint3
     return (plane < __CFUniCharUnicodePropertyTable[propertyType]._numPlanes ? __CFUniCharUnicodePropertyTable[propertyType]._planes[plane] : NULL);
 }
 
-__private_extern__ uint32_t CFUniCharGetNumberOfPlanesForUnicodePropertyData(uint32_t propertyType) {
+CF_PRIVATE uint32_t CFUniCharGetNumberOfPlanesForUnicodePropertyData(uint32_t propertyType) {
     (void)CFUniCharGetUnicodePropertyDataForPlane(propertyType, 0);
     return __CFUniCharUnicodePropertyTable[propertyType]._numPlanes;
 }
 
-__private_extern__ uint32_t CFUniCharGetUnicodeProperty(UTF32Char character, uint32_t propertyType) {
+CF_PRIVATE uint32_t CFUniCharGetUnicodeProperty(UTF32Char character, uint32_t propertyType) {
     if (propertyType == kCFUniCharCombiningProperty) {
         return CFUniCharGetCombiningPropertyForCharacter(character, (const uint8_t *)CFUniCharGetUnicodePropertyDataForPlane(propertyType, (character >> 16) & 0xFF));
     } else if (propertyType == kCFUniCharBidiProperty) {

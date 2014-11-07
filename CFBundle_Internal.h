@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBundle_Internal.h
-	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_INTERNAL__)
@@ -54,9 +54,6 @@ CF_EXTERN_C_BEGIN
 #define CFBundleExecutableLoadError                 3587
 #define CFBundleExecutableLinkError                 3588
 
-// uncomment this to enable the new look up algorithm
-#define CFBUNDLE_NEWLOOKUP
-
 // uncomment this to enable the checking for 8302591
 //#define CFBUNDLE_NO_TRAVERSE_OUTSIDE
 
@@ -78,29 +75,92 @@ typedef struct __CFPlugInData {
     CFMutableArrayRef _factories;
 } _CFPlugInData;
 
+struct __CFBundle {
+    CFRuntimeBase _base;
+    
+    CFURLRef _url;
+    CFDateRef _modDate;
+    
+    __strong CFDictionaryRef _infoDict;
+    __strong CFDictionaryRef _localInfoDict;
+    CFArrayRef _searchLanguages;
+    
+    __CFPBinaryType _binaryType;
+    Boolean _isLoaded;
+    uint8_t _version;
+    Boolean _sharesStringsFiles;
+    char _padding[1];
+    
+    /* CFM goop */
+    void *_connectionCookie;
+    
+    /* DYLD goop */
+    const void *_imageCookie;
+    const void *_moduleCookie;
+    
+    /* dlfcn goop */
+    void *_handleCookie;
+    
+    /* CFM<->DYLD glue */
+    CFMutableDictionaryRef _glueDict;
+    
+    /* Resource fork goop */
+    _CFResourceData _resourceData;
+    
+    _CFPlugInData _plugInData;
+    
+    pthread_mutex_t _bundleLoadingLock;
+    
+    CFStringRef _executablePath; // Calculated and cached here
+    CFStringRef _developmentRegion; // Calculated and cached here
+    Boolean _developmentRegionCalculated;
+    
+    CFSpinLock_t _lock;
+    
+    CFArrayRef _localizations; // List of localizations, including the development language fallback if required
+    Boolean _lookedForLocalizations;
+    
+    CFMutableDictionaryRef _resourceDirectoryContents;
+    
+    CFSpinLock_t _queryLock;
+    CFMutableDictionaryRef _queryTable;
+    CFStringRef _bundleBasePath;
+    
+#if defined(BINARY_SUPPORT_DLL)
+    HMODULE _hModule;
+#endif /* BINARY_SUPPORT_DLL */
+    
+};
+
 extern _CFPlugInData *__CFBundleGetPlugInData(CFBundleRef bundle);
 
 /* Private CFBundle API */
 
+CF_PRIVATE void _CFBundleInfoPlistProcessInfoDictionary(CFMutableDictionaryRef dict);
+CF_PRIVATE Boolean _CFBundleSupportedProductName(CFStringRef fileName, CFRange searchRange);
+CF_PRIVATE Boolean _CFBundleSupportedPlatformName(CFStringRef fileName, CFRange searchRange);
+
+CF_EXPORT CFStringRef _CFGetProductName(void);
+CF_EXPORT CFStringRef _CFGetPlatformName(void);
+CF_EXPORT CFStringRef _CFGetAlternatePlatformName(void);
+
 extern Boolean _CFIsResourceAtURL(CFURLRef url, Boolean *isDir);
 extern Boolean _CFIsResourceAtPath(CFStringRef path, Boolean *isDir);
 
-extern Boolean _CFBundleURLLooksLikeBundleVersion(CFURLRef url, UInt8 *version);
+CF_PRIVATE uint8_t _CFBundleGetBundleVersionForURL(CFURLRef url);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectory(CFAllocatorRef alloc, CFURLRef url, UInt8 *version);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInDirectoryWithVersion(CFAllocatorRef alloc, CFURLRef url, UInt8 version);
 extern CFURLRef _CFBundleCopySupportFilesDirectoryURLInDirectory(CFURLRef bundleURL, UInt8 version);
 extern CFURLRef _CFBundleCopyResourcesDirectoryURLInDirectory(CFURLRef bundleURL, UInt8 version);
 
 extern Boolean _CFBundleCouldBeBundle(CFURLRef url);
-extern CFURLRef _CFBundleCopyResourceForkURLMayBeLocal(CFBundleRef bundle, Boolean mayBeLocal);
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInResourceForkWithAllocator(CFAllocatorRef alloc, CFURLRef url);
+CF_PRIVATE CFStringRef _CFBundleCopyExecutableName(CFBundleRef bundle, CFURLRef url, CFDictionaryRef infoDict);
 #if DEPLOYMENT_TARGET_MACOSX
-__private_extern__ CFStringRef _CFBundleCopyBundleDevelopmentRegionFromVersResource(CFBundleRef bundle);
+CF_PRIVATE CFStringRef _CFBundleCopyBundleDevelopmentRegionFromVersResource(CFBundleRef bundle);
 #endif
 extern CFDictionaryRef _CFBundleCopyInfoDictionaryInExecutable(CFURLRef url);
 extern CFArrayRef _CFBundleCopyArchitecturesForExecutable(CFURLRef url);
-
-extern void _CFBundleAddPreferredLprojNamesInDirectory(CFAllocatorRef alloc, CFURLRef bundleURL, UInt8 version, CFDictionaryRef infoDict, CFMutableArrayRef lprojNames, CFStringRef devLang);
 
 extern CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void);
 extern CFStringRef _CFBundleGetAlternatePlatformExecutablesSubdirectoryName(void);
@@ -114,13 +174,9 @@ extern void _CFBundleScheduleForUnloading(CFBundleRef bundle);
 extern void _CFBundleUnscheduleForUnloading(CFBundleRef bundle);
 extern void _CFBundleUnloadScheduledBundles(void);
 
-__private_extern__ CFStringRef _CFBundleGetBundlePath(CFBundleRef bundle);
-__private_extern__ void _CFBundleSetResourceDir(UniChar *buffer, CFIndex *currLen, CFIndex maxLen, uint8_t version);
-__private_extern__ CFURLRef _CFBundleCopyResourceForkURLWithoutLocal(CFBundleRef bundle);
-__private_extern__ CFDictionaryRef _CFBundleCreateQueryTableAtPath(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, UniChar *resDir, CFIndex resDirLen, UniChar *subDir, CFIndex subDirLen);
-__private_extern__ CFDictionaryRef _CFBundleCopyQueryTable(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, UniChar *resDir, CFIndex resDirLen, UniChar *subDirBuffer, CFIndex subDirLen);
-__private_extern__ CFArrayRef _CFFindBundleResourcesNoBlock(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, uint8_t version);
-__private_extern__ CFTypeRef _CFBundleCopyFindResourcesWithNoBlock(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized);
+CF_PRIVATE void _CFBundleAppendResourceDir(CFMutableStringRef path, uint8_t version);
+
+CF_PRIVATE UInt8 _CFBundleLayoutVersion(CFBundleRef bundle);
 
 #if defined(BINARY_SUPPORT_DYLD)
 // DYLD API
@@ -176,6 +232,14 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory);
 #define _CFBundleExecutablesDirectoryName CFSTR("Executables")
 #define _CFBundleNonLocalizedResourcesDirectoryName CFSTR("Non-localized Resources")
 
+#if DEPLOYMENT_TARGET_WINDOWS
+#define _CFBundleSupportFilesDirectoryName1WithResources CFSTR("Support Files\\Resources")
+#define _CFBundleSupportFilesDirectoryName2WithResources CFSTR("Contents\\Resources")
+#else
+#define _CFBundleSupportFilesDirectoryName1WithResources CFSTR("Support Files/Resources")
+#define _CFBundleSupportFilesDirectoryName2WithResources CFSTR("Contents/Resources")
+#endif
+
 #define _CFBundleSupportFilesURLFromBase1 CFSTR("Support%20Files/")
 #define _CFBundleSupportFilesURLFromBase2 CFSTR("Contents/")
 #define _CFBundleResourcesURLFromBase0 CFSTR("Resources/")
@@ -186,15 +250,42 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory);
 #define _CFBundleAppStoreReceiptURLFromBase2 CFSTR("Contents/_MASReceipt/receipt")
 #define _CFBundleExecutablesURLFromBase1 CFSTR("Support%20Files/Executables/")
 #define _CFBundleExecutablesURLFromBase2 CFSTR("Contents/")
+
 #define _CFBundleInfoURLFromBase0 CFSTR("Resources/Info.plist")
 #define _CFBundleInfoURLFromBase1 CFSTR("Support%20Files/Info.plist")
 #define _CFBundleInfoURLFromBase2 CFSTR("Contents/Info.plist")
 #define _CFBundleInfoURLFromBase3 CFSTR("Info.plist")
-#define _CFBundleInfoFileName CFSTR("Info.plist")
-#define _CFBundleInfoURLFromBaseNoExtension0 CFSTR("Resources/Info")
-#define _CFBundleInfoURLFromBaseNoExtension1 CFSTR("Support%20Files/Info")
-#define _CFBundleInfoURLFromBaseNoExtension2 CFSTR("Contents/Info")
 #define _CFBundleInfoURLFromBaseNoExtension3 CFSTR("Info")
+
+#if DEPLOYMENT_TARGET_MACOSX
+#define _CFBundlePlatformInfoURLFromBase0 CFSTR("Resources/Info-macos.plist")
+#define _CFBundlePlatformInfoURLFromBase1 CFSTR("Support%20Files/Info-macos.plist")
+#define _CFBundlePlatformInfoURLFromBase2 CFSTR("Contents/Info-macos.plist")
+#define _CFBundlePlatformInfoURLFromBase3 CFSTR("Info-macos.plist")
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+#define _CFBundlePlatformInfoURLFromBase0 CFSTR("Resources/Info-iphoneos.plist")
+#define _CFBundlePlatformInfoURLFromBase1 CFSTR("Support%20Files/Info-iphoneos.plist")
+#define _CFBundlePlatformInfoURLFromBase2 CFSTR("Contents/Info-iphoneos.plist")
+#define _CFBundlePlatformInfoURLFromBase3 CFSTR("Info-iphoneos.plist")
+#else
+// No platform-specific variants in these cases
+#define _CFBundlePlatformInfoURLFromBase0 _CFBundleInfoURLFromBase0
+#define _CFBundlePlatformInfoURLFromBase1 _CFBundleInfoURLFromBase1
+#define _CFBundlePlatformInfoURLFromBase2 _CFBundleInfoURLFromBase2
+#define _CFBundlePlatformInfoURLFromBase3 _CFBundleInfoURLFromBase3
+#endif
+
+#define _CFBundleInfoPlistName CFSTR("Info.plist")
+
+#if DEPLOYMENT_TARGET_MACOSX
+#define _CFBundlePlatformInfoPlistName CFSTR("Info-macos.plist")
+#elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+#define _CFBundlePlatformInfoPlistName CFSTR("Info-iphoneos.plist")
+#else
+// No platform-specific Info.plist for these
+#define _CFBundlePlatformInfoPlistName _CFBundleInfoPlistName
+#endif
+
 #define _CFBundleInfoExtension CFSTR("plist")
 #define _CFBundleLocalInfoName CFSTR("InfoPlist")
 #define _CFBundlePkgInfoURLFromBase1 CFSTR("Support%20Files/PkgInfo")
@@ -245,12 +336,6 @@ extern void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory);
 #define _CFBundleLocalizedResourceForkFileName CFSTR("Localized")
 
 #define _CFBundleWindowsResourceDirectoryExtension CFSTR("resources")
-
-/* Old platform names (no longer used) */
-#define _CFBundleMacOSXPlatformName_OLD CFSTR("macintosh")
-#define _CFBundleAlternateMacOSXPlatformName_OLD CFSTR("nextstep")
-#define _CFBundleWindowsPlatformName_OLD CFSTR("windows")
-#define _CFBundleAlternateWindowsPlatformName_OLD CFSTR("winnt")
 
 #define _CFBundleMacOSXInfoPlistPlatformName_OLD CFSTR("macos")
 #define _CFBundleWindowsInfoPlistPlatformName_OLD CFSTR("win32")

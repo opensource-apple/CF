@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,9 @@
  */
 
 /*	CFURLAccess.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+
+        CFURLAccess is deprecated as of Mac OS X 10.9 and iOS 7.0. The suggested replacement for URLs with network schemes (http, https, ftp, data) is the NSURLConnection class. The suggested replacement for URLs with the file scheme are the foundation classes NSFileManager, NSFileHandle and NSURL, or the CoreFoundation classes CFStream and CFURL.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -62,8 +64,9 @@ resource (file). Please use CFStream or other techniques if you are downloading
 large files.
 
 */
+/* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
+Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
 /* Attempts to write the given data and properties to the given URL.
 If dataToWrite is NULL, only properties are written out (use
@@ -73,18 +76,23 @@ is NULL or empty, the URL's properties are not changed at all.
 Returns success or failure; errorCode is set as for
 CFURLCreateDataAndPropertiesFromResource(), above.
 */
+/* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
+Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
-/* Destroys the resource indicated by url. */
-/* Returns success or failure; errorCode set as above. */
+/* Destroys the resource indicated by url.
+Returns success or failure; errorCode set as above.
+*/
+/* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
+Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
-/* Convenience method which calls through to CFURLCreateDataAndPropertiesFromResource(). */
-/* Returns NULL on error and sets errorCode accordingly. */
+/* Convenience method which calls through to CFURLCreateDataAndPropertiesFromResource().
+Returns NULL on error and sets errorCode accordingly.
+*/
+/* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) CF_AVAILABLE(10_0, 2_0);
+CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
 
 /* Common error codes (returned only by the older APIs that predate CFError) */
@@ -98,26 +106,26 @@ typedef CF_ENUM(CFIndex, CFURLError) {
     kCFURLUnknownPropertyKeyError = -16L,
     kCFURLPropertyKeyUnavailableError = -17L,
     kCFURLTimeoutError = -18L
-};
+} CF_ENUM_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
 /* Older property keys */
 
 CF_EXPORT
-const CFStringRef kCFURLFileExists CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFileExists CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLFileDirectoryContents CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFileDirectoryContents CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLFileLength CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFileLength CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT 
-const CFStringRef kCFURLFileLastModificationTime CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFileLastModificationTime CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLFilePOSIXMode CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFilePOSIXMode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLFileOwnerID CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLFileOwnerID CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusCode CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLHTTPStatusCode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusLine CF_AVAILABLE(10_0, 2_0);
+const CFStringRef kCFURLHTTPStatusLine CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
 /* The value of kCFURLFileExists is a CFBoolean */
 /* The value of kCFURLFileDirectoryContents is a CFArray containing CFURLs.  An empty array means the directory exists, but is empty */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*      CFPlugIn.c
-        Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
         Responsibility: Tony Parker
 */
 
@@ -35,7 +35,7 @@ CONST_STRING_DECL(kCFPlugInUnloadFunctionKey, "CFPlugInUnloadFunction")
 CONST_STRING_DECL(kCFPlugInFactoriesKey, "CFPlugInFactories")
 CONST_STRING_DECL(kCFPlugInTypesKey, "CFPlugInTypes")
 
-__private_extern__ void __CFPlugInInitialize(void) {
+CF_PRIVATE void __CFPlugInInitialize(void) {
 }
 
 /* ===================== Finding factories and creating instances ===================== */

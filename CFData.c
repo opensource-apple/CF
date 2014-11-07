@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFData.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Kevin Perry
 */
 
@@ -195,7 +195,7 @@ static void __CFDataHandleOutOfMemory(CFTypeRef obj, CFIndex numBytes) {
     if(0 < numBytes && numBytes <= CFDATA_MAX_SIZE) {
 	msg = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("Attempt to allocate %ld bytes for NS/CFData failed"), numBytes);
     } else {
-	msg = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("Attempt to allocate %ld bytes for NS/CFData failed. Maximum size: %ld"), numBytes, CFDATA_MAX_SIZE);
+	msg = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("Attempt to allocate %ld bytes for NS/CFData failed. Maximum size: %lld"), numBytes, CFDATA_MAX_SIZE);
     }
     {
         CFLog(kCFLogLevelCritical, CFSTR("%@"), msg);
@@ -239,7 +239,7 @@ static CFStringRef __CFDataCopyDescription(CFTypeRef cf) {
     len = __CFDataLength(data);
     bytes = CFDataGetBytePtr(data);
     result = CFStringCreateMutable(CFGetAllocator(data), 0);
-    CFStringAppendFormat(result, NULL, CFSTR("<CFData %p [%p]>{length = %u, capacity = %u, bytes = 0x"), cf, CFGetAllocator(data), len, __CFDataCapacity(data));
+    CFStringAppendFormat(result, NULL, CFSTR("<CFData %p [%p]>{length = %lu, capacity = %lu, bytes = 0x"), cf, CFGetAllocator(data), (unsigned long)len, (unsigned long)__CFDataCapacity(data));
     if (24 < len) {
         for (idx = 0; idx < 16; idx += 4) {
 	    CFStringAppendFormat(result, NULL, CFSTR("%02x%02x%02x%02x"), bytes[idx], bytes[idx + 1], bytes[idx + 2], bytes[idx + 3]);
@@ -307,7 +307,7 @@ static void __CFDataDeallocate(CFTypeRef cf) {
 	CFAllocatorRef deallocator = data->_bytesDeallocator;
 	if (deallocator != NULL) {
 	    _CFAllocatorDeallocateGC(deallocator, data->_bytes);
-	    if (!_CFAllocatorIsGCRefZero(deallocator)) CFRelease(deallocator);
+	    CFRelease(deallocator);
 	    data->_bytes = NULL;
 	} else {
 	    if (__CFDataUseAllocator(data)) {
@@ -334,7 +334,7 @@ static const CFRuntimeClass __CFDataClass = {
     __CFDataCopyDescription
 };
 
-__private_extern__ void __CFDataInitialize(void) {
+CF_PRIVATE void __CFDataInitialize(void) {
     __kCFDataTypeID = _CFRuntimeRegisterClass(&__CFDataClass);
 }
 
@@ -411,14 +411,14 @@ static CFMutableDataRef __CFDataInit(CFAllocatorRef allocator, CFOptionFlags fla
     if (noCopy) {
 	__CFAssignWithWriteBarrier((void **)&memory->_bytes, (uint8_t *)bytes);
 	if (finalize) {
-            if (_CFAllocatorIsGCRefZero(bytesDeallocator)) {
+            if ((0)) {
 	        memory->_bytesDeallocator = bytesDeallocator;
             } else {
-	        memory->_bytesDeallocator = (CFAllocatorRef)CFRetain(_CFConvertAllocatorToNonGCRefZeroEquivalent(bytesDeallocator));
+	        memory->_bytesDeallocator = (CFAllocatorRef)CFRetain(bytesDeallocator);
             }
 	}
-	if (CF_IS_COLLECTABLE_ALLOCATOR(bytesDeallocator) && !_CFAllocatorIsGCRefZero(bytesDeallocator)) {
-	    // When given a GC allocator which is not one of the GCRefZero ones as the deallocator, we assume that the no-copy memory is GC-allocated with a retain count of (at least) 1 and we should release it now instead of waiting until __CFDataDeallocate.
+	if (CF_IS_COLLECTABLE_ALLOCATOR(bytesDeallocator) && !(0)) {
+	    // we assume that the no-copy memory is GC-allocated with a retain count of (at least) 1 and we should release it now instead of waiting until __CFDataDeallocate.
 	    auto_zone_release(objc_collectableZone(), memory->_bytes);
 	}
 	__CFDataSetNumBytesUsed(memory, length);
@@ -470,8 +470,7 @@ CFMutableDataRef CFDataCreateMutable(CFAllocatorRef allocator, CFIndex capacity)
     // Do not allow magic allocator for now for mutable datas, because it
     // isn't remembered for proper handling later when growth of the buffer
     // has to occur.
-    Boolean wasMagic = _CFAllocatorIsGCRefZero(allocator);
-    if (0 == capacity) allocator = _CFConvertAllocatorToNonGCRefZeroEquivalent(allocator);
+    Boolean wasMagic = (0);
     CFMutableDataRef r = (CFMutableDataRef)__CFDataInit(allocator, (0 == capacity) ? kCFMutable : kCFFixedMutable, capacity, NULL, 0, NULL);
     if (wasMagic) CFMakeCollectable(r);
     return r;
@@ -481,8 +480,7 @@ CFMutableDataRef CFDataCreateMutableCopy(CFAllocatorRef allocator, CFIndex capac
     // Do not allow magic allocator for now for mutable datas, because it
     // isn't remembered for proper handling later when growth of the buffer
     // has to occur.
-    Boolean wasMagic = _CFAllocatorIsGCRefZero(allocator);
-    if (0 == capacity) allocator = _CFConvertAllocatorToNonGCRefZeroEquivalent(allocator);
+    Boolean wasMagic = (0);
     CFMutableDataRef r = (CFMutableDataRef) __CFDataInit(allocator, (0 == capacity) ? kCFMutable : kCFFixedMutable, capacity, CFDataGetBytePtr(data), CFDataGetLength(data), NULL);
     if (wasMagic) CFMakeCollectable(r);
     return r;

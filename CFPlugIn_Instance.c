@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPlugIn_Instance.c
-	Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
         Responsibility: Tony Parker
 */
 
@@ -79,7 +79,7 @@ static const CFRuntimeClass __CFPlugInInstanceClass = {
     __CFPlugInInstanceCopyDescription
 };
 
-__private_extern__ void __CFPlugInInstanceInitialize(void) {
+CF_PRIVATE void __CFPlugInInstanceInitialize(void) {
     __kCFPlugInInstanceTypeID = _CFRuntimeRegisterClass(&__CFPlugInInstanceClass);
 }
 
@@ -115,7 +115,8 @@ CF_EXPORT Boolean CFPlugInInstanceGetInterfaceFunctionTable(CFPlugInInstanceRef 
 }
 
 CF_EXPORT CFStringRef CFPlugInInstanceGetFactoryName(CFPlugInInstanceRef instance) {
-    // This function leaks, but it's the only safe way to access the factory name
+    // This function leaks, but it's the only safe way to access the factory name (on 10.8 or later).
+    // On 10.9 we added the CF_RETURNS_RETAINED annotation to the header.
     CFUUIDRef factoryId = _CFPFactoryCopyFactoryID(instance->factory);
     return (CFStringRef)factoryId;
 }

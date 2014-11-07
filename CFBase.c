@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBase.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -116,7 +116,7 @@ CF_INLINE CFAllocatorPreferredSizeCallBack __CFAllocatorGetPreferredSizeFunction
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 
-__private_extern__ void __CFAllocatorDeallocate(CFTypeRef cf);
+CF_PRIVATE void __CFAllocatorDeallocate(CFTypeRef cf);
 
 static kern_return_t __CFAllocatorZoneIntrospectNoOp(void) {
     return 0;
@@ -404,12 +404,12 @@ static CFStringRef __CFAllocatorCopyDescription(CFTypeRef cf) {
 // remember to release value returned from copydescr function when this happens
 }
 
-__private_extern__ CFAllocatorRef __CFAllocatorGetAllocator(CFTypeRef cf) {
+CF_PRIVATE CFAllocatorRef __CFAllocatorGetAllocator(CFTypeRef cf) {
     CFAllocatorRef allocator = (CFAllocatorRef)cf;
     return (kCFAllocatorUseContext == allocator->_allocator) ? allocator : allocator->_allocator;
 }
 
-__private_extern__ void __CFAllocatorDeallocate(CFTypeRef cf) {
+CF_PRIVATE void __CFAllocatorDeallocate(CFTypeRef cf) {
     CFAllocatorRef self = (CFAllocatorRef)cf;
     CFAllocatorRef allocator = self->_allocator;
     CFAllocatorReleaseCallBack releaseFunc = __CFAllocatorGetReleaseFunction(&self->_context);
@@ -446,31 +446,31 @@ static const CFRuntimeClass __CFAllocatorClass = {
     __CFAllocatorCopyDescription
 };
 
-__private_extern__ void __CFAllocatorInitialize(void) {
+static void _CFAllocatorSetInstanceTypeIDAndIsa(struct __CFAllocator *memory) {
+    _CFRuntimeSetInstanceTypeID(memory, __kCFAllocatorTypeID);
+    memory->_base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+}
+
+CF_PRIVATE void __CFAllocatorInitialize(void) {
     __kCFAllocatorTypeID = _CFRuntimeRegisterClass(&__CFAllocatorClass);
 
-    _CFRuntimeSetInstanceTypeID(&__kCFAllocatorSystemDefault, __kCFAllocatorTypeID);
-    __kCFAllocatorSystemDefault._base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorSystemDefault);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     __kCFAllocatorSystemDefault._context.info = (kCFUseCollectableAllocator ? objc_collectableZone() : malloc_default_zone());
 #endif
     __kCFAllocatorSystemDefault._allocator = kCFAllocatorSystemDefault;
 
-    _CFRuntimeSetInstanceTypeID(&__kCFAllocatorMalloc, __kCFAllocatorTypeID);
-    __kCFAllocatorMalloc._base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMalloc);
     __kCFAllocatorMalloc._allocator = kCFAllocatorSystemDefault;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    _CFRuntimeSetInstanceTypeID(&__kCFAllocatorMallocZone, __kCFAllocatorTypeID);
-    __kCFAllocatorMallocZone._base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMallocZone);
     __kCFAllocatorMallocZone._allocator = kCFAllocatorSystemDefault;
     __kCFAllocatorMallocZone._context.info = malloc_default_zone();
 #endif
 
-    _CFRuntimeSetInstanceTypeID(&__kCFAllocatorNull, __kCFAllocatorTypeID);
-    __kCFAllocatorNull._base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorNull);
     __kCFAllocatorNull._allocator = kCFAllocatorSystemDefault;
-
 }
 
 CFTypeID CFAllocatorGetTypeID(void) {
@@ -482,9 +482,6 @@ CFAllocatorRef CFAllocatorGetDefault(void) {
 }
 
 void CFAllocatorSetDefault(CFAllocatorRef allocator) {
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator || kCFAllocatorDefaultGCRefZero == allocator) {
-        HALT;
-    }
     CFAllocatorRef current = __CFGetDefaultAllocator();
 #if defined(DEBUG) 
     if (NULL != allocator) {
@@ -543,15 +540,13 @@ static CFAllocatorRef __CFAllocatorCreate(CFAllocatorRef allocator, CFAllocatorC
 	if (__CFOASafe) __CFSetLastAllocationEventName(memory, "CFAllocator");
     }
     memset(memory, 0, sizeof(CFRuntimeBase));
-    memory->_base._cfisa = 0;
 #if __LP64__
     memory->_base._rc = 1;
 #else
     memory->_base._cfinfo[CF_RC_BITS] = 1;
 #endif
     memory->_base._cfinfo[CF_INFO_BITS] = 0;
-    _CFRuntimeSetInstanceTypeID(memory, __kCFAllocatorTypeID);
-    memory->_base._cfisa = __CFISAForTypeID(__kCFAllocatorTypeID);
+    _CFAllocatorSetInstanceTypeIDAndIsa(memory);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     memory->size = __CFAllocatorCustomSize;
     memory->malloc = __CFAllocatorCustomMalloc;
@@ -596,14 +591,7 @@ void *CFAllocatorAllocate(CFAllocatorRef allocator, CFIndex size, CFOptionFlags 
     void *newptr = NULL;
 
     Boolean initialRefcountOne = true;
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
-	allocator = kCFAllocatorSystemDefault;
-	initialRefcountOne = false;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator) {
-        // Under GC, we can't use just any old allocator when the GCRefZero allocator was requested
-	allocator = kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : __CFGetDefaultAllocator();
-	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) initialRefcountOne = false;
-    } else if (NULL == allocator) {
+    if (NULL == allocator) {
 	allocator = __CFGetDefaultAllocator();
     }
 
@@ -638,10 +626,9 @@ void *CFAllocatorReallocate(CFAllocatorRef allocator, void *ptr, CFIndex newsize
     CFAllocatorDeallocateCallBack deallocateFunc;
     void *newptr;
 
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
+    if (0) {
         allocator = kCFAllocatorSystemDefault;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator) {
-        // Under GC, we can't use just any old allocator when the GCRefZero allocator was requested
+    } else if (0) {
 	allocator = kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : __CFGetDefaultAllocator();
     } else if (NULL == allocator) {
         allocator = __CFGetDefaultAllocator();
@@ -699,11 +686,9 @@ void *CFAllocatorReallocate(CFAllocatorRef allocator, void *ptr, CFIndex newsize
 void CFAllocatorDeallocate(CFAllocatorRef allocator, void *ptr) {
     CFAllocatorDeallocateCallBack deallocateFunc;
 
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
-        if (_CFAllocatorIsGCRefZero(allocator)) return;
+    if (0) {
         allocator = kCFAllocatorSystemDefault;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator) {
-        // Under GC, we can't use just any old allocator when the GCRefZero allocator was requested
+    } else if (0) {
 	allocator = kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : __CFGetDefaultAllocator();
 	if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) return;
     } else if (NULL == allocator) {
@@ -736,10 +721,9 @@ CFIndex CFAllocatorGetPreferredSizeForSize(CFAllocatorRef allocator, CFIndex siz
     CFAllocatorPreferredSizeCallBack prefFunc;
     CFIndex newsize = 0;
 
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
+    if (0) {
         allocator = kCFAllocatorSystemDefault;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator) {
-        // Under GC, we can't use just any old allocator when the GCRefZero allocator was requested
+    } else if (0) {
 	allocator = kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : __CFGetDefaultAllocator();
     } else if (NULL == allocator) {
         allocator = __CFGetDefaultAllocator();
@@ -766,10 +750,9 @@ CFIndex CFAllocatorGetPreferredSizeForSize(CFAllocatorRef allocator, CFIndex siz
 }
 
 void CFAllocatorGetContext(CFAllocatorRef allocator, CFAllocatorContext *context) {
-    if (kCFAllocatorSystemDefaultGCRefZero == allocator) {
+    if (0) {
         allocator = kCFAllocatorSystemDefault;
-    } else if (kCFAllocatorDefaultGCRefZero == allocator) {
-        // Under GC, we can't use just any old allocator when the GCRefZero allocator was requested
+    } else if (0) {
 	allocator = kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : __CFGetDefaultAllocator();
     } else if (NULL == allocator) {
         allocator = __CFGetDefaultAllocator();
@@ -799,7 +782,7 @@ void CFAllocatorGetContext(CFAllocatorRef allocator, CFAllocatorContext *context
     context->preferredSize = __CFAllocatorGetPreferredSizeFunction(&allocator->_context);
 }
 
-__private_extern__ void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint)
+CF_PRIVATE void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFIndex size, CFOptionFlags hint)
 {
     if (CF_IS_COLLECTABLE_ALLOCATOR(allocator))
         return auto_zone_allocate_object((auto_zone_t*)kCFAllocatorSystemDefault->_context.info, size, CF_GET_GC_MEMORY_TYPE(hint), false, false);
@@ -807,7 +790,7 @@ __private_extern__ void *_CFAllocatorAllocateGC(CFAllocatorRef allocator, CFInde
         return CFAllocatorAllocate(allocator, size, hint);
 }
 
-__private_extern__ void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void *ptr, CFIndex newsize, CFOptionFlags hint)
+CF_PRIVATE void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void *ptr, CFIndex newsize, CFOptionFlags hint)
 {
     if (CF_IS_COLLECTABLE_ALLOCATOR(allocator)) {
 	if (ptr && (newsize == 0)) {
@@ -821,7 +804,7 @@ __private_extern__ void *_CFAllocatorReallocateGC(CFAllocatorRef allocator, void
     return CFAllocatorReallocate(allocator, ptr, newsize, hint);
 }
 
-__private_extern__ void _CFAllocatorDeallocateGC(CFAllocatorRef allocator, void *ptr)
+CF_PRIVATE void _CFAllocatorDeallocateGC(CFAllocatorRef allocator, void *ptr)
 {
     // when running GC, don't deallocate.
     if (!CF_IS_COLLECTABLE_ALLOCATOR(allocator)) CFAllocatorDeallocate(allocator, ptr);
@@ -873,10 +856,9 @@ static const CFRuntimeClass __CFNullClass = {
     __CFNullCopyDescription
 };
 
-__private_extern__ void __CFNullInitialize(void) {
+CF_PRIVATE void __CFNullInitialize(void) {
     __kCFNullTypeID = _CFRuntimeRegisterClass(&__CFNullClass);
-    _CFRuntimeSetInstanceTypeID(&__kCFNull, __kCFNullTypeID);
-    __kCFNull._base._cfisa = __CFISAForTypeID(__kCFNullTypeID);
+    _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFNull, __kCFNullTypeID);
 }
 
 CFTypeID CFNullGetTypeID(void) {

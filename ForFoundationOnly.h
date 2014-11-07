@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	ForFoundationOnly.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 #if !CF_BUILDING_CF && !NSBUILDINGFOUNDATION
@@ -77,14 +77,9 @@ CF_EXPORT const CFStringRef _kCFBundleResolvedPathKey;
 CF_EXPORT const CFStringRef _kCFBundlePrincipalClassKey;
 
 #if __BLOCKS__
-CF_EXPORT CFArrayRef _CFFindBundleResources(CFBundleRef bundle, CFURLRef bundleURL, CFStringRef subDirName, CFArrayRef searchLanguages, CFStringRef resName, CFArrayRef resTypes, CFIndex limit, Boolean (^predicate)(CFStringRef filename, Boolean *stop), UInt8 version);
-// new look up algorithm is in place (look for CFBUNDLE_NEWLOOKUP)
 CF_EXPORT CFTypeRef _CFBundleCopyFindResources(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized, Boolean (^predicate)(CFStringRef filename, Boolean *stop));
 #endif
 
-CF_EXPORT UInt8 _CFBundleLayoutVersion(CFBundleRef bundle);
-
-CF_EXPORT CFArrayRef _CFBundleCopyLanguageSearchListInDirectory(CFAllocatorRef alloc, CFURLRef url, UInt8 *version);
 CF_EXPORT CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle);
 
 CF_EXPORT Boolean _CFBundleLoadExecutableAndReturnError(CFBundleRef bundle, Boolean forceGlobal, CFErrorRef *error);
@@ -176,6 +171,38 @@ CF_EXTERN_C_END
 // ---- CFString material ----------------------------------------
 
 #include <CoreFoundation/CFStringEncodingExt.h>
+
+#define NSSTRING_BOUNDSERROR \
+    [NSException raise:NSRangeException format:@"%@: Range or index out of bounds", __CFExceptionProem((id)self, _cmd)]
+
+#define NSSTRING_RANGEERROR(range, len) \
+    [NSException raise:NSRangeException format:@"%@: Range {%lu, %lu} out of bounds; string length %lu", __CFExceptionProem((id)self, _cmd), (unsigned long)range.location, (unsigned long)range.length, (unsigned long)len]
+
+#define NSSTRING_INDEXERROR(index, len) \
+    [NSException raise:NSRangeException format:@"%@: Index %lu out of bounds; string length %lu", __CFExceptionProem((id)self, _cmd), (unsigned long)index, (unsigned long)len]
+
+// This can be made into an exception for post-10.9 apps
+#define NSSTRING_POSSIBLE_RANGEERROR(range, len)     \
+    if (__CFStringNoteErrors()) {       \
+        static bool warnonce = false;   \
+        if (!warnonce) {                \
+            warnonce = true;            \
+            CFLog(kCFLogLevelWarning, CFSTR("*** %@: Range {%lu, %lu} out of bounds; string length %lu. This will become an exception for apps linked after 10.9. Warning shown once per app execution."), __CFExceptionProem((id)self, _cmd), (unsigned long)range.location, (unsigned long)range.length, (unsigned long)len);        \
+    }   \
+}
+
+#define NSSTRING_ILLEGALREQUESTERROR \
+    [NSException raise:NSInvalidArgumentException format:@"Can't call %s in %@", sel_getName(_cmd), object_getClass((id)self)]
+
+#define NSSTRING_INVALIDMUTATIONERROR \
+    [NSException raise:NSInvalidArgumentException format:@"Attempt to mutate immutable object with %s", sel_getName(_cmd)]
+
+#define NSSTRING_NULLCSTRINGERROR \
+    [NSException raise:NSInvalidArgumentException format:@"%@: NULL cString", __CFExceptionProem((id)self, _cmd)]
+
+#define NSSTRING_NILSTRINGERROR \
+    [NSException raise:NSInvalidArgumentException format:@"%@: nil argument", __CFExceptionProem((id)self, _cmd)]
+
 
 CF_EXTERN_C_BEGIN
 
@@ -285,12 +312,10 @@ CF_INLINE Boolean __CFIsWhitespace(UniChar theChar) {
 /* Same as CFStringGetCharacterFromInlineBuffer() but returns 0xFFFF on out of bounds access
 */
 CF_INLINE UniChar __CFStringGetCharacterFromInlineBufferAux(CFStringInlineBuffer *buf, CFIndex idx) {
-    if (buf->directBuffer) {
-	if (idx < 0 || idx >= buf->rangeToBuffer.length) return 0xFFFF;
-        return buf->directBuffer[idx + buf->rangeToBuffer.location];
-    }
+    if (idx < 0 || idx >= buf->rangeToBuffer.length) return 0xFFFF;
+    if (buf->directUniCharBuffer) return buf->directUniCharBuffer[idx + buf->rangeToBuffer.location];
+    if (buf->directCStringBuffer) return (UniChar)(buf->directCStringBuffer[idx + buf->rangeToBuffer.location]);
     if (idx >= buf->bufferedRangeEnd || idx < buf->bufferedRangeStart) {
-	if (idx < 0 || idx >= buf->rangeToBuffer.length) return 0xFFFF;
 	if ((buf->bufferedRangeStart = idx - 4) < 0) buf->bufferedRangeStart = 0;
 	buf->bufferedRangeEnd = buf->bufferedRangeStart + __kCFStringInlineBufferLength;
 	if (buf->bufferedRangeEnd > buf->rangeToBuffer.length) buf->bufferedRangeEnd = buf->rangeToBuffer.length;
@@ -302,7 +327,8 @@ CF_INLINE UniChar __CFStringGetCharacterFromInlineBufferAux(CFStringInlineBuffer
 /* Same as CFStringGetCharacterFromInlineBuffer(), but without the bounds checking (will return garbage or crash)
 */
 CF_INLINE UniChar __CFStringGetCharacterFromInlineBufferQuick(CFStringInlineBuffer *buf, CFIndex idx) {
-    if (buf->directBuffer) return buf->directBuffer[idx + buf->rangeToBuffer.location];
+    if (buf->directUniCharBuffer) return buf->directUniCharBuffer[idx + buf->rangeToBuffer.location];
+    if (buf->directCStringBuffer) return (UniChar)(buf->directCStringBuffer[idx + buf->rangeToBuffer.location]);
     if (idx >= buf->bufferedRangeEnd || idx < buf->bufferedRangeStart) {
 	if ((buf->bufferedRangeStart = idx - 4) < 0) buf->bufferedRangeStart = 0;
 	buf->bufferedRangeEnd = buf->bufferedRangeStart + __kCFStringInlineBufferLength;
@@ -499,9 +525,9 @@ CF_EXPORT CFStringRef _CFErrorCreateLocalizedRecoverySuggestion(CFErrorRef err);
 CF_EXPORT CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err);
 
 CF_EXPORT CFURLRef _CFURLAlloc(CFAllocatorRef allocator);
-CF_EXPORT void _CFURLInitWithString(CFURLRef url, CFStringRef string, CFURLRef baseURL);
-CF_EXPORT void _CFURLInitFSPath(CFURLRef url, CFStringRef path);
-CF_EXPORT Boolean _CFStringIsLegalURLString(CFStringRef string);
+CF_EXPORT Boolean _CFURLInitWithURLString(CFURLRef uninitializedURL, CFStringRef string, Boolean checkForLegalCharacters, CFURLRef baseURL);
+CF_EXPORT Boolean _CFURLInitWithFileSystemPath(CFURLRef uninitializedURL, CFStringRef fileSystemPath, CFURLPathStyle pathStyle, Boolean isDirectory, CFURLRef baseURL);
+CF_EXPORT Boolean _CFURLInitWithFileSystemRepresentation(CFURLRef uninitializedURL, const UInt8 *buffer, CFIndex bufLen, Boolean isDirectory, CFURLRef baseURL);
 CF_EXPORT void *__CFURLReservedPtr(CFURLRef  url);
 CF_EXPORT void __CFURLSetReservedPtr(CFURLRef  url, void *ptr);
 CF_EXPORT CFStringEncoding _CFURLGetEncoding(CFURLRef url);

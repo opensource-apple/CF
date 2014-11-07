@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPlatform.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -37,6 +37,7 @@
     #include <pwd.h>
     #include <crt_externs.h>
     #include <mach-o/dyld.h>
+    #include <pthread/tsd_private.h>
 #endif
 
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -63,14 +64,14 @@ int _CFArgc(void) { return *_NSGetArgc(); }
 #endif
 
 
-__private_extern__ Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
+CF_PRIVATE Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
     return getcwd(path, maxlen) != NULL;
 }
 
 #if DEPLOYMENT_TARGET_WINDOWS
 // Returns the path to the CF DLL, which we can then use to find resources like char sets
 bool bDllPathCached = false;
-__private_extern__ const wchar_t *_CFDLLPath(void) {
+CF_PRIVATE const wchar_t *_CFDLLPath(void) {
     static wchar_t cachedPath[MAX_PATH+1];
 
     if (!bDllPathCached) {
@@ -190,7 +191,7 @@ const char *_CFProcessPath(void) {
 }
 #endif
 
-__private_extern__ CFStringRef _CFProcessNameString(void) {
+CF_PRIVATE CFStringRef _CFProcessNameString(void) {
     static CFStringRef __CFProcessNameString = NULL;
     if (!__CFProcessNameString) {
         const char *processName = *_CFGetProgname();
@@ -231,7 +232,7 @@ static CFURLRef _CFCopyHomeDirURLForUser(struct passwd *upwd, bool fallBackToHom
 #define CFMaxHostNameLength	256
 #define CFMaxHostNameSize	(CFMaxHostNameLength+1)
 
-__private_extern__ CFStringRef _CFStringCreateHostName(void) {
+CF_PRIVATE CFStringRef _CFStringCreateHostName(void) {
     char myName[CFMaxHostNameSize];
 
     // return @"" instead of nil a la CFUserName() and Ali Ozer
@@ -510,7 +511,7 @@ CF_EXPORT int _NS_pthread_main_np() {
 #define CF_TSD_MAX_SLOTS 70
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-#define CF_TSD_KEY 55
+static const unsigned long CF_TSD_KEY = __PTK_FRAMEWORK_COREFOUNDATION_KEY5;
 #endif
 
 // Windows and Linux, not sure how many times the destructor could get called; CF_TSD_MAX_DESTRUCTOR_CALLS could be 1
@@ -533,17 +534,17 @@ static void __CFTSDFinalize(void *arg);
 static DWORD __CFTSDIndexKey = 0xFFFFFFFF;
 
 // Called from CFRuntime's startup code, on Windows only
-__private_extern__ void __CFTSDWindowsInitialize() {
+CF_PRIVATE void __CFTSDWindowsInitialize() {
     __CFTSDIndexKey = TlsAlloc();
 }
 
 // Called from CFRuntime's cleanup code, on Windows only
-__private_extern__ void __CFTSDWindowsCleanup() {
+CF_PRIVATE void __CFTSDWindowsCleanup() {
     TlsFree(__CFTSDIndexKey);
 }
 
 // Called for each thread as it exits, on Windows only
-__private_extern__ void __CFFinalizeWindowsThreadData() {
+CF_PRIVATE void __CFFinalizeWindowsThreadData() {
     // Normally, this should call the finalizer several times to emulate the behavior of pthreads on Windows. However, a few bugs keep us from doing this:
     // <rdar://problem/8989063> REGRESSION(CF-610-CF-611): Crash closing Safari in BonjourDB destructor (Windows)
     // <rdar://problem/9326814> SyncUIHandler crashes after conflict is resolved and we do SyncNow
@@ -559,7 +560,7 @@ __private_extern__ void __CFFinalizeWindowsThreadData() {
 static pthread_key_t __CFTSDIndexKey;
 
 // Called from CFRuntime's startup code, on Linux only
-__private_extern__ void __CFTSDLinuxInitialize() {
+CF_PRIVATE void __CFTSDLinuxInitialize() {
     (void)pthread_key_create(&__CFTSDIndexKey, __CFTSDFinalize);
 }
 
@@ -567,7 +568,7 @@ __private_extern__ void __CFTSDLinuxInitialize() {
 
 static void __CFTSDSetSpecific(void *arg) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    pthread_setspecific(CF_TSD_KEY, arg);
+    _pthread_setspecific_direct(CF_TSD_KEY, arg);
 #elif DEPLOYMENT_TARGET_LINUX
     pthread_setspecific(__CFTSDIndexKey, arg);
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -577,7 +578,7 @@ static void __CFTSDSetSpecific(void *arg) {
 
 static void *__CFTSDGetSpecific() {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    return pthread_getspecific(CF_TSD_KEY);
+    return _pthread_getspecific_direct(CF_TSD_KEY);
 #elif DEPLOYMENT_TARGET_LINUX
     return pthread_getspecific(__CFTSDIndexKey);
 #elif DEPLOYMENT_TARGET_WINDOWS
@@ -1023,7 +1024,7 @@ struct timezone {
     int	tz_dsttime;	/* type of dst correction */
 };
 
-__private_extern__ int _NS_gettimeofday(struct timeval *tv, struct timezone *tz) {
+CF_PRIVATE int _NS_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (tv) {
         FILETIME ft;
         GetSystemTimeAsFileTime(&ft);
@@ -1077,6 +1078,10 @@ bool OSAtomicCompareAndSwap32Barrier(int32_t oldValue, int32_t newValue, volatil
     return __sync_bool_compare_and_swap(theValue, oldValue, newValue);
 }
 
+bool OSAtomicCompareAndSwap64Barrier(int64_t oldValue, int64_t newValue, volatile int64_t *theValue) {
+    return __sync_bool_compare_and_swap(theValue, oldValue, newValue);
+}
+
 int32_t OSAtomicDecrement32Barrier(volatile int32_t *dst)
 {
     return OSAtomicAdd32Barrier(-1, dst);
@@ -1103,6 +1108,13 @@ void OSMemoryBarrier() {
     __sync_synchronize();
 }
 
+#include <Block_private.h>
+
+void dispatch_once(dispatch_once_t *predicate, dispatch_block_t block) {
+    struct Block_layout *layout = (struct Block_layout *)block; 
+    pthread_once(predicate, (void (*)(void))layout->invoke);
+}
+
 #endif // DEPLOYMENT_TARGET_LINUX
 
 #pragma mark -
@@ -1112,7 +1124,7 @@ void OSMemoryBarrier() {
 
 #include <stdio.h>
 
-__private_extern__ int asprintf(char **ret, const char *format, ...) {
+CF_PRIVATE int asprintf(char **ret, const char *format, ...) {
     va_list args;
     size_t sz = 1024;
     *ret = (char *) malloc(sz * sizeof(char));

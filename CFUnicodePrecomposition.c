@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFUnicodePrecomposition.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -121,7 +121,7 @@ static uint32_t __CFUniCharGetMappedValue_P(const __CFUniCharPrecomposeMappings 
     return 0;
 }
 
-__private_extern__
+CF_PRIVATE
 UTF32Char CFUniCharPrecomposeCharacter(UTF32Char base, UTF32Char combining) {
     uint32_t value;
 

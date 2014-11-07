@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,7 +23,7 @@
 
 /*	
  CFLocaleInternal.h
- Copyright (c) 2008-2012, Apple Inc. All rights reserved.
+ Copyright (c) 2008-2013, Apple Inc. All rights reserved.
  */
 
 /*
@@ -83,6 +83,7 @@ CF_EXPORT CFStringRef const kCFDateFormatterVeryShortStandaloneMonthSymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterVeryShortStandaloneWeekdaySymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterVeryShortWeekdaySymbolsKey;
 CF_EXPORT CFStringRef const kCFDateFormatterWeekdaySymbolsKey;
+CF_EXPORT CFStringRef const kCFDateFormatterUsesCharacterDirectionKey;
 
 CF_EXPORT CFStringRef const kCFNumberFormatterAlwaysShowDecimalSeparatorKey;
 CF_EXPORT CFStringRef const kCFNumberFormatterCurrencyCodeKey;
@@ -122,6 +123,7 @@ CF_EXPORT CFStringRef const kCFNumberFormatterSecondaryGroupingSizeKey;
 CF_EXPORT CFStringRef const kCFNumberFormatterUseGroupingSeparatorKey;
 CF_EXPORT CFStringRef const kCFNumberFormatterUseSignificantDigitsKey;
 CF_EXPORT CFStringRef const kCFNumberFormatterZeroSymbolKey;
+CF_EXPORT CFStringRef const kCFNumberFormatterUsesCharacterDirectionKey;
 
 CF_EXPORT CFStringRef const kCFCalendarIdentifierGregorian;
 CF_EXPORT CFStringRef const kCFCalendarIdentifierBuddhist;

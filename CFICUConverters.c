@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFICUConverters.c
-	Copyright (c) 2004-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -74,7 +74,7 @@ CF_INLINE __CFICUThreadData *__CFStringEncodingICUGetThreadData() {
     return data;
 }
 
-__private_extern__ const char *__CFStringEncodingGetICUName(CFStringEncoding encoding) {
+CF_PRIVATE const char *__CFStringEncodingGetICUName(CFStringEncoding encoding) {
 #define STACK_BUFFER_SIZE (60)
     char buffer[STACK_BUFFER_SIZE];
     const char *result = NULL;
@@ -93,11 +93,12 @@ __private_extern__ const char *__CFStringEncodingGetICUName(CFStringEncoding enc
 #undef STACK_BUFFER_SIZE
 }
 
-__private_extern__ CFStringEncoding __CFStringEncodingGetFromICUName(const char *icuName) {
+CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromICUName(const char *icuName) {
     uint32_t codepage;
+    char *endPtr;
     UErrorCode errorCode = U_ZERO_ERROR;
 
-    if ((0 == strncasecmp_l(icuName, "windows-", strlen("windows-"), NULL)) && (0 != (codepage = strtol(icuName + strlen("windows-"), NULL, 10)))) return __CFStringEncodingGetFromWindowsCodePage(codepage);
+    if ((0 == strncasecmp_l(icuName, "windows-", strlen("windows-"), NULL)) && (0 != (codepage = strtol(icuName + strlen("windows-"), &endPtr, 10))) && (*endPtr == '\0')) return __CFStringEncodingGetFromWindowsCodePage(codepage);
 
     if (0 != ucnv_countAliases(icuName, &errorCode)) {
         CFStringEncoding encoding;
@@ -107,7 +108,7 @@ __private_extern__ CFStringEncoding __CFStringEncodingGetFromICUName(const char 
         name = ucnv_getStandardName(icuName, "WINDOWS", &errorCode);
         
         if (NULL != name) {
-            if ((0 == strncasecmp_l(name, "windows-", strlen("windows-"), NULL)) && (0 != (codepage = strtol(name + strlen("windows-"), NULL, 10)))) return __CFStringEncodingGetFromWindowsCodePage(codepage);
+            if ((0 == strncasecmp_l(name, "windows-", strlen("windows-"), NULL)) && (0 != (codepage = strtol(name + strlen("windows-"), &endPtr, 10))) && (*endPtr == '\0')) return __CFStringEncodingGetFromWindowsCodePage(codepage);
             
             if (strncasecmp_l(icuName, name, strlen(name), NULL) && (kCFStringEncodingInvalidId != (encoding = __CFStringEncodingGetFromCanonicalName(name)))) return encoding;
         }
@@ -238,14 +239,17 @@ static CFIndex __CFStringEncodingConverterReleaseICUConverter(UConverter *conver
 #define MAX_BUFFER_SIZE (1000)
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if 0
+// we're no longer doing this check. Revive when the status in the bug changed.
 #if (U_ICU_VERSION_MAJOR_NUM > 49)
 #warning Unknown ICU version. Check binary compatibility issues for rdar://problem/6024743
+#endif
 #endif
 #endif
 #define HAS_ICU_BUG_6024743 (1)
 #define HAS_ICU_BUG_6025527 (1)
 
-__private_extern__ CFIndex __CFStringEncodingICUToBytes(const char *icuName, uint32_t flags, const UniChar *characters, CFIndex numChars, CFIndex *usedCharLen, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen) {
+CF_PRIVATE CFIndex __CFStringEncodingICUToBytes(const char *icuName, uint32_t flags, const UniChar *characters, CFIndex numChars, CFIndex *usedCharLen, uint8_t *bytes, CFIndex maxByteLen, CFIndex *usedByteLen) {
     UConverter *converter;
     UErrorCode errorCode = U_ZERO_ERROR;
     const UTF16Char *source = characters;
@@ -347,7 +351,7 @@ __private_extern__ CFIndex __CFStringEncodingICUToBytes(const char *icuName, uin
     return status;
 }
 
-__private_extern__ CFIndex __CFStringEncodingICUToUnicode(const char *icuName, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, CFIndex *usedByteLen, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen) {
+CF_PRIVATE CFIndex __CFStringEncodingICUToUnicode(const char *icuName, uint32_t flags, const uint8_t *bytes, CFIndex numBytes, CFIndex *usedByteLen, UniChar *characters, CFIndex maxCharLen, CFIndex *usedCharLen) {
     UConverter *converter;
     UErrorCode errorCode = U_ZERO_ERROR;
     const char *source = (const char *)bytes;
@@ -418,17 +422,17 @@ __private_extern__ CFIndex __CFStringEncodingICUToUnicode(const char *icuName, u
     return status;
 }
 
-__private_extern__ CFIndex __CFStringEncodingICUCharLength(const char *icuName, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
+CF_PRIVATE CFIndex __CFStringEncodingICUCharLength(const char *icuName, uint32_t flags, const uint8_t *bytes, CFIndex numBytes) {
     CFIndex usedCharLen;
     return (__CFStringEncodingICUToUnicode(icuName, flags, bytes, numBytes, NULL, NULL, 0, &usedCharLen) == kCFStringEncodingConversionSuccess ? usedCharLen : 0);
 }
 
-__private_extern__ CFIndex __CFStringEncodingICUByteLength(const char *icuName, uint32_t flags, const UniChar *characters, CFIndex numChars) {
+CF_PRIVATE CFIndex __CFStringEncodingICUByteLength(const char *icuName, uint32_t flags, const UniChar *characters, CFIndex numChars) {
     CFIndex usedByteLen;
     return (__CFStringEncodingICUToBytes(icuName, flags, characters, numChars, NULL, NULL, 0, &usedByteLen) == kCFStringEncodingConversionSuccess ? usedByteLen : 0);
 }
 
-__private_extern__ CFStringEncoding *__CFStringEncodingCreateICUEncodings(CFAllocatorRef allocator, CFIndex *numberOfIndex) {
+CF_PRIVATE CFStringEncoding *__CFStringEncodingCreateICUEncodings(CFAllocatorRef allocator, CFIndex *numberOfIndex) {
     CFIndex count = ucnv_countAvailable();
     CFIndex numEncodings = 0;
     CFStringEncoding *encodings;

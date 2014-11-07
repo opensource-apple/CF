@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFSocketStream.c
-	Copyright (c) 2000-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2013, Apple Inc. All rights reserved.
 	Responsibility: Jeremy Wyld
 */
 //	Original Author: Becky Willrich
@@ -203,7 +203,7 @@ CF_EXPORT void CFStreamCreatePairWithPeerSocketSignature(CFAllocatorRef alloc, c
     createPair(alloc, NULL, 0, 0, sig, readStream, writeStream);
 }
 
-__private_extern__ CFStreamError _CFStreamErrorFromError(CFErrorRef error) {
+CF_PRIVATE CFStreamError _CFStreamErrorFromError(CFErrorRef error) {
     CFStreamError result;
     Boolean canUpCall;
     
@@ -230,7 +230,7 @@ __private_extern__ CFStreamError _CFStreamErrorFromError(CFErrorRef error) {
     return result;
 }
 
-__private_extern__ CFErrorRef _CFErrorFromStreamError(CFAllocatorRef alloc, CFStreamError *streamError) {
+CF_PRIVATE CFErrorRef _CFErrorFromStreamError(CFAllocatorRef alloc, CFStreamError *streamError) {
     CFErrorRef result;
     Boolean canUpCall;
     

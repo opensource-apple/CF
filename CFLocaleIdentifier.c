@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,7 +23,7 @@
 
 /*
     CFLocaleIdentifier.c
-	Copyright (c) 2002-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2013, Apple Inc. All rights reserved.
     Responsibility: David Smith
     
     CFLocaleIdentifier.c defines

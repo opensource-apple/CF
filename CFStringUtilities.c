@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStringUtilities.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -111,6 +111,11 @@ CFStringEncoding CFStringConvertIANACharSetNameToEncoding(CFStringRef charsetNam
 #endif
     
 
+    // handling Java name variant for MS codepages
+    if ((kCFStringEncodingInvalidId == encoding) && !strncasecmp(name, "ms950", strlen("ms950"))) { // <rdar://problem/12903398> “MS950” is not recognized
+        encoding = __CFStringEncodingGetFromCanonicalName("cp950");
+    }
+    
     return encoding;
 }
 
@@ -556,7 +561,7 @@ static inline CFIndex __extendLocationForward(CFIndex location, CFStringInlineBu
     return location;
 }
 
-__private_extern__ CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *str1, CFRange str1Range, CFStringInlineBuffer *str2, CFRange str2Range, CFOptionFlags options, const void *compareLocale) {
+CF_PRIVATE CFComparisonResult _CFCompareStringsWithLocale(CFStringInlineBuffer *str1, CFRange str1Range, CFStringInlineBuffer *str2, CFRange str2Range, CFOptionFlags options, const void *compareLocale) {
     const UniChar *characters1;
     const UniChar *characters2;
     CFComparisonResult compResult = kCFCompareEqualTo;

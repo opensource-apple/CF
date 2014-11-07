@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBigNumber.h
-	Copyright (c) 2012-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2012-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBIGNUMBER__)

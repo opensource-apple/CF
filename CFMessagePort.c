@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFMessagePort.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -301,7 +301,7 @@ static const CFRuntimeClass __CFMessagePortClass = {
     __CFMessagePortCopyDescription
 };
 
-__private_extern__ void __CFMessagePortInitialize(void) {
+CF_PRIVATE void __CFMessagePortInitialize(void) {
     __kCFMessagePortTypeID = _CFRuntimeRegisterClass(&__CFMessagePortClass);
 }
 
@@ -879,7 +879,7 @@ SInt32 CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef
     CFRunLoopRef currentRL = CFRunLoopGetCurrent();
     CFRunLoopSourceRef source = NULL;
     CFDataRef reply = NULL;
-    int64_t termTSR;
+    uint64_t termTSR;
     uint32_t sendOpts = 0, sendTimeOut = 0;
     int32_t desiredReply;
     Boolean didRegister = false;
@@ -953,10 +953,10 @@ SInt32 CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef
     _CFMachPortInstallNotifyPort(currentRL, replyMode);
     termTSR = mach_absolute_time() + __CFTimeIntervalToTSR(rcvTimeout);
     for (;;) {
-	CFRunLoopRunInMode(replyMode, __CFTSRToTimeInterval(termTSR - mach_absolute_time()), true);
+	CFRunLoopRunInMode(replyMode, __CFTimeIntervalUntilTSR(termTSR), true);
 	// warning: what, if anything, should be done if remote is now invalid?
 	reply = CFDictionaryGetValue(remote->_replies, (void *)(uintptr_t)desiredReply);
-	if (NULL != reply || termTSR < (int64_t)mach_absolute_time()) {
+	if (NULL != reply || termTSR < mach_absolute_time()) {
 	    break;
 	}
 	if (!CFMessagePortIsValid(remote)) {
@@ -990,6 +990,7 @@ static mach_port_t __CFMessagePortGetPort(void *info) {
     return ms->_port ? CFMachPortGetPort(ms->_port) : MACH_PORT_NULL;
 }
 
+
 static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allocator, void *info) {
     CFMessagePortRef ms = info;
     mach_msg_base_t *msgp = msg;
@@ -1015,6 +1016,7 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
     }
     __CFMessagePortUnlock(ms);
 
+    
     int32_t byteslen = 0;
 
     Boolean invalidMagic = (MSGP_GET(msgp, magic) != MAGIC) && (CFSwapInt32(MSGP_GET(msgp, magic)) != MAGIC);

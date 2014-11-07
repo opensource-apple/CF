@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPreferences.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFPREFERENCES__)
@@ -129,7 +129,7 @@ which have preferences in the scope of the given user and host.
 The returned value must be released by the caller; neither argument
 may be NULL. */
 CF_EXPORT
-CFArrayRef CFPreferencesCopyApplicationList(CFStringRef userName, CFStringRef hostName);
+CFArrayRef CFPreferencesCopyApplicationList(CFStringRef userName, CFStringRef hostName) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 
 /* Constructs and returns the list of all keys set in the given
 location.  The returned value must be released by the caller;

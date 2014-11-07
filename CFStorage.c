@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStorage.c
- Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+ Copyright (c) 1999-2013, Apple Inc. All rights reserved.
  Responsibility: Ali Ozer
  */
 
@@ -976,7 +976,7 @@ static CFStringRef __CFStorageCopyDescription(CFTypeRef cf) {
     CFMutableStringRef result;
     CFAllocatorRef allocator = CFGetAllocator(storage);
     result = CFStringCreateMutable(allocator, 0);
-    CFStringAppendFormat(result, NULL, CFSTR("<CFStorage %p [%p]>[count = %u, capacity = %u]\n"), storage, allocator, __CFStorageGetCount(storage), __CFStorageGetCapacity(storage));
+    CFStringAppendFormat(result, NULL, CFSTR("<CFStorage %p [%p]>[count = %lu, capacity = %lu]\n"), storage, allocator, (unsigned long)__CFStorageGetCount(storage), (unsigned long)__CFStorageGetCapacity(storage));
     __CFStorageDescribeNode(&storage->rootNode, result, 0);
     return result;
 }
@@ -1105,7 +1105,7 @@ static const CFRuntimeClass __CFStorageClass = {
     __CFStorageCopyDescription
 };
 
-__private_extern__ void __CFStorageInitialize(void) {
+CF_PRIVATE void __CFStorageInitialize(void) {
     __kCFStorageTypeID = _CFRuntimeRegisterClass(&__CFStorageClass);
 }
 
@@ -1471,7 +1471,7 @@ static void __CFStorageNodeSetUnscanned(CFStorageNode *node, auto_zone_t *zone) 
     }
 }
 
-__private_extern__ void _CFStorageSetWeak(CFStorageRef storage) {
+CF_PRIVATE void _CFStorageSetWeak(CFStorageRef storage) {
     storage->nodeHint = 0;
     __CFStorageNodeSetUnscanned(&storage->rootNode, (auto_zone_t *)objc_collectableZone());
 }

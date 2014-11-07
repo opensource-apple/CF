@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPreferences.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -67,7 +67,7 @@ CONST_STRING_DECL(kCFPreferencesCurrentUser, "kCFPreferencesCurrentUser")
 
 
 static CFAllocatorRef _preferencesAllocator = NULL;
-__private_extern__ CFAllocatorRef __CFPreferencesAllocator(void) {
+CF_PRIVATE CFAllocatorRef __CFPreferencesAllocator(void) {
     if (!_preferencesAllocator) {
 #if DEBUG_PREFERENCES_MEMORY
         _preferencesAllocator = CFCountingAllocatorCreate(NULL);
@@ -103,7 +103,7 @@ CF_EXPORT void CFPreferencesDumpMem(void) {
 // If this becomes available in a header (<rdar://problem/4943036>), I need to pull this out
 int gethostuuid(unsigned char *uuid_buf, const struct timespec *timeoutp);
 
-__private_extern__ CFStringRef _CFGetHostUUIDString(void) {
+CF_PRIVATE CFStringRef _CFGetHostUUIDString(void) {
     static CFStringRef __hostUUIDString = NULL;
     
     if (!__hostUUIDString) {
@@ -131,7 +131,7 @@ __private_extern__ CFStringRef _CFGetHostUUIDString(void) {
     return __hostUUIDString;
 }
 
-__private_extern__ CFStringRef _CFPreferencesGetByHostIdentifierString(void) {
+CF_PRIVATE CFStringRef _CFPreferencesGetByHostIdentifierString(void) {
     static CFStringRef __byHostIdentifierString = NULL;
 
     if (!__byHostIdentifierString) {
@@ -164,7 +164,7 @@ __private_extern__ CFStringRef _CFPreferencesGetByHostIdentifierString(void) {
 
 #else
 
-__private_extern__ CFStringRef _CFPreferencesGetByHostIdentifierString(void) {
+CF_PRIVATE CFStringRef _CFPreferencesGetByHostIdentifierString(void) {
     return CFSTR("");
 }
 
@@ -425,7 +425,7 @@ static const CFRuntimeClass __CFPreferencesDomainClass = {
 };
 
 /* This is called once at CFInitialize() time. */
-__private_extern__ void __CFPreferencesDomainInitialize(void) {
+CF_PRIVATE void __CFPreferencesDomainInitialize(void) {
     __kCFPreferencesDomainTypeID = _CFRuntimeRegisterClass(&__CFPreferencesDomainClass);
 }
 
@@ -571,7 +571,7 @@ static void __CFPreferencesPerformSynchronize(const void *key, const void *value
     if (!_CFPreferencesDomainSynchronize(domain)) *cumulativeResult = false;
 }
 
-__private_extern__ Boolean _CFSynchronizeDomainCache(void) {
+CF_PRIVATE Boolean _CFSynchronizeDomainCache(void) {
     Boolean result = true;
     __CFSpinLock(&domainCacheLock);
     if (domainCache) {
@@ -581,7 +581,7 @@ __private_extern__ Boolean _CFSynchronizeDomainCache(void) {
     return result;
 }
 
-__private_extern__ void _CFPreferencesPurgeDomainCache(void) {
+CF_PRIVATE void _CFPreferencesPurgeDomainCache(void) {
     _CFSynchronizeDomainCache();
     __CFSpinLock(&domainCacheLock);
     if (domainCache) {
@@ -591,7 +591,7 @@ __private_extern__ void _CFPreferencesPurgeDomainCache(void) {
     __CFSpinUnlock(&domainCacheLock);
 }
 
-__private_extern__ CFArrayRef  _CFPreferencesCreateDomainList(CFStringRef  userName, CFStringRef  hostName) {
+CF_PRIVATE CFArrayRef  _CFPreferencesCreateDomainList(CFStringRef  userName, CFStringRef  hostName) {
     CFAllocatorRef prefAlloc = __CFPreferencesAllocator();
     CFArrayRef  domains;
     CFMutableArrayRef  marray;
@@ -715,17 +715,17 @@ void _CFPreferencesDomainSet(CFPreferencesDomainRef domain, CFStringRef  key, CF
     domain->_callBacks->writeValue(domain->_context, domain->_domain, key, value);
 }
 
-__private_extern__ Boolean _CFPreferencesDomainSynchronize(CFPreferencesDomainRef domain) {
+CF_PRIVATE Boolean _CFPreferencesDomainSynchronize(CFPreferencesDomainRef domain) {
     return domain->_callBacks->synchronize(domain->_context, domain->_domain);
 }
 
-__private_extern__ void _CFPreferencesDomainSetIsWorldReadable(CFPreferencesDomainRef domain, Boolean isWorldReadable) {
+CF_PRIVATE void _CFPreferencesDomainSetIsWorldReadable(CFPreferencesDomainRef domain, Boolean isWorldReadable) {
     if (domain->_callBacks->setIsWorldReadable) {
         domain->_callBacks->setIsWorldReadable(domain->_context, domain->_domain, isWorldReadable);
     }
 }
 
-__private_extern__ void *_CFPreferencesDomainCopyDictFunc(CFPreferencesDomainRef domain) {
+CF_PRIVATE void *_CFPreferencesDomainCopyDictFunc(CFPreferencesDomainRef domain) {
     return domain->_callBacks->copyDomainDictionary;
 }
 

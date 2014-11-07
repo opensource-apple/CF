@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CoreFoundation_Prefix.h
-	Copyright (c) 2005-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2013, Apple Inc. All rights reserved.
 */
 
 
@@ -61,8 +61,7 @@ typedef char * Class;
 #import <pthread.h>
 #endif
 
-/* This macro creates 3 helper functions which are useful in dealing with libdispatch:
- *  __ PREFIX SyncDispatchIsSafe  -- returns bool indicating whether calling dispatch_sync() would be safe from self-deadlock
+/* This macro creates some helper functions which are useful in dealing with libdispatch:
  *  __ PREFIX Queue -- manages and returns a singleton serial queue
  *
  * Use the macro like this:
@@ -70,11 +69,6 @@ typedef char * Class;
  */
 
 #define DISPATCH_HELPER_FUNCTIONS(PREFIX, QNAME)			\
-static Boolean __ ## PREFIX ## SyncDispatchIsSafe(dispatch_queue_t Q) {	\
-    dispatch_queue_t C = dispatch_get_current_queue();			\
-    return (!C || Q != C) ? true : false;				\
-}									\
-									\
 static dispatch_queue_t __ ## PREFIX ## Queue(void) {			\
     static volatile dispatch_queue_t __ ## PREFIX ## dq = NULL;		\
     if (!__ ## PREFIX ## dq) {						\
@@ -112,7 +106,7 @@ typedef int		boolean_t;
 
 #if DEPLOYMENT_TARGET_LINUX
     
-#define __private_extern__
+#define CF_PRIVATE
 #define __strong
 #define __weak
 
@@ -123,9 +117,34 @@ typedef int		boolean_t;
 #define strncasecmp_l(a, b, c, d) strncasecmp(a, b, c)
 
 #define fprintf_l(a,locale,b,...) fprintf(a, b, __VA_ARGS__)
-    
-#define strlcat(a,b,c) strncat(a,b,c)
-#define strlcpy(a,b,c) strncpy(a,b,c)
+
+#include <pthread.h>
+
+CF_INLINE size_t
+strlcpy(char * dst, const char * src, size_t maxlen) {
+    const size_t srclen = strlen(src);
+    if (srclen < maxlen) {
+        memcpy(dst, src, srclen+1);
+    } else if (maxlen != 0) {
+        memcpy(dst, src, maxlen-1);
+        dst[maxlen-1] = '\0';
+    }
+    return srclen;
+}
+
+CF_INLINE size_t
+strlcat(char * dst, const char * src, size_t maxlen) {
+    const size_t srclen = strlen(src);
+    const size_t dstlen = strnlen(dst, maxlen);
+    if (dstlen == maxlen) return maxlen+srclen;
+    if (srclen < maxlen-dstlen) {
+        memcpy(dst+dstlen, src, srclen+1);
+    } else {
+        memcpy(dst+dstlen, src, maxlen-dstlen-1);
+        dst[maxlen-1] = '\0';
+    }
+    return dstlen + srclen;
+}
 
 #define issetugid() 0
     
@@ -133,7 +152,8 @@ typedef int		boolean_t;
 bool OSAtomicCompareAndSwapPtr(void *oldp, void *newp, void *volatile *dst);
 bool OSAtomicCompareAndSwapLong(long oldl, long newl, long volatile *dst);
 bool OSAtomicCompareAndSwapPtrBarrier(void *oldp, void *newp, void *volatile *dst);
-
+bool OSAtomicCompareAndSwap64Barrier( int64_t __oldValue, int64_t __newValue, volatile int64_t *__theValue );
+    
 int32_t OSAtomicDecrement32Barrier(volatile int32_t *dst);
 int32_t OSAtomicIncrement32Barrier(volatile int32_t *dst);
 int32_t OSAtomicIncrement32(volatile int32_t *theValue);
@@ -149,6 +169,11 @@ void OSMemoryBarrier();
 CF_INLINE size_t malloc_size(void *memblock) {
     return malloc_usable_size(memblock);
 }
+    
+// substitute for dispatch_once
+typedef pthread_once_t dispatch_once_t;
+typedef void (^dispatch_block_t)(void);
+void dispatch_once(dispatch_once_t *predicate, dispatch_block_t block);
 
 #endif
 
@@ -178,7 +203,7 @@ CF_INLINE size_t malloc_size(void *memblock) {
 #define mode_t uint16_t
         
 // This works because things aren't actually exported from the DLL unless they have a __declspec(dllexport) on them... so extern by itself is closest to __private_extern__ on Mac OS
-#define __private_extern__ extern
+#define CF_PRIVATE extern
     
 #define __builtin_expect(P1,P2) P1
     
@@ -239,6 +264,8 @@ typedef int gid_t;
 #define getuid() 0
 #define getegid() 0
 
+#define scalbn(A, B) _scalb(A, B)
+
 #define fsync(a) _commit(a)
 #define malloc_create_zone(a,b) 123
 #define malloc_set_zone_name(zone,name)
@@ -278,14 +305,38 @@ CF_INLINE long long llabs(long long v) {
 #define strtoul_l(a,b,c,locale) strtoul(a,b,c)
 #define strtol_l(a,b,c,locale) strtol(a,b,c)
 #define strtoll_l(a,b,c,locale) _strtoi64(a,b,c)
+#define strncasecmp(a, b, c) _strnicmp(a, b, c)
 #define strncasecmp_l(a, b, c, d) _strnicmp(a, b, c)
 #define snprintf _snprintf
 
 #define fprintf_l(a,locale,b,...) fprintf(a, b, __VA_ARGS__)
 
-#define strlcat(a,b,c) strncat(a,b,c)
-#define strlcpy(a,b,c) strncpy(a,b,c)
-    
+CF_INLINE size_t
+strlcpy(char * dst, const char * src, size_t maxlen) {
+    const size_t srclen = strlen(src);
+    if (srclen < maxlen) {
+        memcpy(dst, src, srclen+1);
+    } else if (maxlen != 0) {
+        memcpy(dst, src, maxlen-1);
+        dst[maxlen-1] = '\0';
+    }
+    return srclen;
+}
+
+CF_INLINE size_t
+strlcat(char * dst, const char * src, size_t maxlen) {
+    const size_t srclen = strlen(src);
+    const size_t dstlen = strnlen(dst, maxlen);
+    if (dstlen == maxlen) return maxlen+srclen;
+    if (srclen < maxlen-dstlen) {
+        memcpy(dst+dstlen, src, srclen+1);
+    } else {
+        memcpy(dst+dstlen, src, maxlen-dstlen-1);
+        dst[maxlen-1] = '\0';
+    }
+    return dstlen + srclen;
+}
+
 #define sleep(x) Sleep(1000*x)
 
 #define issetugid() 0
@@ -322,6 +373,10 @@ CF_EXPORT int64_t OSAtomicAdd64Barrier( int64_t __theAmount, volatile int64_t *_
     
 #endif
 
+#if !defined(CF_PRIVATE)
+#define CF_PRIVATE __attribute__((__visibility__("hidden")))
+#endif
+
 #if DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_WINDOWS
 
 #include <stdarg.h>
@@ -341,7 +396,7 @@ CF_INLINE int popcountll(long long x) {
     return count;
 }
 
-__private_extern__ int asprintf(char **ret, const char *format, ...);
+CF_PRIVATE int asprintf(char **ret, const char *format, ...);
 
 #endif
 

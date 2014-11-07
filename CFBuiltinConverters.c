@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBuiltinConverters.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -106,7 +106,7 @@ static bool __CFFromASCII(uint32_t flags, uint8_t byte, UniChar *character) {
 }
 
 
-__private_extern__ const CFStringEncodingConverter __CFConverterASCII = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterASCII = {
     __CFToASCII, __CFFromASCII, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, NULL, NULL,
 };
@@ -142,7 +142,7 @@ static CFIndex __CFToISOLatin1Precompose(uint32_t flags, const UniChar *characte
     }
 }
 
-__private_extern__ const CFStringEncodingConverter __CFConverterISOLatin1 = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterISOLatin1 = {
     __CFToISOLatin1, __CFFromISOLatin1, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToISOLatin1Precompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -439,7 +439,7 @@ static CFIndex __CFToMacRomanPrecompose(uint32_t flags, const UniChar *character
     }
 }
 
-__private_extern__ const CFStringEncodingConverter __CFConverterMacRoman = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterMacRoman = {
     __CFToMacRoman, __CFFromMacRoman, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToMacRomanPrecompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -537,7 +537,7 @@ static CFIndex __CFToWinLatin1Precompose(uint32_t flags, const UniChar *characte
     }
 }
 
-__private_extern__ const CFStringEncodingConverter __CFConverterWinLatin1 = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterWinLatin1 = {
     __CFToWinLatin1, __CFFromWinLatin1, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToWinLatin1Precompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -837,7 +837,7 @@ static CFIndex __CFToNextStepLatinPrecompose(uint32_t flags, const UniChar *char
     }
 }
 
-__private_extern__ const CFStringEncodingConverter __CFConverterNextStepLatin = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterNextStepLatin = {
     __CFToNextStepLatin, __CFFromNextStepLatin, 1, 1, kCFStringEncodingConverterCheapEightBit,
     NULL, NULL, NULL, NULL, __CFToNextStepLatinPrecompose, CFStringEncodingIsValidCombiningCharacterForLatin1,
 };
@@ -1191,7 +1191,7 @@ static CFIndex __CFFromUTF8Len(uint32_t flags, const uint8_t *source, CFIndex nu
     return theUsedCharLen;
 }
 
-__private_extern__ const CFStringEncodingConverter __CFConverterUTF8 = {
+CF_PRIVATE const CFStringEncodingConverter __CFConverterUTF8 = {
     __CFToUTF8, __CFFromUTF8, 3, 2, kCFStringEncodingConverterStandard,
     __CFToUTF8Len, __CFFromUTF8Len, NULL, NULL, NULL, NULL,
 };

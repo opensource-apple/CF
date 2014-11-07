@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFUniChar.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFUNICHAR__)
@@ -227,7 +227,7 @@ CF_INLINE bool CFUniCharFromUTF32(const UTF32Char *src, CFIndex length, UTF16Cha
     while (src < limit) {
         character = (isBigEndien ? CFSwapInt32BigToHost(*(src++)) : CFSwapInt32LittleToHost(*(src++)));
 
-        if (character < 0xFFFF) { // BMP
+        if (character < 0x10000) { // BMP
             if (allowLossy) {
                 if (CFUniCharIsSurrogateHighCharacter(character)) {
                     UTF32Char otherCharacter = 0xFFFD; // replacement character

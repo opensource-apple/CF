@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFBinaryHeap.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -156,7 +156,7 @@ static CFStringRef __CFBinaryHeapCopyDescription(CFTypeRef cf) {
     const void **list, *buffer[256];
     cnt = __CFBinaryHeapCount(heap);
     result = CFStringCreateMutable(CFGetAllocator(heap), 0);
-    CFStringAppendFormat(result, NULL, CFSTR("<CFBinaryHeap %p [%p]>{count = %u, capacity = %u, objects = (\n"), cf, CFGetAllocator(heap), cnt, __CFBinaryHeapCapacity(heap));
+    CFStringAppendFormat(result, NULL, CFSTR("<CFBinaryHeap %p [%p]>{count = %lu, capacity = %lu, objects = (\n"), cf, CFGetAllocator(heap), (unsigned long)cnt, (unsigned long)__CFBinaryHeapCapacity(heap));
     list = (cnt <= 128) ? (const void **)buffer : (const void **)CFAllocatorAllocate(kCFAllocatorSystemDefault, cnt * sizeof(void *), 0); // GC OK
     if (__CFOASafe && list != buffer) __CFSetLastAllocationEventName(list, "CFBinaryHeap (temp)");
     CFBinaryHeapGetValues(heap, list);
@@ -167,10 +167,10 @@ static CFStringRef __CFBinaryHeapCopyDescription(CFTypeRef cf) {
 	    desc = heap->_callbacks.copyDescription(item);
 	}
 	if (NULL != desc) {
-	    CFStringAppendFormat(result, NULL, CFSTR("\t%u : %@\n"), idx, desc);
+	    CFStringAppendFormat(result, NULL, CFSTR("\t%lu : %@\n"), (unsigned long)idx, desc);
 	    CFRelease(desc);
 	} else {
-	    CFStringAppendFormat(result, NULL, CFSTR("\t%u : <%p>\n"), idx, item);
+	    CFStringAppendFormat(result, NULL, CFSTR("\t%lu : <%p>\n"), (unsigned long)idx, item);
 	}
     }
     CFStringAppend(result, CFSTR(")}"));
@@ -207,7 +207,7 @@ static const CFRuntimeClass __CFBinaryHeapClass = {
     __CFBinaryHeapCopyDescription
 };
 
-__private_extern__ void __CFBinaryHeapInitialize(void) {
+CF_PRIVATE void __CFBinaryHeapInitialize(void) {
     __kCFBinaryHeapTypeID = _CFRuntimeRegisterClass(&__CFBinaryHeapClass);
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFStreamPriv.h
-	Copyright (c) 2000-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2013, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTREAMPRIV__)
@@ -69,21 +69,9 @@ struct _CFStreamCallBacks {
     void (*unschedule)(struct _CFStream *stream, CFRunLoopRef runLoop, CFStringRef runLoopMode, void *info);
 };
 
-struct _CFStream {
-    CFRuntimeBase _cfBase;
-    CFOptionFlags flags;  
-    CFErrorRef error; // if callBacks->version < 2, this is actually a pointer to a CFStreamError
-    struct _CFStreamClient *client;
-    void *info;
-    const struct _CFStreamCallBacks *callBacks;  // This will not exist (will not be allocated) if the callbacks are from our known, "blessed" set.
-    void *_reserved1;
-};
+struct _CFStream;
 
-
-CF_INLINE void *_CFStreamGetInfoPointer(struct _CFStream *stream) {
-    return stream->info;
-}
-
+CF_EXPORT void* _CFStreamGetInfoPointer(struct _CFStream* stream);
 
 // cb version must be > 0
 CF_EXPORT struct _CFStream *_CFStreamCreateWithConstantCallbacks(CFAllocatorRef alloc, void *info, const struct _CFStreamCallBacks *cb, Boolean isReading);

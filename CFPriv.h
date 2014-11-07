@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFPriv.h
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 */
 
 /*
@@ -46,6 +46,7 @@
 
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_LINUX)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
 #include <CoreFoundation/CFMachPort.h>
+#include <CoreFoundation/CFMessagePort.h>
 #endif
 
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || TARGET_OS_WIN32
@@ -84,6 +85,8 @@ CF_EXPORT CFPropertyListRef _CFURLCopyPropertyListRepresentation(CFURLRef url);
 CF_EXPORT CFURLRef _CFURLCreateFromPropertyListRepresentation(CFAllocatorRef alloc, CFPropertyListRef pListRepresentation);
 
 CF_EXPORT void CFPreferencesFlushCaches(void);
+
+
 
 #if TARGET_OS_WIN32
 CF_EXPORT Boolean _CFURLGetWideFileSystemRepresentation(CFURLRef url, Boolean resolveAgainstBase, wchar_t *buffer, CFIndex bufferLength);
@@ -222,6 +225,7 @@ typedef CF_OPTIONS(CFOptionFlags, CFSearchPathDomainMask) {
 CF_EXPORT
 CFArrayRef CFCopySearchPathForDirectoriesInDomains(CFSearchPathDirectory directory, CFSearchPathDomainMask domainMask, Boolean expandTilde);
 
+
 /* Obsolete keys */
 CF_EXPORT const CFStringRef kCFFileURLExists;
 CF_EXPORT const CFStringRef kCFFileURLPOSIXMode;
@@ -304,8 +308,8 @@ extern UniChar __CFCharToUniCharTable[256];
 CF_INLINE const UniChar *CFStringGetCharactersPtrFromInlineBuffer(CFStringInlineBuffer *buf, CFRange desiredRange) {
     if ((desiredRange.location < 0) || ((desiredRange.location + desiredRange.length) > buf->rangeToBuffer.length)) return NULL;
 
-    if (buf->directBuffer) {
-        return buf->directBuffer + buf->rangeToBuffer.location + desiredRange.location;
+    if (buf->directUniCharBuffer) {
+        return buf->directUniCharBuffer + buf->rangeToBuffer.location + desiredRange.location;
     } else {
         if (desiredRange.length > __kCFStringInlineBufferLength) return NULL;
 
@@ -313,7 +317,14 @@ CF_INLINE const UniChar *CFStringGetCharactersPtrFromInlineBuffer(CFStringInline
             buf->bufferedRangeStart = desiredRange.location;
             buf->bufferedRangeEnd = buf->bufferedRangeStart + __kCFStringInlineBufferLength;
             if (buf->bufferedRangeEnd > buf->rangeToBuffer.length) buf->bufferedRangeEnd = buf->rangeToBuffer.length;
-            CFStringGetCharacters(buf->theString, CFRangeMake(buf->rangeToBuffer.location + buf->bufferedRangeStart, buf->bufferedRangeEnd - buf->bufferedRangeStart), buf->buffer);
+            CFIndex location = buf->rangeToBuffer.location + buf->bufferedRangeStart;
+            CFIndex length = buf->bufferedRangeEnd - buf->bufferedRangeStart;
+            if (buf->directCStringBuffer) {
+                UniChar *bufPtr = buf->buffer;
+                while (length--) *bufPtr++ = (UniChar)buf->directCStringBuffer[location++];
+            } else {
+                CFStringGetCharacters(buf->theString, CFRangeMake(location, length), buf->buffer);
+            }
         }
 
         return buf->buffer + (desiredRange.location - buf->bufferedRangeStart);
@@ -321,8 +332,8 @@ CF_INLINE const UniChar *CFStringGetCharactersPtrFromInlineBuffer(CFStringInline
 }
 
 CF_INLINE void CFStringGetCharactersFromInlineBuffer(CFStringInlineBuffer *buf, CFRange desiredRange, UniChar *outBuf) {
-    if (buf->directBuffer) {
-        memmove(outBuf, buf->directBuffer + buf->rangeToBuffer.location + desiredRange.location, desiredRange.length * sizeof(UniChar));
+    if (buf->directUniCharBuffer) {
+        memmove(outBuf, buf->directUniCharBuffer + buf->rangeToBuffer.location + desiredRange.location, desiredRange.length * sizeof(UniChar));
     } else {
         if ((desiredRange.location >= buf->bufferedRangeStart) && (desiredRange.location < buf->bufferedRangeEnd)) {
             CFIndex bufLen = desiredRange.length;
@@ -340,16 +351,100 @@ CF_INLINE void CFStringGetCharactersFromInlineBuffer(CFStringInlineBuffer *buf, 
             }
         }
 
-        if (desiredRange.length > 0) CFStringGetCharacters(buf->theString, CFRangeMake(buf->rangeToBuffer.location + desiredRange.location, desiredRange.length), outBuf);
+        if (desiredRange.length > 0) {
+            CFIndex location = buf->rangeToBuffer.location + desiredRange.location;
+            CFIndex length = desiredRange.length;
+            if (buf->directCStringBuffer) {
+                UniChar *bufPtr = outBuf;
+                while (length--) *bufPtr++ = (UniChar)buf->directCStringBuffer[location++];
+            } else {
+                CFStringGetCharacters(buf->theString, CFRangeMake(location, length), outBuf);
+            }
+        }
     }
 }
 
 #else
-#define CFStringGetCharactersPtrFromInlineBuffer(buf, desiredRange) ((buf)->directBuffer ? (buf)->directBuffer + (buf)->rangeToBuffer.location + desiredRange.location : NULL)
+#define CFStringGetCharactersPtrFromInlineBuffer(buf, desiredRange) ((buf)->directUniCharBuffer ? (buf)->directUniCharBuffer + (buf)->rangeToBuffer.location + desiredRange.location : NULL)
 
 #define CFStringGetCharactersFromInlineBuffer(buf, desiredRange, outBuf) \
-    if (buf->directBuffer) memmove(outBuf, (buf)->directBuffer + (buf)->rangeToBuffer.location + desiredRange.location, desiredRange.length * sizeof(UniChar)); \
+    if (buf->directUniCharBuffer) memmove(outBuf, (buf)->directUniCharBuffer + (buf)->rangeToBuffer.location + desiredRange.location, desiredRange.length * sizeof(UniChar)); \
     else CFStringGetCharacters((buf)->theString, CFRangeMake((buf)->rangeToBuffer.location + desiredRange.location, desiredRange.length), outBuf);
+
+#endif /* CF_INLINE */
+
+
+#if defined(CF_INLINE)
+
+#ifndef __kCFStringAppendBufferLength
+    #define __kCFStringAppendBufferLength 1024
+#endif
+typedef struct {
+    UniChar buffer[__kCFStringAppendBufferLength];
+    CFIndex bufferIndex;
+    CFMutableStringRef theString;
+} CFStringAppendBuffer;
+
+
+// Initializes CFStringAppendBuffer with new mutable string.
+CF_INLINE void CFStringInitAppendBuffer(CFAllocatorRef alloc, CFStringAppendBuffer *buf)
+{
+    buf->bufferIndex = 0;
+    buf->theString = CFStringCreateMutable(alloc, 0);
+}
+
+// Appends the characters of a string to the CFStringAppendBuffer.
+CF_INLINE void CFStringAppendStringToAppendBuffer(CFStringAppendBuffer *buf, CFStringRef appendedString)
+{
+    CFIndex numChars = CFStringGetLength(appendedString);
+    if ( numChars > __kCFStringAppendBufferLength ) {
+        if ( buf->bufferIndex ) {
+            CFStringAppendCharacters(buf->theString, buf->buffer, buf->bufferIndex);
+            buf->bufferIndex = 0;
+        }
+        CFStringAppend(buf->theString, appendedString);
+    }
+    else {
+        if ( (buf->bufferIndex + numChars) > __kCFStringAppendBufferLength ) {
+            CFStringAppendCharacters(buf->theString, buf->buffer, buf->bufferIndex);
+            buf->bufferIndex = 0;
+        }
+        CFStringGetCharacters(appendedString, CFRangeMake(0, numChars), &buf->buffer[buf->bufferIndex]);
+        buf->bufferIndex += numChars;
+    }
+}
+
+// Appends a buffer of Unicode characters to the CFStringAppendBuffer.
+CF_INLINE void CFStringAppendCharactersToAppendBuffer(CFStringAppendBuffer *buf, const UniChar *chars, CFIndex numChars)
+{
+    if ( numChars > __kCFStringAppendBufferLength ) {
+        if ( buf->bufferIndex ) {
+            CFStringAppendCharacters(buf->theString, buf->buffer, buf->bufferIndex);
+            buf->bufferIndex = 0;
+        }
+        CFStringAppendCharacters(buf->theString, chars, numChars);
+    }
+    else {
+        if ( (buf->bufferIndex + numChars) > __kCFStringAppendBufferLength ) {
+            CFStringAppendCharacters(buf->theString, buf->buffer, buf->bufferIndex);
+            buf->bufferIndex = 0;
+        }
+        memcpy(&buf->buffer[buf->bufferIndex], chars, numChars * sizeof(UniChar));
+        buf->bufferIndex += numChars;
+    }
+}
+
+// Returns a mutable string from the CFStringAppendBuffer.
+CF_INLINE CFMutableStringRef CFStringCreateMutableWithAppendBuffer(CFStringAppendBuffer *buf)
+{
+    if ( buf->bufferIndex ) {
+        CFStringAppendCharacters(buf->theString, buf->buffer, buf->bufferIndex);
+        buf->bufferIndex = 0;
+    }
+    CFMutableStringRef result = buf->theString;
+    buf->theString = NULL;
+    return ( result );
+}
 
 #endif /* CF_INLINE */
 
@@ -513,6 +608,8 @@ CF_EXPORT bool _CFPropertyListCreateSingleValue(CFAllocatorRef allocator, CFData
 // Returns a subset of the property list, only including the keyPaths in the CFSet. If the top level object is not a dictionary, you will get back an empty dictionary as the result.
 CF_EXPORT bool _CFPropertyListCreateFiltered(CFAllocatorRef allocator, CFDataRef data, CFOptionFlags option, CFSetRef keyPaths, CFPropertyListRef *value, CFErrorRef *error) CF_AVAILABLE(10_8, 6_0);
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE) || TARGET_OS_WIN32
+
 // Returns a subset of a bundle's Info.plist. The keyPaths follow the same rules as above CFPropertyList function. This function takes platform and product keys into account.
 typedef CF_OPTIONS(CFOptionFlags, _CFBundleFilteredPlistOptions) {
     _CFBundleFilteredPlistMemoryMapped = 1
@@ -520,6 +617,7 @@ typedef CF_OPTIONS(CFOptionFlags, _CFBundleFilteredPlistOptions) {
 
 CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, _CFBundleFilteredPlistOptions options) CF_AVAILABLE(10_8, 6_0);
 CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredLocalizedInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, CFStringRef localizationName, _CFBundleFilteredPlistOptions options) CF_AVAILABLE(10_8, 6_0);
+#endif
 
 #if TARGET_OS_WIN32
 #include <CoreFoundation/CFNotificationCenter.h>
@@ -551,6 +649,9 @@ CF_EXPORT CFArrayRef CFDateFormatterCreateDateFormatsFromTemplates(CFAllocatorRe
 // Available for internal use on embedded
 CF_EXPORT CFNotificationCenterRef CFNotificationCenterGetDistributedCenter(void);
 #endif
+
+CF_EXPORT const CFStringRef kCFNumberFormatterUsesCharacterDirection CF_AVAILABLE(10_9, 6_0);	// CFBoolean
+CF_EXPORT const CFStringRef kCFDateFormatterUsesCharacterDirection CF_AVAILABLE(10_9, 6_0);	// CFBoolean
 
 
 CF_EXTERN_C_END

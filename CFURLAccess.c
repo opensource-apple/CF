@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,13 +22,16 @@
  */
 
 /*	CFURLAccess.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: Chris Linn
 */
 
 /*------
 CFData read/write routines
 -------*/
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
 
 #include "CFInternal.h"
 #include <CoreFoundation/CFBase.h>
@@ -852,5 +855,6 @@ Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) {
 #endif
     }
 }
+#pragma GCC diagnostic pop
 
 

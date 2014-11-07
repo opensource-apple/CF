@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFXMLInputStream.c
-	Copyright (c) 1999-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -145,7 +145,7 @@ CF_INLINE void _fillStringWithCharacters(CFMutableStringRef string, UniChar *cha
     }
 }
 
-__private_extern__ Boolean _openInputStream(_CFXMLInputStream *stream) {
+CF_PRIVATE Boolean _openInputStream(_CFXMLInputStream *stream) {
     if (NULL == stream->data) {
         return false;
     } else {
@@ -159,7 +159,7 @@ __private_extern__ Boolean _openInputStream(_CFXMLInputStream *stream) {
     }
 }
 
-__private_extern__ void _initializeInputStream(_CFXMLInputStream *stream, CFAllocatorRef alloc, CFURLRef dataSource, CFDataRef xmlData) {
+CF_PRIVATE void _initializeInputStream(_CFXMLInputStream *stream, CFAllocatorRef alloc, CFURLRef dataSource, CFDataRef xmlData) {
     stream->data = xmlData ? (CFDataRef)CFRetain(xmlData) : NULL;
     stream->url = dataSource ? (CFURLRef)CFRetain(dataSource) : NULL;
     stream->encoding = kCFStringEncodingInvalidId;
@@ -182,7 +182,7 @@ __private_extern__ void _initializeInputStream(_CFXMLInputStream *stream, CFAllo
 }
 
 
-__private_extern__ void _freeInputStream(_CFXMLInputStream *stream) {
+CF_PRIVATE void _freeInputStream(_CFXMLInputStream *stream) {
     if (stream->data) CFRelease(stream->data);
     if (stream->url) CFRelease(stream->url);
     if (stream->charBuffer) CFAllocatorDeallocate(stream->allocator, stream->charBuffer);
@@ -191,26 +191,26 @@ __private_extern__ void _freeInputStream(_CFXMLInputStream *stream) {
     CFRelease(stream->allocator);
 }
 
-__private_extern__ CFStringEncoding _inputStreamGetEncoding(_CFXMLInputStream *stream) {
+CF_PRIVATE CFStringEncoding _inputStreamGetEncoding(_CFXMLInputStream *stream) {
     return stream->encoding;
 }
 
-__private_extern__ CFIndex _inputStreamCurrentLocation(_CFXMLInputStream *stream) {
+CF_PRIVATE CFIndex _inputStreamCurrentLocation(_CFXMLInputStream *stream) {
     return stream->charIndex;
 }
 
-__private_extern__ CFIndex _inputStreamCurrentLine(_CFXMLInputStream *stream) {
+CF_PRIVATE CFIndex _inputStreamCurrentLine(_CFXMLInputStream *stream) {
     return stream->lineNum;
 }
 
-__private_extern__ Boolean _inputStreamAtEOF(_CFXMLInputStream *stream) {
+CF_PRIVATE Boolean _inputStreamAtEOF(_CFXMLInputStream *stream) {
     if (!(stream->flags & STREAM_OPEN)) return false;
     if (stream->currentChar) return false;
     if (stream->currentByte - CFDataGetBytePtr(stream->data) < CFDataGetLength(stream->data)) return false;
     return true;
 }
 
-__private_extern__ Boolean _inputStreamComposingErrorOccurred(_CFXMLInputStream *stream) {
+CF_PRIVATE Boolean _inputStreamComposingErrorOccurred(_CFXMLInputStream *stream) {
     return stream->flags & ENCODING_COMPOSITION_ERROR;
 }
 
@@ -428,15 +428,15 @@ CF_INLINE Boolean getCharacter(_CFXMLInputStream *stream, UniChar *ch, Boolean a
     return true;
 }
 
-__private_extern__ Boolean _inputStreamPeekCharacter(_CFXMLInputStream *stream, UniChar *ch) {
+CF_PRIVATE Boolean _inputStreamPeekCharacter(_CFXMLInputStream *stream, UniChar *ch) {
     return getCharacter(stream, ch, false);
 }
 
-__private_extern__ Boolean _inputStreamGetCharacter(_CFXMLInputStream *stream, UniChar *ch) {
+CF_PRIVATE Boolean _inputStreamGetCharacter(_CFXMLInputStream *stream, UniChar *ch) {
     return getCharacter(stream, ch, true);
 }
 
-__private_extern__ Boolean _inputStreamReturnCharacter(_CFXMLInputStream *stream, UniChar ch) {
+CF_PRIVATE Boolean _inputStreamReturnCharacter(_CFXMLInputStream *stream, UniChar ch) {
     Boolean decrementLineNum = false;
     if (ch == '\n') {
         decrementLineNum = true;
@@ -514,17 +514,17 @@ static UniChar *dropMark(_CFXMLInputStream *stream) {
 
 }
 
-__private_extern__ void _inputStreamSetMark(_CFXMLInputStream *stream) {
+CF_PRIVATE void _inputStreamSetMark(_CFXMLInputStream *stream) {
     CFAssert(stream->mark == NULL, __kCFLogAssertion, "CF internal error: parser input stream malformed");
     stream->mark = dropMark(stream);
 }
 
-__private_extern__ void _inputStreamClearMark(_CFXMLInputStream *stream) {
+CF_PRIVATE void _inputStreamClearMark(_CFXMLInputStream *stream) {
     CFAssert(stream->mark != NULL, __kCFLogAssertion, "CF internal error: parser input stream malformed");
     stream->mark = NULL;
 }
 
-__private_extern__ void _inputStreamGetCharactersFromMark(_CFXMLInputStream *stream, CFMutableStringRef string) {
+CF_PRIVATE void _inputStreamGetCharactersFromMark(_CFXMLInputStream *stream, CFMutableStringRef string) {
     UniChar *end = stream->currentChar ? stream->currentChar : stream->charBuffer + stream->bufferLength;
     CFIndex numChars = end - stream->mark;
     CFAssert(stream->mark, __kCFLogAssertion, "CF internal error: malformed XML input stream");
@@ -559,7 +559,7 @@ static void restoreToMark(_CFXMLInputStream *stream, UniChar *mark) {
     }
 }
 
-__private_extern__ void _inputStreamBackUpToMark(_CFXMLInputStream *stream) {
+CF_PRIVATE void _inputStreamBackUpToMark(_CFXMLInputStream *stream) {
     CFAssert(stream->mark != NULL || stream->charBuffer == NULL, __kCFLogAssertion, "CF internal error: malformed XML input stream");
     restoreToMark(stream, stream->mark);
 }
@@ -568,7 +568,7 @@ CF_INLINE Boolean isWhitespaceChar(UniChar ch) {
     return (ch == '\n' || ch == '\r' || ch == ' ' || ch == '\t');
 }
 
-__private_extern__ CFIndex _inputStreamSkipWhitespace(_CFXMLInputStream *stream, CFMutableStringRef str) {
+CF_PRIVATE CFIndex _inputStreamSkipWhitespace(_CFXMLInputStream *stream, CFMutableStringRef str) {
     UniChar ch;
     CFIndex len = 0;
     if (str) {
@@ -588,7 +588,7 @@ __private_extern__ CFIndex _inputStreamSkipWhitespace(_CFXMLInputStream *stream,
 }
 
 // false return means EOF was encountered without finding scanChars
-__private_extern__ Boolean _inputStreamScanToCharacters(_CFXMLInputStream *stream, const UniChar *scanChars, CFIndex numChars, CFMutableStringRef str) {
+CF_PRIVATE Boolean _inputStreamScanToCharacters(_CFXMLInputStream *stream, const UniChar *scanChars, CFIndex numChars, CFMutableStringRef str) {
     Boolean done = false;
     CFIndex firstRepeatIndex = -1;
     CFIndex len = 0;
@@ -636,7 +636,7 @@ __private_extern__ Boolean _inputStreamScanToCharacters(_CFXMLInputStream *strea
     return true;
 }
 
-__private_extern__ Boolean _inputStreamMatchString(_CFXMLInputStream *stream, const UniChar *stringToMatch, CFIndex length) {
+CF_PRIVATE Boolean _inputStreamMatchString(_CFXMLInputStream *stream, const UniChar *stringToMatch, CFIndex length) {
     const UniChar *end = stringToMatch+length;
     const UniChar *sPtr=stringToMatch;
     stream->parserMark = dropMark(stream);
@@ -656,7 +656,7 @@ __private_extern__ Boolean _inputStreamMatchString(_CFXMLInputStream *stream, co
     }
 }
 
-__private_extern__ Boolean _inputStreamScanQuotedString(_CFXMLInputStream *stream, CFMutableStringRef str) {
+CF_PRIVATE Boolean _inputStreamScanQuotedString(_CFXMLInputStream *stream, CFMutableStringRef str) {
     UniChar ch;
     if (!_inputStreamPeekCharacter(stream, &ch)) return false;
     if (ch != '\'' && ch != '\"')  return false;
@@ -685,7 +685,7 @@ __private_extern__ Boolean _inputStreamScanQuotedString(_CFXMLInputStream *strea
  CombiningChar == kCFUniCharNonBaseCharacterSet
  Extender - complex, and not represented by a uniform character set.
  */
-__private_extern__ Boolean _inputStreamScanXMLName(_CFXMLInputStream *stream, Boolean isNMToken, CFStringRef *str) {
+CF_PRIVATE Boolean _inputStreamScanXMLName(_CFXMLInputStream *stream, Boolean isNMToken, CFStringRef *str) {
     UniChar ch;
     Boolean success = true;
     stream->parserMark = dropMark(stream);

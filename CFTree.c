@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFTree.c
-	Copyright (c) 1998-2012, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -97,7 +97,7 @@ static CFStringRef __CFTreeCopyDescription(CFTypeRef cf) {
     if (NULL == contextDesc) {
 	contextDesc = CFStringCreateWithFormat(allocator, NULL, CFSTR("<CFTree context %p>"), tree->_info);
     }
-    CFStringAppendFormat(result, NULL, CFSTR("<CFTree %p [%p]>{children = %u, context = %@}"), cf, allocator, CFTreeGetChildCount(tree), contextDesc);
+    CFStringAppendFormat(result, NULL, CFSTR("<CFTree %p [%p]>{children = %lu, context = %@}"), cf, allocator, (unsigned long)CFTreeGetChildCount(tree), contextDesc);
     if (contextDesc) CFRelease(contextDesc);
     return result;
 }
@@ -136,7 +136,7 @@ static const CFRuntimeClass __CFTreeClass = {
     __CFTreeCopyDescription
 };
 
-__private_extern__ void __CFTreeInitialize(void) {
+CF_PRIVATE void __CFTreeInitialize(void) {
     __kCFTreeTypeID = _CFRuntimeRegisterClass(&__CFTreeClass);
 }
 

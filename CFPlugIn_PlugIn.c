@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*      CFPlugIn_PlugIn.c
-        Copyright (c) 1999-2012, Apple Inc.  All rights reserved.
+        Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
         Responsibility: Tony Parker
 */
 
@@ -66,7 +66,7 @@ static void _registerType(const void *key, const void *val, void *context) {
     if (typeID) CFRelease(typeID);
 }
 
-__private_extern__ Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle) {
+CF_PRIVATE Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle) {
     Boolean result = false;
     CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle), factoryDict;
     CFStringRef tempStr;
@@ -79,7 +79,7 @@ __private_extern__ Boolean _CFBundleNeedsInitPlugIn(CFBundleRef bundle) {
     return result;
 }
 
-__private_extern__ void _CFBundleInitPlugIn(CFBundleRef bundle) {
+CF_PRIVATE void _CFBundleInitPlugIn(CFBundleRef bundle) {
     CFArrayCallBacks _pluginFactoryArrayCallbacks = {0, NULL, NULL, NULL, NULL};
     Boolean doDynamicReg = false;
     CFDictionaryRef infoDict;
@@ -119,7 +119,7 @@ __private_extern__ void _CFBundleInitPlugIn(CFBundleRef bundle) {
     }
 }
 
-__private_extern__ void _CFBundlePlugInLoaded(CFBundleRef bundle) {
+CF_PRIVATE void _CFBundlePlugInLoaded(CFBundleRef bundle) {
     CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
     CFStringRef tempStr;
     CFPlugInDynamicRegisterFunction func = NULL;
@@ -148,7 +148,7 @@ __private_extern__ void _CFBundlePlugInLoaded(CFBundleRef bundle) {
     }
 }
 
-__private_extern__ void _CFBundleDeallocatePlugIn(CFBundleRef bundle) {
+CF_PRIVATE void _CFBundleDeallocatePlugIn(CFBundleRef bundle) {
     if (__CFBundleGetPlugInData(bundle)->_isPlugIn) {
         SInt32 c;
 
@@ -196,7 +196,7 @@ Boolean CFPlugInIsLoadOnDemand(CFPlugInRef plugIn) {
     }
 }
 
-__private_extern__ void _CFPlugInWillUnload(CFPlugInRef plugIn) {
+CF_PRIVATE void _CFPlugInWillUnload(CFPlugInRef plugIn) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         SInt32 c = CFArrayGetCount(__CFBundleGetPlugInData(plugIn)->_factories);
         /* First, flush all the function pointers that may be cached by our factories. */
@@ -204,7 +204,7 @@ __private_extern__ void _CFPlugInWillUnload(CFPlugInRef plugIn) {
     }
 }
 
-__private_extern__ void _CFPlugInAddPlugInInstance(CFPlugInRef plugIn) {
+CF_PRIVATE void _CFPlugInAddPlugInInstance(CFPlugInRef plugIn) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         if (__CFBundleGetPlugInData(plugIn)->_instanceCount == 0 && __CFBundleGetPlugInData(plugIn)->_loadOnDemand) _CFBundleUnscheduleForUnloading(CFPlugInGetBundle(plugIn));     // Make sure we are not scheduled for unloading
         __CFBundleGetPlugInData(plugIn)->_instanceCount++;
@@ -213,7 +213,7 @@ __private_extern__ void _CFPlugInAddPlugInInstance(CFPlugInRef plugIn) {
     }
 }
 
-__private_extern__ void _CFPlugInRemovePlugInInstance(CFPlugInRef plugIn) {
+CF_PRIVATE void _CFPlugInRemovePlugInInstance(CFPlugInRef plugIn) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         /* MF:!!! Assert that instanceCount > 0. */
         __CFBundleGetPlugInData(plugIn)->_instanceCount--;
@@ -228,11 +228,11 @@ __private_extern__ void _CFPlugInRemovePlugInInstance(CFPlugInRef plugIn) {
     }
 }
 
-__private_extern__ void _CFPlugInAddFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
+CF_PRIVATE void _CFPlugInAddFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) CFArrayAppendValue(__CFBundleGetPlugInData(plugIn)->_factories, factory);
 }
 
-__private_extern__ void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
+CF_PRIVATE void _CFPlugInRemoveFactory(CFPlugInRef plugIn, _CFPFactoryRef factory) {
     if (__CFBundleGetPlugInData(plugIn)->_isPlugIn) {
         SInt32 idx = CFArrayGetFirstIndexOfValue(__CFBundleGetPlugInData(plugIn)->_factories, CFRangeMake(0, CFArrayGetCount(__CFBundleGetPlugInData(plugIn)->_factories)), factory);
         if (idx >= 0) CFArrayRemoveValueAtIndex(__CFBundleGetPlugInData(plugIn)->_factories, idx);

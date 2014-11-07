@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,7 +22,7 @@
  */
 
 /*	CFConcreteStreams.c
-	Copyright (c) 2000-2012, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2013, Apple Inc. All rights reserved.
 	Responsibility: John Iarocci
 */
 
@@ -168,7 +168,7 @@ static Boolean fileOpen(struct _CFStream *stream, CFStreamError *errorCode, Bool
     return TRUE;
 }
 
-__private_extern__ CFIndex fdRead(int fd, UInt8 *buffer, CFIndex bufferLength, CFStreamError *errorCode, Boolean *atEOF) {
+CF_PRIVATE CFIndex fdRead(int fd, UInt8 *buffer, CFIndex bufferLength, CFStreamError *errorCode, Boolean *atEOF) {
     CFIndex bytesRead = read(fd, buffer, bufferLength);
     if (bytesRead < 0) {
         errorCode->error = errno;
@@ -213,7 +213,7 @@ static CFIndex fileRead(CFReadStreamRef stream, UInt8 *buffer, CFIndex bufferLen
 }
 
 #ifdef REAL_FILE_SCHEDULING
-__private_extern__ Boolean fdCanRead(int fd) {
+CF_PRIVATE Boolean fdCanRead(int fd) {
     struct timeval timeout = {0, 0};
     fd_set *readSetPtr;
     fd_set readSet;
@@ -246,7 +246,7 @@ static Boolean fileCanRead(CFReadStreamRef stream, void *info) {
 #endif
 }
 
-__private_extern__ CFIndex fdWrite(int fd, const UInt8 *buffer, CFIndex bufferLength, CFStreamError *errorCode) {
+CF_PRIVATE CFIndex fdWrite(int fd, const UInt8 *buffer, CFIndex bufferLength, CFStreamError *errorCode) {
     CFIndex bytesWritten = write(fd, buffer, bufferLength);
     if (bytesWritten < 0) {
         errorCode->error = errno;
@@ -277,7 +277,7 @@ static CFIndex fileWrite(CFWriteStreamRef stream, const UInt8 *buffer, CFIndex b
 }
 
 #ifdef REAL_FILE_SCHEDULING
-__private_extern__ Boolean fdCanWrite(int fd) {
+CF_PRIVATE Boolean fdCanWrite(int fd) {
     struct timeval timeout = {0, 0};
     fd_set *writeSetPtr;
     fd_set writeSet;
@@ -676,13 +676,19 @@ static CFIndex dataWrite(CFWriteStreamRef stream, const UInt8 *buffer, CFIndex b
             if (bufferLength > 0) {
                 CFIndex bufSize = BUF_SIZE > bufferLength ? BUF_SIZE : bufferLength;
                 _CFStreamByteBuffer *newBuf = (_CFStreamByteBuffer *)CFAllocatorAllocate(dataStream->bufferAllocator, sizeof(_CFStreamByteBuffer) + bufSize, 0);
-                newBuf->bytes = (UInt8 *)(newBuf + 1);
-                newBuf->capacity = bufSize;
-                newBuf->length = 0;
-                newBuf->next = NULL;
-                dataStream->currentBuf->next = newBuf;
-                dataStream->currentBuf = newBuf;
-                freeSpace = bufSize;
+                if (newBuf == NULL) {
+                    errorCode->error = ENOMEM;
+                    errorCode->domain = kCFStreamErrorDomainPOSIX;
+                    return -1;
+                } else {
+                    newBuf->bytes = (UInt8 *)(newBuf + 1);
+                    newBuf->capacity = bufSize;
+                    newBuf->length = 0;
+                    newBuf->next = NULL;
+                    dataStream->currentBuf->next = newBuf;
+                    dataStream->currentBuf = newBuf;
+                    freeSpace = bufSize;
+                }
             }
         }
         errorCode->error = 0;
@@ -712,7 +718,6 @@ static CFPropertyListRef dataCopyProperty(struct _CFStream *stream, CFStringRef 
     for (buf = dataStream->firstBuf; buf != NULL; buf = buf->next) {
         size += buf->length;
     }
-    if (size == 0) return NULL;
     bytes = (UInt8 *)CFAllocatorAllocate(alloc, size, 0);
     currByte = bytes;
     for (buf = dataStream->firstBuf; buf != NULL; buf = buf->next) {
@@ -867,13 +872,6 @@ CFWriteStreamRef CFWriteStreamCreateWithBuffer(CFAllocatorRef alloc, UInt8 *buff
 }
 
 CF_EXPORT CFWriteStreamRef CFWriteStreamCreateWithAllocatedBuffers(CFAllocatorRef alloc, CFAllocatorRef bufferAllocator) {
-    if (!(bufferAllocator == NULL || bufferAllocator == kCFAllocatorNull)) {
-        // If there is a real bufferAllocator, then we don't allow the
-        // CFStream or the contents to be allocated with one of the special
-        // *GCRefZero allocators for now.
-        bufferAllocator = _CFConvertAllocatorToNonGCRefZeroEquivalent(bufferAllocator);
-        alloc = _CFConvertAllocatorToNonGCRefZeroEquivalent(alloc);
-    }
     _CFWriteDataStreamContext ctxt;
     ctxt.firstBuf = NULL;
     ctxt.currentBuf = NULL;
