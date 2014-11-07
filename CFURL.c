@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -2220,61 +2220,63 @@ CF_EXPORT Boolean _CFURLInitWithFileSystemRepresentation(CFURLRef uninitializedU
     memcpy(input_buffer, buffer, bufLen);
 #endif
     Boolean result = false;
-    CFAllocatorRef alloc = CFGetAllocator(uninitializedURL);
+    if ( bufLen > 0 ) {
+        CFAllocatorRef alloc = CFGetAllocator(uninitializedURL);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
-    struct __CFURL *url = (struct __CFURL *)uninitializedURL;
-    Boolean isAbsolute = bufLen && (*buffer == '/');
-    Boolean addedPercentEncoding;
-    Boolean releaseBaseURL = false;
-    
-    if ( isAbsolute ) {
-        // if buffer contains an absolute path, ignore baseURL (if provided)
-        baseURL = NULL;
-    }
-    else if ( baseURL == NULL ) {
-        // if buffer contains a relative path and no baseURL is provided, use the current working directory
-        baseURL = _CFURLCreateCurrentDirectoryURL(CFGetAllocator(uninitializedURL));
-        releaseBaseURL = true;
-    }
-    CFStringRef urlString = CreateStringFromFileSystemRepresentationByAddingPercentEscapes(alloc, buffer, bufLen, isDirectory, isAbsolute, false /*windowsPath*/, &addedPercentEncoding);
-    if ( urlString ) {
-        _CFURLInit(url, urlString, baseURL, FALSE);
+        struct __CFURL *url = (struct __CFURL *)uninitializedURL;
+        Boolean isAbsolute = bufLen && (*buffer == '/');
+        Boolean addedPercentEncoding;
+        Boolean releaseBaseURL = false;
         
-        // hard coded parse
         if ( isAbsolute ) {
-            if ( AddAuthorityToFileURL() ) {
-                url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_SCHEME | HAS_HOST | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH | IS_CANONICAL_FILE_URL;
-                _setSchemeTypeInFlags(&url->_flags, kHasFileScheme);
-                url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange) * 3, 0);
-                url->_ranges[0] = CFRangeMake(0, 4); // scheme "file"
-                url->_ranges[1] = CFRangeMake(7, 9); // host "localhost"
-                url->_ranges[2] = CFRangeMake(16, CFStringGetLength(urlString)- 16);
-            }
-            else {
-                url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_SCHEME | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH | IS_CANONICAL_FILE_URL;
-                _setSchemeTypeInFlags(&url->_flags, kHasFileScheme);
-                url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange) * 2, 0);
-                url->_ranges[0] = CFRangeMake(0, 4); // scheme "file"
-                url->_ranges[1] = CFRangeMake(7, CFStringGetLength(urlString)- 7);
-            }
-        } else {
-            url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH;
-            url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange), 0);
-            *(url->_ranges) = CFRangeMake(0, CFStringGetLength(url->_string));
+            // if buffer contains an absolute path, ignore baseURL (if provided)
+            baseURL = NULL;
         }
-        if ( releaseBaseURL && baseURL ) {
-            CFRelease(baseURL);
+        else if ( baseURL == NULL ) {
+            // if buffer contains a relative path and no baseURL is provided, use the current working directory
+            baseURL = _CFURLCreateCurrentDirectoryURL(CFGetAllocator(uninitializedURL));
+            releaseBaseURL = true;
         }
-        CFRelease(urlString);
-        result = true;
-    }
+        CFStringRef urlString = CreateStringFromFileSystemRepresentationByAddingPercentEscapes(alloc, buffer, bufLen, isDirectory, isAbsolute, false /*windowsPath*/, &addedPercentEncoding);
+        if ( urlString ) {
+            _CFURLInit(url, urlString, baseURL, FALSE);
+            
+            // hard coded parse
+            if ( isAbsolute ) {
+                if ( AddAuthorityToFileURL() ) {
+                    url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_SCHEME | HAS_HOST | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH | IS_CANONICAL_FILE_URL;
+                    _setSchemeTypeInFlags(&url->_flags, kHasFileScheme);
+                    url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange) * 3, 0);
+                    url->_ranges[0] = CFRangeMake(0, 4); // scheme "file"
+                    url->_ranges[1] = CFRangeMake(7, 9); // host "localhost"
+                    url->_ranges[2] = CFRangeMake(16, CFStringGetLength(urlString)- 16);
+                }
+                else {
+                    url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_SCHEME | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH | IS_CANONICAL_FILE_URL;
+                    _setSchemeTypeInFlags(&url->_flags, kHasFileScheme);
+                    url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange) * 2, 0);
+                    url->_ranges[0] = CFRangeMake(0, 4); // scheme "file"
+                    url->_ranges[1] = CFRangeMake(7, CFStringGetLength(urlString)- 7);
+                }
+            } else {
+                url->_flags = (addedPercentEncoding ? 0 : POSIX_AND_URL_PATHS_MATCH ) | (isDirectory ? IS_DIRECTORY : 0) | IS_DECOMPOSABLE | HAS_PATH | ORIGINAL_AND_URL_STRINGS_MATCH;
+                url->_ranges = (CFRange *)CFAllocatorAllocate(alloc, sizeof(CFRange), 0);
+                *(url->_ranges) = CFRangeMake(0, CFStringGetLength(url->_string));
+            }
+            if ( releaseBaseURL && baseURL ) {
+                CFRelease(baseURL);
+            }
+            CFRelease(urlString);
+            result = true;
+        }
 #elif DEPLOYMENT_TARGET_WINDOWS
-    CFStringRef filePath = CFStringCreateWithBytes(alloc, buffer, bufLen, CFStringFileSystemEncoding(), false);
-    if ( filePath ) {
-        result = _CFURLInitWithFileSystemPath(uninitializedURL, filePath, kCFURLWindowsPathStyle, isDirectory, baseURL);
-        CFRelease(filePath);
-    }
+        CFStringRef filePath = CFStringCreateWithBytes(alloc, buffer, bufLen, CFStringFileSystemEncoding(), false);
+        if ( filePath ) {
+            result = _CFURLInitWithFileSystemPath(uninitializedURL, filePath, kCFURLWindowsPathStyle, isDirectory, baseURL);
+            CFRelease(filePath);
+        }
 #endif
+    }
 #if DEBUG_URL_INITIALIZER_LOGGING
     CFLog(kCFLogLevelError, CFSTR("_CFURLInitWithFileSystemRepresentation (in) buffer '%*s', isDirectory %@, baseURL %@\n\t_CFURLInitWithFileSystemRepresentation (out) result %@, url %@"), input_bufLen, input_buffer, input_isDirectory ? CFSTR("YES") : CFSTR("NO"), input_baseURL, result ? CFSTR("YES") : CFSTR("NO"), uninitializedURL);
     if ( input_baseURL ) {
