@@ -955,6 +955,8 @@ void _CFStringGetUserDefaultEncoding(UInt32 *oScriptValue, UInt32 *oRegionValue)
 
     if (stringValue) {
         *oScriptValue = strtol_l(stringValue, &stringValue, 0, NULL);
+        // We force using MacRoman for Arabic/Hebrew users <rdar://problem/17633551> When changing language to Arabic and Hebrew, set the default user encoding to MacRoman, not MacArabic/MacHebrew
+        if ((*oScriptValue == kCFStringEncodingMacArabic) || (*oScriptValue == kCFStringEncodingMacHebrew)) *oScriptValue = kCFStringEncodingMacRoman;
         if (*stringValue == ':') {
             if (oRegionValue) *oRegionValue = strtol_l(++stringValue, NULL, 0, NULL);
             return;
@@ -994,6 +996,8 @@ void _CFStringGetInstallationEncodingAndRegion(uint32_t *encoding, uint32_t *reg
     
     if (stringValue) {
         *encoding = strtol_l(stringValue, &stringValue, 0, NULL);
+        // We force using MacRoman for Arabic/Hebrew users <rdar://problem/17633551> When changing language to Arabic and Hebrew, set the default user encoding to MacRoman, not MacArabic/MacHebrew
+        if ((*encoding == kCFStringEncodingMacArabic) || (*encoding == kCFStringEncodingMacHebrew)) *encoding = kCFStringEncodingMacRoman;
         if (*stringValue == ':') *region = strtol_l(++stringValue, NULL, 0, NULL);
     }
 }
@@ -1017,6 +1021,8 @@ Boolean _CFStringSaveUserDefaultEncoding(UInt32 iScriptValue, UInt32 iRegionValu
 	int fd = open(filename, O_WRONLY|O_CREAT, 0400);
 	if (0 <= fd) {
             char buffer[__kCFMaxDefaultEncodingFileLength];
+            // We force using MacRoman for Arabic/Hebrew users <rdar://problem/17633551> When changing language to Arabic and Hebrew, set the default user encoding to MacRoman, not MacArabic/MacHebrew
+            if ((iScriptValue == kCFStringEncodingMacArabic) || (iScriptValue == kCFStringEncodingMacHebrew)) iScriptValue = kCFStringEncodingMacRoman;
             size_t size = snprintf(buffer, __kCFMaxDefaultEncodingFileLength, "0x%X:0x%X", (unsigned int)iScriptValue, (unsigned int)iRegionValue);
 	    if (size <= __kCFMaxDefaultEncodingFileLength) {
                 int ret = write(fd, buffer, size);

@@ -1154,7 +1154,7 @@ static CFStringRef __CFDateFormatterCreateForcedString(CFDateFormatterRef format
         } else if (err == U_BUFFER_OVERFLOW_ERROR) {
             err = U_ZERO_ERROR;
             UChar *largerBuffer = calloc(newPatternLen + 1, sizeof(UChar));
-            newPatternLen = uadatpg_remapPatternWithOptions(ptg, ustr, cnt, options, outBuffer, newPatternLen + 1, &err);
+            newPatternLen = uadatpg_remapPatternWithOptions(ptg, ustr, cnt, options, largerBuffer, newPatternLen + 1, &err);
             if (U_SUCCESS(err)) {
                 result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, largerBuffer, newPatternLen);
             }

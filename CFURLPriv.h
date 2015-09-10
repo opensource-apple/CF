@@ -291,6 +291,23 @@ CF_EXPORT const CFStringRef kCFURLUbiquitousItemDownloadRequestedKey CF_AVAILABL
 CF_EXPORT const CFStringRef kCFURLUbiquitousItemContainerDisplayNameKey CF_AVAILABLE(10_10, 8_0);
     /* Returns the localized name of the ubiquity container that contains this item (Read-only, value type CFString) */
 
+CF_EXPORT const CFStringRef kCFURLUbiquitousItemIsSharedKey; // true if the ubiquitous item is shared. (Read-only, value type boolean NSNumber)
+
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemRoleKey /*CF_AVAILABLE(10_11, 9_0)*/; // returns the current user's role for this shared item, or nil if not shared. (Read-only, value type NSString). Possible values below.
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemRoleOwner /*CF_AVAILABLE(10_11, 9_0)*/; // the current user is the owner of this shared item.
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemRoleParticipant /*CF_AVAILABLE(10_11, 9_0)*/; // the current user is a participant of this shared item.
+
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemOwnerNameKey /*CF_AVAILABLE(10_11, 9_0)*/; // returns the name of the owner of a shared item, or nil if the current user. (Read-only, value type NSString)
+
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemPermissionsKey /*CF_AVAILABLE(10_11, 9_0)*/; // returns the current user's permissions for this shared item. (Read-only, value type NSString). Possible values below.
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemPermissionsReadOnly /*CF_AVAILABLE(10_11, 9_0)*/; // the user is only allowed to read this item
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemPermissionsReadWrite /*CF_AVAILABLE(10_11, 9_0)*/; // the user is allowed to both read and write this item
+
+// Deprecated. Will be removed.
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemReadOnlyPermissions /*CF_AVAILABLE(10_11, 9_0)*/; // the user is only allowed to read this item
+CF_EXPORT const CFStringRef kCFURLUbiquitousSharedItemReadWritePermissions /*CF_AVAILABLE(10_11, 9_0)*/; // the user is allowed to both read and write this item
+
+
 // these keys are defined here, not in CFURL.h, because they return NSImage values which can only be used by Foundation
 CF_EXPORT const CFStringRef kCFURLThumbnailDictionaryKey CF_AVAILABLE(10_10, 8_0);
 CF_EXPORT const CFStringRef kCFURLThumbnailKey CF_AVAILABLE(10_10, 8_0);

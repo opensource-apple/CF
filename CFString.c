@@ -3398,6 +3398,98 @@ enum {
     kCFStringHangulStateBreak
 };
 
+static const CFCharacterSetInlineBuffer *__CFStringGetFitzpatrickModifierBaseCharacterSet(void) {
+    static CFCharacterSetInlineBuffer buffer;
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ // based on UTR#51 1.0 (draft 7) for Unicode 8.0
+        /*
+         U+261D WHITE UP POINTING INDEX
+         U+2639 WHITE FROWNING FACE…U+263A WHITE SMILING FACE
+         U+270A RAISED FIST…U+270D WRITING HAND
+         U+1F385 FATHER CHRISTMAS
+         U+1F3C2 SNOWBOARDER…U+1F3C4 SURFER
+         U+1F3C7 HORSE RACING
+         U+1F3CA SWIMMER
+         U+1F442 EAR…U+1F443 NOSE
+         U+1F446 WHITE UP POINTING BACKHAND INDEX…U+1F450 OPEN HANDS SIGN
+         U+1F466 BOY…U+1F469 WOMAN
+         U+1F46E POLICE OFFICER…U+1F478 PRINCESS
+         U+1F47C BABY ANGEL
+         U+1F47F IMP
+         U+1F481 INFORMATION DESK PERSON…U+1F482 GUARDSMAN
+         U+1F483 DANCER
+         U+1F485 NAIL POLISH
+         U+1F486 FACE MASSAGE…U+1F487 HAIRCUT
+         U+1F4AA FLEXED BICEPS
+         U+1F590 RAISED HAND WITH FINGERS SPLAYED
+         U+1F595 REVERSED HAND WITH MIDDLE FINGER EXTENDED…U+1F596 RAISED HAND WITH PART BETWEEN MIDDLE AND RING FINGERS
+         U+1F600 GRINNING FACE…U+1F637 FACE WITH MEDICAL MASK
+         U+1F641 SLIGHTLY FROWNING FACE…U+1F642 SLIGHTLY SMILING FACE
+         U+1F645 FACE WITH NO GOOD GESTURE…U+1F647 PERSON BOWING DEEPLY
+         U+1F64B HAPPY PERSON RAISING ONE HAND
+         U+1F64C PERSON RAISING BOTH HANDS IN CELEBRATION
+         U+1F64D PERSON FROWNING…U+1F64E PERSON WITH POUTING FACE
+         U+1F64F PERSON WITH FOLDED HANDS
+         U+1F6A3 ROWBOAT
+         U+1F6B4 BICYCLIST…U+1F6B6 PEDESTRIAN
+         U+1F6C0 BATH
+         */
+        CFMutableCharacterSetRef cset = CFCharacterSetCreateMutable(NULL);
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x261D, 1)); // WHITE UP POINTING INDEX
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x2639, 2)); // WHITE FROWNING FACE ~ WHITE SMILING FACE
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x270A, 4)); // RAISED FIST ~ WRITING HAND
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F385, 1)); // FATHER CHRISTMAS
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F3C2, 3)); // SNOWBOARDER ~ SURFER
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F3C7, 1)); // HORSE RACING
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F3CA, 1)); // SWIMMER
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F442, 2)); // EAR ~ NOSE
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F446, 0x1F451 - 0x1F446)); // WHITE UP POINTING BACKHAND INDEX ~ OPEN HANDS SIGN
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F466, 4)); // BOY ~ WOMAN
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F46E, 0x1F479 - 0x1F46E)); // POLICE OFFICER ~ PRINCESS
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F47C, 1)); // BABY ANGEL
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F47F, 1)); // IMP
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F481, 3)); // INFORMATION DESK PERSON ~ DANCER
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F485, 3)); // NAIL POLISH ~ HAIRCUT
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F4AA, 1)); // FLEXED BICEPS
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F590, 1)); // RAISED HAND WITH FINGERS SPLAYED
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F595, 2)); // REVERSED HAND WITH MIDDLE FINGER EXTENDED ~ RAISED HAND WITH PART BETWEEN MIDDLE AND RING FINGERS
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F600, 0x1F638 - 0x1F600)); // GRINNING FACE ~ FACE WITH MEDICAL MASK
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F641, 2)); // SLIGHTLY FROWNING FACE ~ SLIGHTLY SMILING FACE
+        
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F645, 3)); // FACE WITH NO GOOD GESTURE ~ PERSON BOWING DEEPLY
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F64B, 0x1F650 - 0x1F64B)); // HAPPY PERSON RAISING ONE HAND ~ PERSON WITH FOLDED HANDS
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F6A3, 1)); // ROWBOAT
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F6B4, 0x1F6B7 - 0x1F6B4)); // BICYCLIST ~ PEDESTRIAN
+        CFCharacterSetAddCharactersInRange(cset, CFRangeMake(0x1F6C0, 1)); // BATH
+        CFCharacterSetCompact(cset);
+        CFCharacterSetInitInlineBuffer(cset, &buffer);
+    });
+
+    return (const CFCharacterSetInlineBuffer *)&buffer;
+}
+
+static inline bool __CFStringIsFitzpatrickModifiers(UTF32Char character) { return ((character >= 0x1F3FB) && (character <= 0x1F3FF) ? true : false); }
+static inline bool __CFStringIsBaseForFitzpatrickModifiers(UTF32Char character) {
+    if (((character >= 0x2600) && (character < 0x27C0)) || ((character >= 0x1F300) && (character < 0x1F700))) { // Misc symbols, dingbats, & emoticons
+        return (CFCharacterSetInlineBufferIsLongCharacterMember(__CFStringGetFitzpatrickModifierBaseCharacterSet(), character) ? true : false);
+    }
+
+    return false;
+}
+
+static inline bool __CFStringIsFamilySequenceBaseCharacterHigh(UTF16Char character) { return (character == 0xD83D) ? true : false; }
+static inline bool __CFStringIsFamilySequenceBaseCharacterLow(UTF16Char character) { return (((character >= 0xDC66) && (character <= 0xDC69)) || (character == 0xDC8B) ? true : false); }
+static inline bool __CFStringIsFamilySequenceCluster(CFStringInlineBuffer *buffer, CFRange range) {
+    UTF16Char character = CFStringGetCharacterFromInlineBuffer(buffer, range.location);
+
+    if (character == 0x2764) { // HEART
+        return true;
+    } else if (range.length > 1) {
+        if (__CFStringIsFamilySequenceBaseCharacterHigh(character) && __CFStringIsFamilySequenceBaseCharacterLow(CFStringGetCharacterFromInlineBuffer(buffer, range.location + 1))) return true;
+    }
+    return false;
+}
+
 static CFRange _CFStringInlineBufferGetComposedRange(CFStringInlineBuffer *buffer, CFIndex start, CFStringCharacterClusterType type, const uint8_t *bmpBitmap, CFIndex csetType) {
     CFIndex end = start + 1;
     const uint8_t *bitmap = bmpBitmap;
@@ -3430,7 +3522,19 @@ static CFRange _CFStringInlineBufferGetComposedRange(CFStringInlineBuffer *buffe
                 }
             }
 
-            if (!CFUniCharIsMemberOfBitmap(character, bitmap) && (character != 0xFF9E) && (character != 0xFF9F) && ((character & 0x1FFFF0) != 0xF870)) break;
+            if (__CFStringIsFitzpatrickModifiers(character) && (start > 0)) {
+                UTF32Char baseCharacter = CFStringGetCharacterFromInlineBuffer(buffer, start - 1);
+
+                if (CFUniCharIsSurrogateLowCharacter(baseCharacter) && ((start - 1) > 0)) {
+                    UTF16Char otherCharacter = CFStringGetCharacterFromInlineBuffer(buffer, start - 2);
+
+                    if (CFUniCharIsSurrogateHighCharacter(otherCharacter)) baseCharacter = CFUniCharGetLongCharacterForSurrogatePair(otherCharacter, baseCharacter);
+                }
+
+                if (!__CFStringIsBaseForFitzpatrickModifiers(baseCharacter)) break;
+            } else {
+                if (!CFUniCharIsMemberOfBitmap(character, bitmap) && (character != 0xFF9E) && (character != 0xFF9F) && ((character & 0x1FFFF0) != 0xF870)) break;
+            }
     
             --start;
     
@@ -3522,6 +3626,8 @@ static CFRange _CFStringInlineBufferGetComposedRange(CFStringInlineBuffer *buffe
         }
     }
 
+    bool prevIsFitzpatrickBase = __CFStringIsBaseForFitzpatrickModifiers(character);
+
     // Extend forward
     while ((character = CFStringGetCharacterFromInlineBuffer(buffer, end)) > 0) {
         if ((type == kCFStringBackwardDeletionCluster) && (character >= 0x0530) && (character < 0x1950)) break;
@@ -3535,7 +3641,9 @@ static CFRange _CFStringInlineBufferGetComposedRange(CFStringInlineBuffer *buffe
             step  = 1;
         }
 
-        if (!CFUniCharIsMemberOfBitmap(character, bitmap) && (character != 0xFF9E) && (character != 0xFF9F) && ((character & 0x1FFFF0) != 0xF870)) break;
+        if ((!prevIsFitzpatrickBase || !__CFStringIsFitzpatrickModifiers(character)) && !CFUniCharIsMemberOfBitmap(character, bitmap) && (character != 0xFF9E) && (character != 0xFF9F) && ((character & 0x1FFFF0) != 0xF870)) break;
+
+        prevIsFitzpatrickBase = __CFStringIsBaseForFitzpatrickModifiers(character);
 
         end += step;
     } 
@@ -3673,7 +3781,54 @@ CFRange CFStringGetRangeOfCharacterClusterAtIndex(CFStringRef string, CFIndex ch
         }
         ++currentIndex;
     }
-    
+
+    // Family face sequence
+    CFRange aCluster;
+
+    if (range.location > 1) { // there are more than 2 chars
+        character = CFStringGetCharacterFromInlineBuffer(&stringBuffer, range.location);
+
+        if (__CFStringIsFamilySequenceCluster(&stringBuffer, range) || (character == ZERO_WIDTH_JOINER)) { // extend backward
+            currentIndex = (character == ZERO_WIDTH_JOINER) ? range.location + 1 : range.location;
+
+            while ((currentIndex > 1) && (ZERO_WIDTH_JOINER == CFStringGetCharacterFromInlineBuffer(&stringBuffer, currentIndex - 1))) {
+                aCluster = _CFStringInlineBufferGetComposedRange(&stringBuffer, currentIndex - 2, type, bmpBitmap, csetType);
+
+                if (__CFStringIsFamilySequenceCluster(&stringBuffer, aCluster) && (aCluster.location < range.location)) {
+                    currentIndex = aCluster.location;
+                } else {
+                    break;
+                }
+            }
+
+            if (currentIndex < range.location) {
+                range.length += range.location - currentIndex;
+                range.location = currentIndex;
+            }
+        }
+    }
+
+    // Extend forward
+    if (range.location + range.length < length) {
+        currentIndex = range.location + range.length - 1;
+        character = CFStringGetCharacterFromInlineBuffer(&stringBuffer, currentIndex);
+
+        if ((ZERO_WIDTH_JOINER == character) || __CFStringIsFamilySequenceCluster(&stringBuffer, _CFStringInlineBufferGetComposedRange(&stringBuffer, currentIndex, type, bmpBitmap, csetType))) {
+
+            if (ZERO_WIDTH_JOINER != character) ++currentIndex; // move to the end of cluster
+
+            while (((currentIndex + 1) < length) && (ZERO_WIDTH_JOINER == CFStringGetCharacterFromInlineBuffer(&stringBuffer, currentIndex))) {
+                aCluster = _CFStringInlineBufferGetComposedRange(&stringBuffer, currentIndex + 1, type, bmpBitmap, csetType);
+                if (__CFStringIsFamilySequenceCluster(&stringBuffer, aCluster)) {
+                    currentIndex = aCluster.location + aCluster.length;
+                    if ((aCluster.length > 1) && (ZERO_WIDTH_JOINER == CFStringGetCharacterFromInlineBuffer(&stringBuffer, currentIndex - 1))) --currentIndex;
+                } else {
+                    break;
+                }
+            }
+            if (currentIndex > (range.location + range.length)) range.length = currentIndex - range.location;
+        }
+    }
     return range;
 }
 

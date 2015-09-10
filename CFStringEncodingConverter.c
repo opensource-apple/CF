@@ -768,9 +768,13 @@ uint32_t CFStringEncodingUnicodeToBytes(uint32_t encoding, uint32_t flags, const
                         CFIndex localUsedLen;
 
                         localUsedByteLen = 0;
-                        while ((usedLen < numChars && theUsedByteLen < maxByteLen) && !localUsedByteLen && (localUsedLen = TO_BYTE_FALLBACK(converter, characters + usedLen, numChars - usedLen, NULL, 0, &localUsedByteLen))) usedLen += localUsedLen;
-                        
-                        theUsedByteLen += localUsedByteLen;
+                        // after the buffer is full, we still try out all the rest of the characters
+                        // if all characters cannot be converted, we mark the result as insufficient output buffer
+                        while ((usedLen < numChars) && !localUsedByteLen && (localUsedLen = TO_BYTE_FALLBACK(converter, characters + usedLen, numChars - usedLen, NULL, 0, &localUsedByteLen))) {
+                            if (localUsedByteLen == 0) {
+                                usedLen += localUsedLen;
+                            }
+                        }
                     }
                     if (usedLen < numChars) theResult = kCFStringEncodingInsufficientOutputBufferLength;
                     break;
@@ -799,9 +803,11 @@ uint32_t CFStringEncodingUnicodeToBytes(uint32_t encoding, uint32_t flags, const
                 CFIndex localUsedLen;
 
                 localUsedByteLen = 0;
-                while ((usedLen < numChars && theUsedByteLen < maxByteLen) && !localUsedByteLen && (localUsedLen = TO_BYTE_FALLBACK(converter, characters + usedLen, numChars - usedLen, NULL, 0, &localUsedByteLen))) usedLen += localUsedLen;
-                
-                theUsedByteLen += localUsedByteLen;
+                while ((usedLen < numChars) && !localUsedByteLen && (localUsedLen = TO_BYTE_FALLBACK(converter, characters + usedLen, numChars - usedLen, NULL, 0, &localUsedByteLen))) {
+                    if (!localUsedByteLen) {
+                        usedLen += localUsedLen;
+                    }
+                }
             }
             if (usedLen < numChars) theResult = kCFStringEncodingInsufficientOutputBufferLength;
         }

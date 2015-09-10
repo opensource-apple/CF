@@ -1672,46 +1672,21 @@ static void __CFSocketHandleRead(CFSocketRef s, Boolean causedByTimeout)
 			if (ctRemaining > 0) {
 				base = CFDataGetMutableBytePtr(s->_readBuffer);
 
-                                struct timeval timeBeforeRead = { 0 };
-                                gettimeofday(&timeBeforeRead, NULL);
-
-                                struct timeval deadlineTime = { 0 };
-                                timeradd(&timeBeforeRead, &s->_readBufferTimeout, &deadlineTime);
-
-                                struct timeval timeAfterRead = { 0 };
-
-                                while (1) {
-                                    ctRead = read(CFSocketGetNative(s), &base[s->_bytesToBufferPos], ctRemaining);
-
-                                    if (ctRead >= 0) {
-                                        break;
-                                    }
-
-                                    if (errno != EAGAIN) {
-                                        break;
-                                    }
-
-                                    gettimeofday(&timeAfterRead, NULL);
-
-                                    if (timercmp(&timeAfterRead, &deadlineTime, >)) {
-#if defined(LOG_CFSOCKET)
-                                        CFSocketNativeHandle fd = CFSocketGetNative(s);
-                                        CFStringRef peerName = copyPeerAddress(kCFAllocatorDefault, fd);
-                                        CFStringRef localName = copyLocalAddress(kCFAllocatorDefault, fd);
-                                        CFLog(kCFLogLevelCritical, CFSTR("ERROR: Buffered read of %llu bytes failed for fd %d (socket valid? %d fd valid? %d %@ => %@)"), ctRemaining, fd, __CFSocketIsValid(s), __CFNativeSocketIsValid(fd), localName, peerName);
-                                        if (peerName)
-                                            CFRelease(peerName);
-                                        if (localName)
-                                            CFRelease(localName);
-#endif
-                                        break;
-                                    }
-                                }
+                                ctRead = read(CFSocketGetNative(s), &base[s->_bytesToBufferPos], ctRemaining);
 
 				switch (ctRead) {
 				case -1:
-					s->_bufferedReadError = errno;
-					s->_atEOF = true;
+                                        if (errno == EAGAIN) { // no error
+                                            __CFLock(&__CFActiveSocketsLock);
+                                            /* restore socket to fds */
+                                            __CFSocketSetFDForRead(s);
+                                            __CFUnlock(&__CFActiveSocketsLock);
+                                            __CFSocketUnlock(s);
+                                            return;
+                                        } else {
+                                            s->_bufferedReadError = errno;
+                                            s->_atEOF = true;
+                                        }
 #if defined(LOG_CFSOCKET)
 					fprintf(stderr, "BUFFERED READ GOT ERROR %d\n", errno);
 #endif

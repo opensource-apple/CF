@@ -497,7 +497,7 @@ void CFCharacterSetInitInlineBuffer(CFCharacterSetRef cset, CFCharacterSetInline
  @result true, if the value is in the character set, otherwise false.
  */
 #if defined(CF_INLINE)
-CF_INLINE bool CFCharacterSetInlineBufferIsLongCharacterMember(CFCharacterSetInlineBuffer *buffer, UTF32Char character) {
+CF_INLINE bool CFCharacterSetInlineBufferIsLongCharacterMember(const CFCharacterSetInlineBuffer *buffer, UTF32Char character) {
     bool isInverted = ((0 == (buffer->flags & kCFCharacterSetIsInverted)) ? false : true);
 
     if ((character >= buffer->rangeStart) && (character < buffer->rangeLimit)) {
