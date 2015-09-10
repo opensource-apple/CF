@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Apple Inc. All rights reserved.
+ * Copyright (c) 2015 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -1221,16 +1221,14 @@ CF_EXPORT CFTypeRef _CFBundleCopyFindResources(CFBundleRef bundle, CFURLRef bund
         }
         if ((0 == bundleVersion) || CFEqual(CFSTR("/Library/Spotlight"), bundlePath)){
             if (returnValue) CFRelease(returnValue);
-            CFRange found;
-            // 9 is the length of "Resources"
             if ((bundleVersion == 0 && realSubdirectory && CFEqual(realSubdirectory, CFSTR("Resources"))) || (bundleVersion == 2 && realSubdirectory && CFEqual(realSubdirectory, CFSTR("Contents/Resources")))) {
                 if (realSubdirectory) CFRelease(realSubdirectory);
                 realSubdirectory = CFSTR("");
-            } else if ((bundleVersion == 0 && realSubdirectory && CFStringFindWithOptions(realSubdirectory, CFSTR("Resources/"), CFRangeMake(0, 10), kCFCompareEqualTo, &found) && found.location+10 < CFStringGetLength(realSubdirectory))) {
+            } else if (bundleVersion == 0 && realSubdirectory && CFStringGetLength(realSubdirectory) > 10 && CFStringHasPrefix(realSubdirectory, CFSTR("Resources/"))) {
                 CFStringRef tmpRealSubdirectory = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, realSubdirectory, CFRangeMake(10, CFStringGetLength(realSubdirectory) - 10));
                 if (realSubdirectory) CFRelease(realSubdirectory);
                 realSubdirectory = tmpRealSubdirectory;
-            } else if ((bundleVersion == 2 && realSubdirectory && CFStringFindWithOptions(realSubdirectory, CFSTR("Contents/Resources/"), CFRangeMake(0, 19), kCFCompareEqualTo, &found) && found.location+19 < CFStringGetLength(realSubdirectory))) {
+            } else if (bundleVersion == 2 && realSubdirectory && CFStringGetLength(realSubdirectory) > 19 && CFStringHasPrefix(realSubdirectory, CFSTR("Contents/Resources/"))) {
                 CFStringRef tmpRealSubdirectory = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, realSubdirectory, CFRangeMake(19, CFStringGetLength(realSubdirectory) - 19));
                 if (realSubdirectory) CFRelease(realSubdirectory);
                 realSubdirectory = tmpRealSubdirectory;

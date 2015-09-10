@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Apple Inc. All rights reserved.
+ * Copyright (c) 2015 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -404,7 +404,8 @@ CFMachPortRef _CFMachPortCreateWithPort2(CFAllocatorRef allocator, mach_port_t p
             dispatch_source_t theSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_SEND, port, DISPATCH_MACH_SEND_DEAD, _CFMachPortQueue());
 	    if (theSource) {
                 dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                dispatch_source_set_cancel_handler(theSource, ^{ dispatch_semaphore_signal(sem); dispatch_release(theSource); });
+                dispatch_retain(sem);
+                dispatch_source_set_cancel_handler(theSource, ^{ dispatch_semaphore_signal(sem); dispatch_release(sem); dispatch_release(theSource); });
                 dispatch_source_set_event_handler(theSource, ^{ __CFMachPortChecker(false); });
                 memory->_dsrc_sem = sem;
                 memory->_dsrc = theSource;
