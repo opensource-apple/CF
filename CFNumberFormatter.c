@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFNumberFormatter.c
-	Copyright (c) 2002-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2014, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -39,6 +39,7 @@
 static void __CFNumberFormatterCustomize(CFNumberFormatterRef formatter);
 static CFStringRef __CFNumberFormatterCreateCompressedString(CFStringRef inString, Boolean isFormat, CFRange *rangep);
 static UErrorCode __CFNumberFormatterApplyPattern(CFNumberFormatterRef formatter, CFStringRef pattern);
+static CONST_STRING_DECL(kCFNumberFormatterFormattingContextKey, "kCFNumberFormatterFormattingContextKey");
 
 #define BUFFER_SIZE 768
 
@@ -87,12 +88,9 @@ static const CFRuntimeClass __CFNumberFormatterClass = {
     __CFNumberFormatterCopyDescription
 };
 
-static void __CFNumberFormatterInitialize(void) {
-    __kCFNumberFormatterTypeID = _CFRuntimeRegisterClass(&__CFNumberFormatterClass);
-}
-
 CFTypeID CFNumberFormatterGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFNumberFormatterTypeID) __CFNumberFormatterInitialize();
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFNumberFormatterTypeID = _CFRuntimeRegisterClass(&__CFNumberFormatterClass); });
     return __kCFNumberFormatterTypeID;
 }
 
@@ -179,6 +177,7 @@ CFNumberFormatterRef CFNumberFormatterCreate(CFAllocatorRef allocator, CFLocaleR
 	}
     }
     __cficu_unum_setAttribute(memory->_nf, UNUM_LENIENT_PARSE, 0);
+    __cficu_unum_setContext(memory->_nf, UDISPCTX_CAPITALIZATION_NONE, &status);
     return (CFNumberFormatterRef)memory;
 }
 
@@ -769,6 +768,11 @@ void CFNumberFormatterSetProperty(CFNumberFormatterRef formatter, CFStringRef ke
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(key, CFStringGetTypeID());
     // rule-based formatters don't do attributes and symbols, except for one
+    if (CFEqual(kCFNumberFormatterFormattingContextKey, key)) {
+        __CFGenericValidateType(value, CFNumberGetTypeID());
+        CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &n);
+        __cficu_unum_setContext(formatter->_nf, n, &status);
+    }
     if (kCFNumberFormatterSpellOutStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
     if (kCFNumberFormatterOrdinalStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
     if (kCFNumberFormatterDurationStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return;
@@ -983,6 +987,12 @@ CFTypeRef CFNumberFormatterCopyProperty(CFNumberFormatterRef formatter, CFString
     __CFGenericValidateType(formatter, CFNumberFormatterGetTypeID());
     __CFGenericValidateType(key, CFStringGetTypeID());
     // rule-based formatters don't do attributes and symbols, except for one
+    if (CFEqual(kCFNumberFormatterFormattingContextKey, key)) {
+        n = __cficu_unum_getContext(formatter->_nf, UDISPCTX_TYPE_CAPITALIZATION, &status);
+        if (1) {
+            return CFNumberCreate(CFGetAllocator(formatter), kCFNumberSInt32Type, &n);
+        }
+    }
     if (kCFNumberFormatterSpellOutStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
     if (kCFNumberFormatterOrdinalStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
     if (kCFNumberFormatterDurationStyle == formatter->_style && kCFNumberFormatterIsLenientKey != key) return NULL;
@@ -1201,6 +1211,11 @@ Boolean CFNumberFormatterGetDecimalInfoForCurrencyCode(CFStringRef currencyCode,
     if (U_FAILURE(icuStatus))
         return false;
     return (!defaultFractionDigits || 0 <= *defaultFractionDigits) && (!roundingIncrement || 0.0 <= *roundingIncrement);
+}
+
+// This is for NSNumberFormatter use only!
+void *_CFNumberFormatterGetFormatter(CFNumberFormatterRef formatter) {
+    return (void *)formatter->_nf;
 }
 
 #undef BUFFER_SIZE

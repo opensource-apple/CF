@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFStringEncodingDatabase.c
-	Copyright (c) 2005-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2014, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -431,10 +431,10 @@ CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t co
         return (codepage - ISO8859CODEPAGE_BASE) + 0x0200;
     } else {
         static CFMutableDictionaryRef mappingTable = NULL;
-        static CFSpinLock_t lock = CFSpinLockInit;
+        static CFLock_t lock = CFLockInit;
         uintptr_t value;
 
-        __CFSpinLock(&lock);
+        __CFLock(&lock);
         if (NULL == mappingTable) {
             CFIndex index, count = sizeof(__CFKnownEncodingList) / sizeof(*__CFKnownEncodingList);
             
@@ -444,7 +444,7 @@ CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromWindowsCodePage(uint16_t co
                 if (0 != __CFWindowsCPList[index]) CFDictionarySetValue(mappingTable, (const void *)(uintptr_t)__CFWindowsCPList[index], (const void *)(uintptr_t)__CFKnownEncodingList[index]);
             }
         }
-        __CFSpinUnlock(&lock);
+        __CFUnlock(&lock);
 
         if (CFDictionaryGetValueIfPresent(mappingTable, (const void *)(uintptr_t)codepage, (const void **)&value)) return (CFStringEncoding)value;
     }
@@ -527,7 +527,7 @@ CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *c
     CFStringEncoding encoding;
     CFIndex prefixLength;
     static CFMutableDictionaryRef mappingTable = NULL;
-    static CFSpinLock_t lock = CFSpinLockInit;
+    static CFLock_t lock = CFLockInit;
 
     prefixLength = strlen("iso-8859-");
     if (0 == strncasecmp_l(canonicalName, "iso-8859-", prefixLength, NULL)) {// do ISO
@@ -550,7 +550,7 @@ CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *c
         return __CFStringEncodingGetFromWindowsCodePage(encoding);
     }
     
-    __CFSpinLock(&lock);
+    __CFLock(&lock);
     if (NULL == mappingTable) {
         CFIndex index, count = sizeof(__CFKnownEncodingList) / sizeof(*__CFKnownEncodingList);
 
@@ -574,7 +574,7 @@ CF_PRIVATE CFStringEncoding __CFStringEncodingGetFromCanonicalName(const char *c
             if (NULL != __CFCanonicalNameList[index]) CFDictionarySetValue(mappingTable, (const void *)(uintptr_t)__CFCanonicalNameList[index], (const void *)(uintptr_t)__CFKnownEncodingList[index]);
         }
     }
-    __CFSpinUnlock(&lock);
+    __CFUnlock(&lock);
 
     if (0 == strncasecmp_l(canonicalName, "macintosh", sizeof("macintosh") - 1, NULL)) return kCFStringEncodingMacRoman;
 

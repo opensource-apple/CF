@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFUniChar.c
-	Copyright (c) 2001-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2001-2014, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -287,9 +287,11 @@ static bool __CFUniCharLoadFile(const wchar_t *bitmapName, const void **bytes, i
 }
 
 // Bitmap functions
-CF_INLINE bool isControl(UTF32Char theChar, uint16_t charset, const void *data) { // ISO Control
+/*
+ Currently unused but left in for symmetry/informative purposes
+ CF_INLINE bool isControl(UTF32Char theChar, uint16_t charset, const void *data) { // ISO Control
     return (((theChar <= 0x001F) || (theChar >= 0x007F && theChar <= 0x009F)) ? true : false);
-}
+}*/
 
 CF_INLINE bool isWhitespace(UTF32Char theChar, uint16_t charset, const void *data) { // Space
     return (((theChar == 0x0020) || (theChar == 0x0009) || (theChar == 0x00A0) || (theChar == 0x1680) || (theChar >= 0x2000 && theChar <= 0x200B) || (theChar == 0x202F) || (theChar == 0x205F) || (theChar == 0x3000)) ? true : false);
@@ -344,7 +346,7 @@ static char __CFUniCharUnicodeVersionString[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 static uint32_t __CFUniCharNumberOfBitmaps = 0;
 static __CFUniCharBitmapData *__CFUniCharBitmapDataArray = NULL;
 
-static CFSpinLock_t __CFUniCharBitmapLock = CFSpinLockInit;
+static CFLock_t __CFUniCharBitmapLock = CFLockInit;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if !defined(CF_UNICHAR_BITMAP_FILE)
@@ -374,10 +376,10 @@ static bool __CFUniCharLoadBitmapData(void) {
     int idx, bitmapIndex;
     int64_t fileSize;
 
-    __CFSpinLock(&__CFUniCharBitmapLock);
+    __CFLock(&__CFUniCharBitmapLock);
 
     if (__CFUniCharBitmapDataArray || !__CFUniCharLoadFile(CF_UNICHAR_BITMAP_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
-        __CFSpinUnlock(&__CFUniCharBitmapLock);
+        __CFUnlock(&__CFUniCharBitmapLock);
         return false;
     }
 
@@ -425,7 +427,7 @@ static bool __CFUniCharLoadBitmapData(void) {
 
     __CFUniCharBitmapDataArray = array;
 
-    __CFSpinUnlock(&__CFUniCharBitmapLock);
+    __CFUnlock(&__CFUniCharBitmapLock);
 
     return true;
 }
@@ -649,7 +651,7 @@ CF_PRIVATE uint32_t CFUniCharGetNumberOfPlanes(uint32_t charset) {
 // Mapping data loading
 static const void **__CFUniCharMappingTables = NULL;
 
-static CFSpinLock_t __CFUniCharMappingTableLock = CFSpinLockInit;
+static CFLock_t __CFUniCharMappingTableLock = CFLockInit;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if __CF_BIG_ENDIAN__
@@ -685,7 +687,7 @@ static CFSpinLock_t __CFUniCharMappingTableLock = CFSpinLockInit;
 
 CF_PRIVATE const void *CFUniCharGetMappingData(uint32_t type) {
 
-    __CFSpinLock(&__CFUniCharMappingTableLock);
+    __CFLock(&__CFUniCharMappingTableLock);
 
     if (NULL == __CFUniCharMappingTables) {
         const void *bytes;
@@ -695,7 +697,7 @@ CF_PRIVATE const void *CFUniCharGetMappingData(uint32_t type) {
 	int64_t fileSize;
 
         if (!__CFUniCharLoadFile(MAPPING_TABLE_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
-            __CFSpinUnlock(&__CFUniCharMappingTableLock);
+            __CFUnlock(&__CFUniCharMappingTableLock);
             return NULL;
         }
 
@@ -722,7 +724,7 @@ CF_PRIVATE const void *CFUniCharGetMappingData(uint32_t type) {
         }
     }
 
-    __CFSpinUnlock(&__CFUniCharMappingTableLock);
+    __CFUnlock(&__CFUniCharMappingTableLock);
 
     return __CFUniCharMappingTables[type];
 }
@@ -766,10 +768,10 @@ static bool __CFUniCharLoadCaseMappingTable(void) {
     if (NULL == __CFUniCharMappingTables) (void)CFUniCharGetMappingData(kCFUniCharToLowercase);
     if (NULL == __CFUniCharMappingTables) return false;
 
-    __CFSpinLock(&__CFUniCharMappingTableLock);
+    __CFLock(&__CFUniCharMappingTableLock);
 
     if (__CFUniCharCaseMappingTableCounts) {
-        __CFSpinUnlock(&__CFUniCharMappingTableLock);
+        __CFUnlock(&__CFUniCharMappingTableLock);
         return true;
     }
 
@@ -785,7 +787,7 @@ static bool __CFUniCharLoadCaseMappingTable(void) {
 
     __CFUniCharCaseMappingTableCounts = countArray;
 
-    __CFSpinUnlock(&__CFUniCharMappingTableLock);
+    __CFUnlock(&__CFUniCharMappingTableLock);
     return true;
 }
 
@@ -1178,7 +1180,7 @@ CF_PRIVATE uint32_t CFUniCharGetConditionalCaseMappingFlags(UTF32Char theChar, U
 static __CFUniCharBitmapData *__CFUniCharUnicodePropertyTable = NULL;
 static int __CFUniCharUnicodePropertyTableCount = 0;
 
-static CFSpinLock_t __CFUniCharPropTableLock = CFSpinLockInit;
+static CFLock_t __CFUniCharPropTableLock = CFLockInit;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX
 #if USE_MACHO_SEGMENT
@@ -1198,7 +1200,7 @@ static CFSpinLock_t __CFUniCharPropTableLock = CFSpinLockInit;
 
 const void *CFUniCharGetUnicodePropertyDataForPlane(uint32_t propertyType, uint32_t plane) {
 
-    __CFSpinLock(&__CFUniCharPropTableLock);
+    __CFLock(&__CFUniCharPropTableLock);
 
     if (NULL == __CFUniCharUnicodePropertyTable) {
         __CFUniCharBitmapData *table;
@@ -1212,7 +1214,7 @@ const void *CFUniCharGetUnicodePropertyDataForPlane(uint32_t propertyType, uint3
 	int64_t fileSize;
 
         if (!__CFUniCharLoadFile(PROP_DB_FILE, &bytes, &fileSize) || !__CFSimpleFileSizeVerification(bytes, fileSize)) {
-            __CFSpinUnlock(&__CFUniCharPropTableLock);
+            __CFUnlock(&__CFUniCharPropTableLock);
             return NULL;
         }
 
@@ -1262,7 +1264,7 @@ const void *CFUniCharGetUnicodePropertyDataForPlane(uint32_t propertyType, uint3
         __CFUniCharUnicodePropertyTable = table;
     }
 
-    __CFSpinUnlock(&__CFUniCharPropTableLock);
+    __CFUnlock(&__CFUniCharPropTableLock);
 
     return (plane < __CFUniCharUnicodePropertyTable[propertyType]._numPlanes ? __CFUniCharUnicodePropertyTable[propertyType]._planes[plane] : NULL);
 }
@@ -1406,7 +1408,7 @@ void __CFUniCharCleanup(void)
     int	idx;
     
     // cleanup memory allocated by __CFUniCharLoadBitmapData()
-    __CFSpinLock(&__CFUniCharBitmapLock);
+    __CFLock(&__CFUniCharBitmapLock);
     
     if (__CFUniCharBitmapDataArray != NULL) {
         for (idx = 0; idx < (int)__CFUniCharNumberOfBitmaps; idx++) {
@@ -1419,10 +1421,10 @@ void __CFUniCharCleanup(void)
         __CFUniCharNumberOfBitmaps = 0;
     }
     
-    __CFSpinUnlock(&__CFUniCharBitmapLock);
+    __CFUnlock(&__CFUniCharBitmapLock);
     
     // cleanup memory allocated by CFUniCharGetMappingData()
-    __CFSpinLock(&__CFUniCharMappingTableLock);
+    __CFLock(&__CFUniCharMappingTableLock);
     
     if (__CFUniCharMappingTables != NULL) {
         CFAllocatorDeallocate(kCFAllocatorSystemDefault, __CFUniCharMappingTables);
@@ -1438,10 +1440,10 @@ void __CFUniCharCleanup(void)
         __CFUniCharCaseMappingExtraTable = NULL;
     }
     
-    __CFSpinUnlock(&__CFUniCharMappingTableLock);
+    __CFUnlock(&__CFUniCharMappingTableLock);
     
     // cleanup memory allocated by CFUniCharGetUnicodePropertyDataForPlane()
-    __CFSpinLock(&__CFUniCharPropTableLock);
+    __CFLock(&__CFUniCharPropTableLock);
     
     if (__CFUniCharUnicodePropertyTable != NULL) {
         for (idx = 0; idx < __CFUniCharUnicodePropertyTableCount; idx++) {
@@ -1454,7 +1456,7 @@ void __CFUniCharCleanup(void)
         __CFUniCharUnicodePropertyTableCount = 0;
     }
     
-    __CFSpinUnlock(&__CFUniCharPropTableLock);
+    __CFUnlock(&__CFUniCharPropTableLock);
 }
 #endif
 

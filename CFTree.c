@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFTree.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -136,11 +136,9 @@ static const CFRuntimeClass __CFTreeClass = {
     __CFTreeCopyDescription
 };
 
-CF_PRIVATE void __CFTreeInitialize(void) {
-    __kCFTreeTypeID = _CFRuntimeRegisterClass(&__CFTreeClass);
-}
-
 CFTypeID CFTreeGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFTreeTypeID = _CFRuntimeRegisterClass(&__CFTreeClass); });
     return __kCFTreeTypeID;
 }
 
@@ -151,7 +149,7 @@ CFTreeRef CFTreeCreate(CFAllocatorRef allocator, const CFTreeContext *context) {
     CFAssert1(NULL != context, __kCFLogAssertion, "%s(): pointer to context may not be NULL", __PRETTY_FUNCTION__);
     CFAssert1(0 == context->version, __kCFLogAssertion, "%s(): context version not initialized to 0", __PRETTY_FUNCTION__);
     size = sizeof(struct __CFTree) - sizeof(CFRuntimeBase);
-    memory = (CFTreeRef)_CFRuntimeCreateInstance(allocator, __kCFTreeTypeID, size, NULL);
+    memory = (CFTreeRef)_CFRuntimeCreateInstance(allocator, CFTreeGetTypeID(), size, NULL);
     if (NULL == memory) {
 	return NULL;
     }
@@ -168,7 +166,7 @@ CFTreeRef CFTreeCreate(CFAllocatorRef allocator, const CFTreeContext *context) {
 
 CFIndex CFTreeGetChildCount(CFTreeRef tree) {
     SInt32 cnt = 0;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     tree = tree->_child;
     while (NULL != tree) {
 	cnt++;
@@ -178,22 +176,22 @@ CFIndex CFTreeGetChildCount(CFTreeRef tree) {
 }
 
 CFTreeRef CFTreeGetParent(CFTreeRef tree) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     return tree->_parent;
 }
 
 CFTreeRef CFTreeGetNextSibling(CFTreeRef tree) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     return tree->_sibling;
 }
 
 CFTreeRef CFTreeGetFirstChild(CFTreeRef tree) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     return tree->_child;
 }
 
 CFTreeRef CFTreeFindRoot(CFTreeRef tree) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     while (NULL != tree->_parent) {
 	tree = tree->_parent;
     }
@@ -202,7 +200,7 @@ CFTreeRef CFTreeFindRoot(CFTreeRef tree) {
 
 void CFTreeGetContext(CFTreeRef tree, CFTreeContext *context) {
     const struct __CFTreeCallBacks *cb;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     CFAssert1(0 == context->version, __kCFLogAssertion, "%s(): context version not initialized to 0", __PRETTY_FUNCTION__);
     cb = __CFTreeGetCallBacks(tree);
     context->version = 0;
@@ -254,7 +252,7 @@ void CFTreeSetContext(CFTreeRef tree, const CFTreeContext *context) {
 
 #if 0
 CFTreeRef CFTreeFindNextSibling(CFTreeRef tree, const void *info) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     tree = tree->_sibling;
     while (NULL != tree) {
 	if (info == tree->_context.info || (tree->_context.equal && tree->_context.equal(info, tree->_context.info))) {
@@ -266,7 +264,7 @@ CFTreeRef CFTreeFindNextSibling(CFTreeRef tree, const void *info) {
 }
 
 CFTreeRef CFTreeFindFirstChild(CFTreeRef tree, const void *info) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     tree = tree->_child;
     while (NULL != tree) {
 	if (info == tree->_context.info || (tree->_context.equal && tree->_context.equal(info, tree->_context.info))) {
@@ -278,7 +276,7 @@ CFTreeRef CFTreeFindFirstChild(CFTreeRef tree, const void *info) {
 }
 
 CFTreeRef CFTreeFind(CFTreeRef tree, const void *info) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     if (info == tree->_context.info || (tree->_context.equal && tree->_context.equal(info, tree->info))) {
 	return tree;
     }
@@ -295,7 +293,7 @@ CFTreeRef CFTreeFind(CFTreeRef tree, const void *info) {
 #endif
 
 CFTreeRef CFTreeGetChildAtIndex(CFTreeRef tree, CFIndex idx) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     tree = tree->_child;
     while (NULL != tree) {
 	if (0 == idx) return tree;
@@ -306,7 +304,7 @@ CFTreeRef CFTreeGetChildAtIndex(CFTreeRef tree, CFIndex idx) {
 }
 
 void CFTreeGetChildren(CFTreeRef tree, CFTreeRef *children) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     tree = tree->_child;
     while (NULL != tree) {
 	*children++ = tree;
@@ -315,7 +313,7 @@ void CFTreeGetChildren(CFTreeRef tree, CFTreeRef *children) {
 }
 
 void CFTreeApplyFunctionToChildren(CFTreeRef tree, CFTreeApplierFunction applier, void *context) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     CFAssert1(NULL != applier, __kCFLogAssertion, "%s(): pointer to applier function may not be NULL", __PRETTY_FUNCTION__);
     tree = tree->_child;
     while (NULL != tree) {
@@ -325,8 +323,8 @@ void CFTreeApplyFunctionToChildren(CFTreeRef tree, CFTreeApplierFunction applier
 }
 
 void CFTreePrependChild(CFTreeRef tree, CFTreeRef newChild) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
-    __CFGenericValidateType(newChild, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
+    __CFGenericValidateType(newChild, CFTreeGetTypeID());
     CFAssert1(NULL == newChild->_parent, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newChild->_sibling, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     if (!kCFUseCollectableAllocator) CFRetain(newChild);
@@ -340,8 +338,8 @@ void CFTreePrependChild(CFTreeRef tree, CFTreeRef newChild) {
 
 void CFTreeAppendChild(CFTreeRef tree, CFTreeRef newChild) {
     CFAllocatorRef allocator;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
-    __CFGenericValidateType(newChild, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
+    __CFGenericValidateType(newChild, CFTreeGetTypeID());
     CFAssert1(NULL == newChild->_parent, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newChild->_sibling, __kCFLogAssertion, "%s(): must remove newChild from previous parent first", __PRETTY_FUNCTION__);
     if (newChild->_parent) {
@@ -361,8 +359,8 @@ void CFTreeAppendChild(CFTreeRef tree, CFTreeRef newChild) {
 
 void CFTreeInsertSibling(CFTreeRef tree, CFTreeRef newSibling) {
     CFAllocatorRef allocator;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
-    __CFGenericValidateType(newSibling, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
+    __CFGenericValidateType(newSibling, CFTreeGetTypeID());
     CFAssert1(NULL != tree->_parent, __kCFLogAssertion, "%s(): tree must have a parent", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_parent, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
     CFAssert1(NULL == newSibling->_sibling, __kCFLogAssertion, "%s(): must remove newSibling from previous parent first", __PRETTY_FUNCTION__);
@@ -379,7 +377,7 @@ void CFTreeInsertSibling(CFTreeRef tree, CFTreeRef newSibling) {
 }
 
 void CFTreeRemove(CFTreeRef tree) {
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     if (NULL != tree->_parent) {
 	if (tree == tree->_parent->_child) {
             __CFAssignWithWriteBarrier((void **)&tree->_parent->_child, tree->_sibling);
@@ -406,7 +404,7 @@ void CFTreeRemove(CFTreeRef tree) {
 
 void CFTreeRemoveAllChildren(CFTreeRef tree) {
     CFTreeRef nextChild;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     nextChild = tree->_child;
     tree->_child = NULL;
     tree->_rightmostChild = NULL;
@@ -432,7 +430,7 @@ static CFComparisonResult __CFTreeCompareValues(const void *v1, const void *v2, 
 
 void CFTreeSortChildren(CFTreeRef tree, CFComparatorFunction comparator, void *context) {
     CFIndex children;
-    __CFGenericValidateType(tree, __kCFTreeTypeID);
+    __CFGenericValidateType(tree, CFTreeGetTypeID());
     CFAssert1(NULL != comparator, __kCFLogAssertion, "%s(): pointer to comparator function may not be NULL", __PRETTY_FUNCTION__);
     children = CFTreeGetChildCount(tree);
     if (1 < children) {

@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*    CFUnicodeDecomposition.c
-    Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+    Copyright (c) 1999-2014, Apple Inc. All rights reserved.
     Responsibility: Aki Inoue
 */
 
@@ -42,20 +42,20 @@ static UTF32Char *__CFUniCharMultipleDecompositionTable = NULL;
 static const uint8_t *__CFUniCharDecomposableBitmapForBMP = NULL;
 static const uint8_t *__CFUniCharHFSPlusDecomposableBitmapForBMP = NULL;
 
-static CFSpinLock_t __CFUniCharDecompositionTableLock = CFSpinLockInit;
+static CFLock_t __CFUniCharDecompositionTableLock = CFLockInit;
 
 static const uint8_t **__CFUniCharCombiningPriorityTable = NULL;
 static uint8_t __CFUniCharCombiningPriorityTableNumPlane = 0;
 
 static void __CFUniCharLoadDecompositionTable(void) {
 
-    __CFSpinLock(&__CFUniCharDecompositionTableLock);
+    __CFLock(&__CFUniCharDecompositionTableLock);
 
     if (NULL == __CFUniCharDecompositionTable) {
         const uint32_t *bytes = (uint32_t *)CFUniCharGetMappingData(kCFUniCharCanonicalDecompMapping);
 
         if (NULL == bytes) {
-            __CFSpinUnlock(&__CFUniCharDecompositionTableLock);
+            __CFUnlock(&__CFUniCharDecompositionTableLock);
             return;
         }
 
@@ -74,23 +74,23 @@ static void __CFUniCharLoadDecompositionTable(void) {
         for (idx = 0;idx < __CFUniCharCombiningPriorityTableNumPlane;idx++) __CFUniCharCombiningPriorityTable[idx] = (const uint8_t *)CFUniCharGetUnicodePropertyDataForPlane(kCFUniCharCombiningProperty, idx);
     }
 
-    __CFSpinUnlock(&__CFUniCharDecompositionTableLock);
+    __CFUnlock(&__CFUniCharDecompositionTableLock);
 }
 
-static CFSpinLock_t __CFUniCharCompatibilityDecompositionTableLock = CFSpinLockInit;
+static CFLock_t __CFUniCharCompatibilityDecompositionTableLock = CFLockInit;
 static UTF32Char *__CFUniCharCompatibilityDecompositionTable = NULL;
 static uint32_t __CFUniCharCompatibilityDecompositionTableLength = 0;
 static UTF32Char *__CFUniCharCompatibilityMultipleDecompositionTable = NULL;
 
 static void __CFUniCharLoadCompatibilityDecompositionTable(void) {
 
-    __CFSpinLock(&__CFUniCharCompatibilityDecompositionTableLock);
+    __CFLock(&__CFUniCharCompatibilityDecompositionTableLock);
 
     if (NULL == __CFUniCharCompatibilityDecompositionTable) {
         const uint32_t *bytes = (uint32_t *)CFUniCharGetMappingData(kCFUniCharCompatibilityDecompMapping);
 
         if (NULL == bytes) {
-            __CFSpinUnlock(&__CFUniCharCompatibilityDecompositionTableLock);
+            __CFUnlock(&__CFUniCharCompatibilityDecompositionTableLock);
             return;
         }
 
@@ -101,7 +101,7 @@ static void __CFUniCharLoadCompatibilityDecompositionTable(void) {
         __CFUniCharCompatibilityDecompositionTableLength /= (sizeof(uint32_t) * 2);
     }
 
-    __CFSpinUnlock(&__CFUniCharCompatibilityDecompositionTableLock);
+    __CFUnlock(&__CFUniCharCompatibilityDecompositionTableLock);
 }
 
 CF_INLINE bool __CFUniCharIsDecomposableCharacterWithFlag(UTF32Char character, bool isHFSPlus) {

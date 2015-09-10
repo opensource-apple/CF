@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBinaryPList.c
-	Copyright (c) 2000-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2014, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -61,24 +61,10 @@ enum {
 	CF_OVERFLOW_ERROR = (1 << 0),
 };
 
-CF_INLINE uint32_t __check_uint32_add_unsigned_unsigned(uint32_t x, uint32_t y, int32_t* err) {
-   if((UINT_MAX - y) < x)
-        *err = *err | CF_OVERFLOW_ERROR;
-   return x + y;
-};
-
 CF_INLINE uint64_t __check_uint64_add_unsigned_unsigned(uint64_t x, uint64_t y, int32_t* err) {
    if((ULLONG_MAX - y) < x)
         *err = *err | CF_OVERFLOW_ERROR;
    return x + y;
-};
-
-CF_INLINE uint32_t __check_uint32_mul_unsigned_unsigned(uint32_t x, uint32_t y, int32_t* err) {
-   uint64_t tmp = (uint64_t) x * (uint64_t) y;
-   /* If any of the upper 32 bits touched, overflow */
-   if(tmp & 0xffffffff00000000ULL)
-        *err = *err | CF_OVERFLOW_ERROR;
-   return (uint32_t) tmp;
 };
 
 CF_INLINE uint64_t __check_uint64_mul_unsigned_unsigned(uint64_t x, uint64_t y, int32_t* err) {
@@ -92,6 +78,21 @@ CF_INLINE uint64_t __check_uint64_mul_unsigned_unsigned(uint64_t x, uint64_t y, 
 #define check_ptr_add(p, a, err)	(const uint8_t *)__check_uint64_add_unsigned_unsigned((uintptr_t)p, (uintptr_t)a, err)
 #define check_size_t_mul(b, a, err)	(size_t)__check_uint64_mul_unsigned_unsigned((size_t)b, (size_t)a, err)
 #else
+
+CF_INLINE uint32_t __check_uint32_add_unsigned_unsigned(uint32_t x, uint32_t y, int32_t* err) {
+    if((UINT_MAX - y) < x)
+    *err = *err | CF_OVERFLOW_ERROR;
+    return x + y;
+};
+
+CF_INLINE uint32_t __check_uint32_mul_unsigned_unsigned(uint32_t x, uint32_t y, int32_t* err) {
+    uint64_t tmp = (uint64_t) x * (uint64_t) y;
+    /* If any of the upper 32 bits touched, overflow */
+    if(tmp & 0xffffffff00000000ULL)
+    *err = *err | CF_OVERFLOW_ERROR;
+    return (uint32_t) tmp;
+};
+
 #define check_ptr_add(p, a, err)	(const uint8_t *)__check_uint32_add_unsigned_unsigned((uintptr_t)p, (uintptr_t)a, err)
 #define check_size_t_mul(b, a, err)	(size_t)__check_uint32_mul_unsigned_unsigned((size_t)b, (size_t)a, err)
 #endif
@@ -128,17 +129,15 @@ static const CFRuntimeClass __CFKeyedArchiverUIDClass = {
     __CFKeyedArchiverUIDCopyDescription
 };
 
-CF_PRIVATE void __CFKeyedArchiverUIDInitialize(void) {
-    __kCFKeyedArchiverUIDTypeID = _CFRuntimeRegisterClass(&__CFKeyedArchiverUIDClass);
-}
-
 CFTypeID _CFKeyedArchiverUIDGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFKeyedArchiverUIDTypeID = _CFRuntimeRegisterClass(&__CFKeyedArchiverUIDClass); });
     return __kCFKeyedArchiverUIDTypeID;
 }
 
 CFKeyedArchiverUIDRef _CFKeyedArchiverUIDCreate(CFAllocatorRef allocator, uint32_t value) {
     CFKeyedArchiverUIDRef uid;
-    uid = (CFKeyedArchiverUIDRef)_CFRuntimeCreateInstance(allocator, __kCFKeyedArchiverUIDTypeID, sizeof(struct __CFKeyedArchiverUID) - sizeof(CFRuntimeBase), NULL);
+    uid = (CFKeyedArchiverUIDRef)_CFRuntimeCreateInstance(allocator, _CFKeyedArchiverUIDGetTypeID(), sizeof(struct __CFKeyedArchiverUID) - sizeof(CFRuntimeBase), NULL);
     if (NULL == uid) {
 	return NULL;
     }
@@ -168,10 +167,12 @@ typedef struct {
 } __CFBinaryPlistWriteBuffer;
 
 static void writeBytes(__CFBinaryPlistWriteBuffer *buf, const UInt8 *bytes, CFIndex length) {
-    if (0 == length) return;
+    if (length <= 0) return;
     if (buf->error) return;
     if (buf->databytes) {
-        if (buf->datalen < buf->written + length) {
+        int32_t err = CF_NO_ERROR;
+        uint64_t tmpSum = __check_uint64_add_unsigned_unsigned(buf->written, (uint64_t)length, &err);
+        if ((CF_NO_ERROR != err) || buf->datalen < tmpSum) {
             buf->error = __CFPropertyListCreateError(kCFPropertyListWriteStreamError, CFSTR("Binary property list writing could not be completed because databytes is full."));
             return;
         }
@@ -540,11 +541,8 @@ static Boolean _appendObject(__CFBinaryPlistWriteBuffer *buf, CFTypeRef obj, CFD
 }
 
 static void _flattenPlist(CFPropertyListRef plist, CFMutableArrayRef objlist, CFMutableDictionaryRef objtable, CFMutableSetRef uniquingset) {
-    CFPropertyListRef unique;
     uint32_t refnum;
     CFTypeID type = CFGetTypeID(plist);
-    CFIndex idx;
-    CFPropertyListRef *list, buffer[256];
 
     // Do not unique dictionaries or arrays, because: they
     // are slow to compare, and have poor hash codes.
@@ -554,7 +552,7 @@ static void _flattenPlist(CFPropertyListRef plist, CFMutableArrayRef objlist, CF
 	CFSetAddValue(uniquingset, plist);
 	CFIndex after = CFSetGetCount(uniquingset);
 	if (after == before) {	// already in set
-	    unique = CFSetGetValue(uniquingset, plist);
+	    CFPropertyListRef unique = CFSetGetValue(uniquingset, plist);
 	    if (unique != plist) {
 		refnum = (uint32_t)(uintptr_t)CFDictionaryGetValue(objtable, unique);
 		CFDictionaryAddValue(objtable, plist, (const void *)(uintptr_t)refnum);
@@ -566,18 +564,20 @@ static void _flattenPlist(CFPropertyListRef plist, CFMutableArrayRef objlist, CF
     CFArrayAppendValue(objlist, plist);
     CFDictionaryAddValue(objtable, plist, (const void *)(uintptr_t)refnum);
     if (dicttype == type) {
-	CFIndex count = CFDictionaryGetCount((CFDictionaryRef)plist);
-	list = (count <= 128) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, 2 * count * sizeof(CFTypeRef), __kCFAllocatorGCScannedMemory);
+        CFIndex count = CFDictionaryGetCount((CFDictionaryRef)plist);
+        STACK_BUFFER_DECL(CFPropertyListRef, buffer, count <= 128 ? count * 2 : 1);
+        CFPropertyListRef *list = (count <= 128) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, 2 * count * sizeof(CFTypeRef), __kCFAllocatorGCScannedMemory);
         CFDictionaryGetKeysAndValues((CFDictionaryRef)plist, list, list + count);
-        for (idx = 0; idx < 2 * count; idx++) {
+        for (CFIndex idx = 0; idx < 2 * count; idx++) {
             _flattenPlist(list[idx], objlist, objtable, uniquingset);
         }
         if (list != buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, list);
     } else if (arraytype == type) {
-	CFIndex count = CFArrayGetCount((CFArrayRef)plist);
-	list = (count <= 256) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, count * sizeof(CFTypeRef), __kCFAllocatorGCScannedMemory);
+        CFIndex count = CFArrayGetCount((CFArrayRef)plist);
+        STACK_BUFFER_DECL(CFPropertyListRef, buffer, count <= 256 ? count : 1);
+        CFPropertyListRef *list = (count <= 256) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, count * sizeof(CFTypeRef), __kCFAllocatorGCScannedMemory);
         CFArrayGetValues((CFArrayRef)plist, CFRangeMake(0, count), list);
-        for (idx = 0; idx < count; idx++) {
+        for (CFIndex idx = 0; idx < count; idx++) {
             _flattenPlist(list[idx], objlist, objtable, uniquingset);
         }
         if (list != buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, list);
@@ -1078,7 +1078,7 @@ CF_PRIVATE bool __CFBinaryPlistCreateObjectFiltered(const uint8_t *databytes, ui
     if (startOffset < objectsRangeStart || objectsRangeEnd < startOffset) FAIL_FALSE;
 
     uint64_t off;
-    CFPropertyListRef *list, buffer[256];
+    CFPropertyListRef *list;
 
     uint8_t marker = *(databytes + startOffset);
     switch (marker & 0xf0) {
@@ -1316,6 +1316,7 @@ CF_PRIVATE bool __CFBinaryPlistCreateObjectFiltered(const uint8_t *databytes, ui
 	if (databytes + objectsRangeEnd < extent) FAIL_FALSE;
 	byte_cnt = check_size_t_mul(arrayCount, sizeof(CFPropertyListRef), &err);
 	if (CF_NO_ERROR != err) FAIL_FALSE;
+        STACK_BUFFER_DECL(CFPropertyListRef, buffer, arrayCount <= 256 ? arrayCount : 1);
 	list = (arrayCount <= 256) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, byte_cnt, __kCFAllocatorGCScannedMemory);
 	if (!list) FAIL_FALSE;
 	Boolean madeSet = false;
@@ -1456,6 +1457,7 @@ CF_PRIVATE bool __CFBinaryPlistCreateObjectFiltered(const uint8_t *databytes, ui
 	if (databytes + objectsRangeEnd < extent) FAIL_FALSE;
 	byte_cnt = check_size_t_mul(dictionaryCount, sizeof(CFPropertyListRef), &err);
 	if (CF_NO_ERROR != err) FAIL_FALSE;
+        STACK_BUFFER_DECL(CFPropertyListRef, buffer, dictionaryCount <= 256 ? dictionaryCount : 1);
 	list = (dictionaryCount <= 256) ? buffer : (CFPropertyListRef *)CFAllocatorAllocate(kCFAllocatorSystemDefault, byte_cnt, __kCFAllocatorGCScannedMemory);
 	if (!list) FAIL_FALSE;
 	Boolean madeSet = false;

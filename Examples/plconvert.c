@@ -1,5 +1,8 @@
-// Mac OS X: llvm-gcc -F<path-to-CFLite-framework> -framework CoreFoundation Examples/plconvert.c -o plconvert
-
+// Mac OS X: clang -F<path-to-CFLite-framework> -framework CoreFoundation Examples/plconvert.c -o plconvert
+//  note: When running this sample, be sure to set the environment variable DYLD_FRAMEWORK_PATH to point to the directory containing your new version of CoreFoundation.
+//   e.g.
+//  DYLD_FRAMEWORK_PATH=/tmp/CF-Root ./plconvert <input> <output>
+// 
 // Linux: clang -I/usr/local/include -L/usr/local/lib -lCoreFoundation plconvert.c -o plconvert
 
 /*

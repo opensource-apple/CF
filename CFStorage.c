@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFStorage.c
- Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+ Copyright (c) 1999-2014, Apple Inc. All rights reserved.
  Responsibility: Ali Ozer
  */
 
@@ -119,7 +119,7 @@ struct __CFStorage {
     CFRuntimeBase base;
     CFIndex valueSize;
     uint32_t byteToValueShifter;
-    CFSpinLock_t cacheReaderMemoryAllocationLock;
+    CFLock_t cacheReaderMemoryAllocationLock;
     bool alwaysFrozen;
     CFStorageNode * volatile cacheNode;
     CFIndex maxLeafCapacity;	    // In terms of bytes
@@ -150,14 +150,14 @@ CF_INLINE void __CFStorageAllocLeafNodeMemory(CFAllocatorRef allocator, CFStorag
     }
     /* We must be careful here, because another thread may be trying to allocate this memory at the same time (8203146).  This may happen if two threads both attempt to read from a lazily-allocated node. */
     if ((compact ? (cap != node->info.leaf.capacityInBytes) : (cap > node->info.leaf.capacityInBytes))) {
-	__CFSpinLock(&(storage->cacheReaderMemoryAllocationLock));
+	__CFLock(&(storage->cacheReaderMemoryAllocationLock));
 	/* Check again now that we've acquired the lock.  We know that we can do this because two simulaneous readers will always pass the same capacity.  This is the fix for 8203146.  This probably needs a memory barrier. */
 	if ((compact ? (cap != node->info.leaf.capacityInBytes) : (cap > node->info.leaf.capacityInBytes))) {
 	    __CFAssignWithWriteBarrier((void **)&node->info.leaf.memory, _CFAllocatorReallocateGC(allocator, node->info.leaf.memory, cap, storage->nodeHint));	// This will free...
 	    if (__CFOASafe) __CFSetLastAllocationEventName(node->info.leaf.memory, "CFStorage (node bytes)");
 	    node->info.leaf.capacityInBytes = cap;
 	}
-	__CFSpinUnlock(&(storage->cacheReaderMemoryAllocationLock));	    
+	__CFUnlock(&(storage->cacheReaderMemoryAllocationLock));	    
     }
 }
 
@@ -1007,7 +1007,7 @@ static bool __CFStorageEnumerateNodesInByteRangeWithBlock(CFStorageRef storage, 
 	    CFStorageNode ** childrenPtr = children;
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 	    __block bool blockStop = false;
-	    dispatch_apply(numChildren, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t ind) {
+	    dispatch_apply(numChildren, __CFDispatchQueueGetGenericMatchingCurrent(), ^(size_t ind) {
 		if (! blockStop && overlapsPtr[ind].length > 0) {
 		    if (__CFStorageEnumerateNodesInByteRangeWithBlock(storage, childrenPtr[ind], globalOffsetOfNode + offsetsPtr[ind], CFRangeMake(overlapsPtr[ind].location - offsetsPtr[ind], overlapsPtr[ind].length), concurrencyToken, applier)) {
 			blockStop = true;
@@ -1105,16 +1105,12 @@ static const CFRuntimeClass __CFStorageClass = {
     __CFStorageCopyDescription
 };
 
-CF_PRIVATE void __CFStorageInitialize(void) {
-    __kCFStorageTypeID = _CFRuntimeRegisterClass(&__CFStorageClass);
-}
-
 /*** Public API ***/
 
 CFStorageRef CFStorageCreate(CFAllocatorRef allocator, CFIndex valueSize) {
     CFStorageRef storage;
     CFIndex size = sizeof(struct __CFStorage) - sizeof(CFRuntimeBase);
-    storage = (CFStorageRef)_CFRuntimeCreateInstance(allocator, __kCFStorageTypeID, size, NULL);
+    storage = (CFStorageRef)_CFRuntimeCreateInstance(allocator, CFStorageGetTypeID(), size, NULL);
     if (NULL == storage) {
 	return NULL;
     }
@@ -1136,7 +1132,7 @@ CFStorageRef CFStorageCreate(CFAllocatorRef allocator, CFIndex valueSize) {
 	storage->byteToValueShifter = NO_SHIFTER;
     }
     
-    CF_SPINLOCK_INIT_FOR_STRUCTS(storage->cacheReaderMemoryAllocationLock);
+    CF_LOCK_INIT_FOR_STRUCTS(storage->cacheReaderMemoryAllocationLock);
     storage->maxLeafCapacity = __CFStorageMaxLeafCapacity;
     if (valueSize && ((storage->maxLeafCapacity % valueSize) != 0)) {	
         storage->maxLeafCapacity = (storage->maxLeafCapacity / valueSize) * valueSize;	// Make it fit perfectly (3406853)
@@ -1205,6 +1201,8 @@ CFStorageRef CFStorageCreateWithSubrange(CFStorageRef mutStorage, CFRange range)
 }
 
 CFTypeID CFStorageGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFStorageTypeID = _CFRuntimeRegisterClass(&__CFStorageClass); });
     return __kCFStorageTypeID;
 }
 

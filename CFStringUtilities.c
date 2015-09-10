@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFStringUtilities.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -72,7 +72,15 @@ const CFStringEncoding* CFStringGetListOfAvailableEncodings() {
 
 CFStringRef CFStringGetNameOfEncoding(CFStringEncoding theEncoding) {
     static CFMutableDictionaryRef mappingTable = NULL;
-    CFStringRef theName = mappingTable ? (CFStringRef)CFDictionaryGetValue(mappingTable, (const void*)(uintptr_t)theEncoding) : NULL;
+    static OSSpinLock mappingTableLock = OS_SPINLOCK_INIT;
+
+    CFStringRef theName = NULL;
+
+    if (mappingTable) {
+        OSSpinLockLock(&mappingTableLock);
+        theName = (CFStringRef)CFDictionaryGetValue(mappingTable, (const void*)(uintptr_t)theEncoding);
+        OSSpinLockUnlock(&mappingTableLock);
+    }
 
     if (!theName) {
         const char *encodingName = __CFStringEncodingGetName(theEncoding);
@@ -82,10 +90,23 @@ CFStringRef CFStringGetNameOfEncoding(CFStringEncoding theEncoding) {
         }
         
         if (theName) {
-            if (!mappingTable) mappingTable = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, (const CFDictionaryKeyCallBacks *)NULL, &kCFTypeDictionaryValueCallBacks);
+            OSSpinLockLock(&mappingTableLock);
 
-            CFDictionaryAddValue(mappingTable, (const void*)(uintptr_t)theEncoding, (const void*)theName);
-            CFRelease(theName);
+            CFStringRef result = NULL;
+            if (!mappingTable) {
+                mappingTable = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, (const CFDictionaryKeyCallBacks *)NULL, &kCFTypeDictionaryValueCallBacks);
+            } else {    // Check to see if this got in the dictionary in the meantime
+                result = (CFStringRef)CFDictionaryGetValue(mappingTable, (const void*)(uintptr_t)theEncoding);
+            }
+            if (!result) {  // If not, add it in
+                CFDictionaryAddValue(mappingTable, (const void*)(uintptr_t)theEncoding, (const void*)theName);
+                OSSpinLockUnlock(&mappingTableLock);
+                CFRelease(theName);
+            } else {        // Otherwise use the one already in there
+                OSSpinLockUnlock(&mappingTableLock);
+                CFRelease(theName);
+                theName = result;
+            }
         }
     }
 
@@ -123,9 +144,9 @@ CFStringRef CFStringConvertEncodingToIANACharSetName(CFStringEncoding encoding) 
     CFStringRef name = NULL;
     CFIndex value = encoding;
     static CFMutableDictionaryRef mappingTable = NULL;
-    static CFSpinLock_t lock = CFSpinLockInit;
+    static CFLock_t lock = CFLockInit;
 
-    __CFSpinLock(&lock);
+    __CFLock(&lock);
     name = ((NULL == mappingTable) ? NULL : (CFStringRef)CFDictionaryGetValue(mappingTable, (const void*)value));
 
     if (NULL == name) {
@@ -144,7 +165,7 @@ CFStringRef CFStringConvertEncodingToIANACharSetName(CFStringEncoding encoding) 
             CFRelease(name);
         }
     }
-    __CFSpinUnlock(&lock);
+    __CFUnlock(&lock);
 
     return name;
 }
@@ -386,7 +407,7 @@ static UCollator *__CFStringCreateCollator(CFLocaleRef compareLocale) {
 static UCollator *__CFDefaultCollators[kCFMaxCachedDefaultCollators];
 static CFIndex __CFDefaultCollatorsCount = 0;
 static const void *__CFDefaultCollatorLocale = NULL;
-static CFSpinLock_t __CFDefaultCollatorLock = CFSpinLockInit;
+static CFLock_t __CFDefaultCollatorLock = CFLockInit;
 
 static UCollator *__CFStringCopyDefaultCollator(CFLocaleRef compareLocale) {
     CFLocaleRef currentLocale = NULL;
@@ -400,14 +421,14 @@ static UCollator *__CFStringCopyDefaultCollator(CFLocaleRef compareLocale) {
 	}
     }
 
-    __CFSpinLock(&__CFDefaultCollatorLock);
+    __CFLock(&__CFDefaultCollatorLock);
     if ((NULL != currentLocale) && (__CFDefaultCollatorLocale != currentLocale)) {
         while (__CFDefaultCollatorsCount > 0) ucol_close(__CFDefaultCollators[--__CFDefaultCollatorsCount]);
         __CFDefaultCollatorLocale = CFRetain(currentLocale);
     }
 
     if (__CFDefaultCollatorsCount > 0) collator = __CFDefaultCollators[--__CFDefaultCollatorsCount];
-    __CFSpinUnlock(&__CFDefaultCollatorLock);
+    __CFUnlock(&__CFDefaultCollatorLock);
 
     if (NULL == collator) {
 	collator = __CFStringCreateCollator(compareLocale);
@@ -423,12 +444,12 @@ static void __collatorFinalize(UCollator *collator) {
     CFLocaleRef locale = _CFGetTSD(__CFTSDKeyCollatorLocale);
     _CFSetTSD(__CFTSDKeyCollatorUCollator, NULL, NULL);
     _CFSetTSD(__CFTSDKeyCollatorLocale, NULL, NULL);
-    __CFSpinLock(&__CFDefaultCollatorLock);
+    __CFLock(&__CFDefaultCollatorLock);
     if ((__CFDefaultCollatorLocale == locale) && (__CFDefaultCollatorsCount < kCFMaxCachedDefaultCollators)) {
         __CFDefaultCollators[__CFDefaultCollatorsCount++] = collator;
         collator = NULL;
     }
-    __CFSpinUnlock(&__CFDefaultCollatorLock);
+    __CFUnlock(&__CFDefaultCollatorLock);
     if (NULL != collator) ucol_close(collator);
     if (locale) CFRelease(locale);
 }

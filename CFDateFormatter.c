@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*        CFDateFormatter.c
-        Copyright (c) 2002-2013, Apple Inc. All rights reserved.
+        Copyright (c) 2002-2014, Apple Inc. All rights reserved.
         Responsibility: David Smith
 */
 
@@ -54,6 +54,8 @@ typedef CF_ENUM(CFIndex, CFDateFormatterAmbiguousYearHandling) {
 
 extern UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID, CFStringRef localeID, CFTimeZoneRef tz);
 
+static CONST_STRING_DECL(kCFDateFormatterFormattingContextKey, "kCFDateFormatterFormattingContextKey");
+
 CF_EXPORT const CFStringRef kCFDateFormatterCalendarIdentifierKey;
 
 #undef CFReleaseIfNotNull
@@ -61,7 +63,7 @@ CF_EXPORT const CFStringRef kCFDateFormatterCalendarIdentifierKey;
 
 #define BUFFER_SIZE 768
 
-static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFStringRef inString);
+static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFStringRef inString, Boolean stripAMPM);
 
 // If you pass in a string in tmplate, you get back NULL (failure) or a CFStringRef.
 // If you pass in an array in tmplate, you get back NULL (global failure) or a CFArrayRef with CFStringRefs or kCFNulls (per-template failure) at each corresponding index.
@@ -70,11 +72,17 @@ CFArrayRef CFDateFormatterCreateDateFormatsFromTemplates(CFAllocatorRef allocato
     return (CFArrayRef)CFDateFormatterCreateDateFormatFromTemplate(allocator, (CFStringRef)tmplates, options, locale);
 }
 
-static Boolean useTemplatePatternGenerator(const char *localeName, void(^work)(UDateTimePatternGenerator *ptg)) {
+static Boolean useTemplatePatternGenerator(CFLocaleRef locale, void(^work)(UDateTimePatternGenerator *ptg)) {
     static UDateTimePatternGenerator *ptg;
     static pthread_mutex_t ptgLock = PTHREAD_MUTEX_INITIALIZER;
     static const char *ptgLocaleName;
-
+    CFStringRef ln = locale ? CFLocaleGetIdentifier(locale) : CFSTR("");
+    char buffer[BUFFER_SIZE];
+    const char *localeName = CFStringGetCStringPtr(ln, kCFStringEncodingASCII);
+    if (NULL == localeName) {
+        if (CFStringGetCString(ln, buffer, BUFFER_SIZE, kCFStringEncodingASCII)) localeName = buffer;
+    }
+    
     static void (^flushCache)() = ^{
         __cficu_udatpg_close(ptg);
         ptg = NULL;
@@ -99,7 +107,35 @@ static Boolean useTemplatePatternGenerator(const char *localeName, void(^work)(U
     pthread_mutex_unlock(&ptgLock);
     return result;
 }
-    
+
+/*
+ 1) Scan the string for an AM/PM indicator
+ 2) Back up past any spaces in front of the AM/PM indicator
+ 3) As long as the current character is whitespace, or an 'a', remove it and shift everything past it down
+ */
+static void _CFDateFormatterStripAMPMIndicators(UniChar **bpat, int32_t *bpatlen, CFIndex bufferSize) {
+
+    //scan
+    for (CFIndex idx = 0; idx < *bpatlen; idx++) {
+        if ((*bpat)[idx] == 'a') {
+            
+            //back up
+            while ((*bpat)[idx - 1] == ' ') {
+                idx--;
+            }
+            
+            //shift
+            for (; (*bpat)[idx] == ' ' || (*bpat)[idx] == 'a'; idx++) {
+                for (CFIndex shiftIdx = idx; shiftIdx < *bpatlen && shiftIdx + 1 < bufferSize; shiftIdx++) {
+                    (*bpat)[shiftIdx] = (*bpat)[shiftIdx + 1];
+                }
+                //compensate for the character we just removed
+                (*bpatlen)--;
+                idx--;
+            }
+        }
+    }
+}
 
 CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator, CFStringRef tmplate, CFOptionFlags options, CFLocaleRef locale) {
     if (allocator) __CFGenericValidateType(allocator, CFAllocatorGetTypeID());
@@ -108,38 +144,32 @@ CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator
     if (!tmplateIsString) {
         __CFGenericValidateType(tmplate, CFArrayGetTypeID());
     }
-
-    CFStringRef localeName = locale ? CFLocaleGetIdentifier(locale) : CFSTR("");
-    char buffer[BUFFER_SIZE];
-    const char *cstr = CFStringGetCStringPtr(localeName, kCFStringEncodingASCII);
-    if (NULL == cstr) {
-        if (CFStringGetCString(localeName, buffer, BUFFER_SIZE, kCFStringEncodingASCII)) cstr = buffer;
-    }
-    if (NULL == cstr) {
-        return NULL;
-    }
     
     __block CFTypeRef result = tmplateIsString ? NULL : (CFTypeRef)CFArrayCreateMutable(allocator, 0, &kCFTypeArrayCallBacks);
 
-    Boolean success = useTemplatePatternGenerator(cstr, ^(UDateTimePatternGenerator *ptg) {
+    Boolean success = useTemplatePatternGenerator(locale, ^(UDateTimePatternGenerator *ptg) {
         
         
         for (CFIndex idx = 0, cnt = tmplateIsString ? 1 : CFArrayGetCount((CFArrayRef)tmplate); idx < cnt; idx++) {
             CFStringRef tmplateString = tmplateIsString ? (CFStringRef)tmplate : (CFStringRef)CFArrayGetValueAtIndex((CFArrayRef)tmplate, idx);
             CFStringRef resultString = NULL;
             
-            tmplateString = __CFDateFormatterCreateForcedTemplate(locale ? locale : CFLocaleGetSystem(), tmplateString);
+            Boolean stripAMPM = CFStringFind(tmplateString, CFSTR("J"), 0).location != kCFNotFound;
+            tmplateString = __CFDateFormatterCreateForcedTemplate(locale ? locale : CFLocaleGetSystem(), tmplateString, stripAMPM);
             
             CFIndex jCount = 0; // the only interesting cases are 0, 1, and 2 (adjacent)
-            CFRange r = CFStringFind(tmplateString, CFSTR("j"), 0);
+            UniChar adjacentJs[2] = {-1, -1};
+            CFRange r = CFStringFind(tmplateString, CFSTR("j"), kCFCompareCaseInsensitive);
             if (kCFNotFound != r.location) {
+                adjacentJs[0] = CFStringGetCharacterAtIndex(tmplateString, r.location);
                 jCount++;
-                if ((r.location + 1 < CFStringGetLength(tmplateString)) && ('j' == CFStringGetCharacterAtIndex(tmplateString, r.location + 1))) {
+                if ((r.location + 1 < CFStringGetLength(tmplateString)) && ('j' == CFStringGetCharacterAtIndex(tmplateString, r.location + 1) || 'J' == CFStringGetCharacterAtIndex(tmplateString, r.location + 1))) {
                     jCount++;
+                    adjacentJs[1] = CFStringGetCharacterAtIndex(tmplateString, r.location + 1);
                 }
             }
             
-            UChar pattern[BUFFER_SIZE], skel[BUFFER_SIZE], bpat[BUFFER_SIZE];
+            UChar pattern[BUFFER_SIZE] = {0}, skel[BUFFER_SIZE] = {0}, bpat[BUFFER_SIZE] = {0};
             CFIndex tmpltLen = CFStringGetLength(tmplateString);
             if (BUFFER_SIZE < tmpltLen) tmpltLen = BUFFER_SIZE;
             CFStringGetCharacters(tmplateString, CFRangeMake(0, tmpltLen), (UniChar *)pattern);
@@ -150,13 +180,19 @@ CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator
             int32_t skellen = __cficu_udatpg_getSkeleton(ptg, pattern, patlen, skel, sizeof(skel) / sizeof(skel[0]), &status);
             if (!U_FAILURE(status)) {
                 if ((0 < jCount) && (skellen + jCount < (sizeof(skel) / sizeof(skel[0])))) {
-                    skel[skellen++] = 'j';
-                    if (1 < jCount) skel[skellen++] = 'j';
+                    
+                    skel[skellen++] = 'j'; //adjacentJs[0];
+                    if (1 < jCount) skel[skellen++] = 'j'; //adjacentJs[1];
+                    //stripAMPM = false; //'J' will take care of it. We only need to do it manually if we stripped the Js out ourselves while forcing 12/24 hour time
                 }
                 
                 status = U_ZERO_ERROR;
                 int32_t bpatlen = __cficu_udatpg_getBestPattern(ptg, skel, skellen, bpat, sizeof(bpat) / sizeof(bpat[0]), &status);
                 if (!U_FAILURE(status)) {
+                    if (stripAMPM) {
+                        UniChar *bpatptr = (UniChar *)bpat;
+                        _CFDateFormatterStripAMPMIndicators(&bpatptr, &bpatlen, BUFFER_SIZE);
+                    }
                     resultString = CFStringCreateWithCharacters(allocator, (const UniChar *)bpat, bpatlen);
                 }
             }
@@ -171,7 +207,7 @@ CFStringRef CFDateFormatterCreateDateFormatFromTemplate(CFAllocatorRef allocator
     });
     
     if (!success) {
-        CFRelease(result);
+        if (result) CFRelease(result);
         result = NULL;
     }
     
@@ -218,6 +254,7 @@ struct __CFDateFormatter {
         CFStringRef _PMSymbol;
         CFNumberRef _AmbiguousYearStrategy;
         CFBooleanRef _UsesCharacterDirection;
+        CFNumberRef _FormattingContext;
         
         // the following are from preferences
         CFArrayRef _CustomEraSymbols;
@@ -291,6 +328,7 @@ static void __CFDateFormatterDeallocate(CFTypeRef cf) {
     CFReleaseIfNotNull(formatter->_property._PMSymbol);
     CFReleaseIfNotNull(formatter->_property._AmbiguousYearStrategy);
     CFReleaseIfNotNull(formatter->_property._UsesCharacterDirection);
+    CFReleaseIfNotNull(formatter->_property._FormattingContext);
     CFReleaseIfNotNull(formatter->_property._CustomEraSymbols);
     CFReleaseIfNotNull(formatter->_property._CustomMonthSymbols);
     CFReleaseIfNotNull(formatter->_property._CustomShortMonthSymbols);
@@ -595,9 +633,17 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
 
     UErrorCode status = U_ZERO_ERROR;
     UDateFormat *icudf = __cficu_udat_open((UDateFormatStyle)utstyle, (UDateFormatStyle)udstyle, loc_buffer, tz_buffer, CFStringGetLength(tmpTZName), NULL, 0, &status);
+
     if (NULL == icudf || U_FAILURE(status)) {
         return;
     }
+    
+    // <rdar://problem/15420462> "Yesterday" and "Today" now appear in lower case
+    // ICU uses middle of sentence context for relative days by default. We need to have relative dates to be captalized by default for backward compatibility
+    if (wantRelative) {
+        __cficu_udat_setContext(icudf, UDISPCTX_CAPITALIZATION_FOR_UI_LIST_OR_MENU, &status);
+    }
+    
     if (df->_property._IsLenient != NULL) {
         __cficu_udat_setLenient(icudf, (kCFBooleanTrue == df->_property._IsLenient));
     } else {
@@ -714,6 +760,7 @@ static void __ResetUDateFormat(CFDateFormatterRef df, Boolean goingToHaveCustomF
     RESET_PROPERTY(_GregorianStartDate, kCFDateFormatterGregorianStartDateKey);
     RESET_PROPERTY(_AmbiguousYearStrategy, kCFDateFormatterAmbiguousYearStrategyKey);
     RESET_PROPERTY(_UsesCharacterDirection, kCFDateFormatterUsesCharacterDirectionKey);
+    RESET_PROPERTY(_FormattingContext, kCFDateFormatterFormattingContextKey);
 }
 
 static CFTypeID __kCFDateFormatterTypeID = _kCFRuntimeNotATypeID;
@@ -730,12 +777,9 @@ static const CFRuntimeClass __CFDateFormatterClass = {
     __CFDateFormatterCopyDescription
 };
 
-static void __CFDateFormatterInitialize(void) {
-    __kCFDateFormatterTypeID = _CFRuntimeRegisterClass(&__CFDateFormatterClass);
-}
-
 CFTypeID CFDateFormatterGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFDateFormatterTypeID) __CFDateFormatterInitialize();
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFDateFormatterTypeID = _CFRuntimeRegisterClass(&__CFDateFormatterClass); });
     return __kCFDateFormatterTypeID;
 }
 
@@ -786,6 +830,7 @@ CFDateFormatterRef CFDateFormatterCreate(CFAllocatorRef allocator, CFLocaleRef l
     memory->_property._PMSymbol = NULL;
     memory->_property._AmbiguousYearStrategy = NULL;
     memory->_property._UsesCharacterDirection = NULL;
+    memory->_property._FormattingContext = NULL;
     memory->_property._CustomEraSymbols = NULL;
     memory->_property._CustomMonthSymbols = NULL;
     memory->_property._CustomShortMonthSymbols = NULL;
@@ -1026,9 +1071,8 @@ static void __CFDateFormatterStoreSymbolPrefs(const void *key, const void *value
     }
 }
 
-static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFStringRef inString) {
+static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFStringRef inString, Boolean stripAMPM) {
     if (!inString) return NULL;
-    
     Boolean doForce24 = false, doForce12 = false;
     CFDictionaryRef prefs = __CFLocaleGetPrefs(locale);
     CFPropertyListRef pref = prefs ? CFDictionaryGetValue(prefs, CFSTR("AppleICUForce24HourTime")) : NULL;
@@ -1051,6 +1095,7 @@ static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFS
         UniChar ch = CFStringGetCharacterAtIndex(inString, idx);
         switch (ch) {
             case '\'': isInQuote = !isInQuote; break;
+            case 'J': //fall through
             case 'j': if (!isInQuote) {if (-1 == firstHour) firstHour = CFStringGetLength(outString); if (doForce24) ch = 'H'; else ch = 'h';} break;
             case 'h': if (!isInQuote) {if (-1 == firstHour) firstHour = CFStringGetLength(outString); had12Hour = true; if (doForce24) ch = 'H';} break; // switch 12-hour to 24-hour
             case 'K': if (!isInQuote) {if (-1 == firstHour) firstHour = CFStringGetLength(outString); had12Hour = true; if (doForce24) ch = 'k';} break; // switch 12-hour to 24-hour
@@ -1058,7 +1103,7 @@ static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFS
             case 'k': if (!isInQuote) {if (-1 == firstHour) firstHour = CFStringGetLength(outString); had24Hour = true; if (doForce12) ch = 'K';} break; // switch 24-hour to 12-hour
             case 'm': if (!isInQuote) lastMinute = CFStringGetLength(outString); break;
             case 's': if (!isInQuote) lastSecond = CFStringGetLength(outString); break;
-            case 'a': if (!isInQuote) {hasA = true; if (doForce24) emit = false;} break;
+            case 'a': if (!isInQuote) {hasA = true; if (doForce24 || stripAMPM) emit = false;} break;
                 break;
         }
         if (emit) CFStringAppendCharacters(outString, &ch, 1);
@@ -1067,80 +1112,18 @@ static CFStringRef __CFDateFormatterCreateForcedTemplate(CFLocaleRef locale, CFS
     return outString;
 }
 
-/*
- Mapping H<->h and K<->k is not correct in all locales; Japanese 12 hour, for example, uses H<->k
- This gets an approximately correct replacement character for the locale and forcing direction in question
- <rdar://problem/14062096> [iCal] Incorrect time format is used for current time indicator line
- */
-static UChar __CFDateFormatterForcedHourCharacterForLocale(CFLocaleRef locale, Boolean doForce24, Boolean doForce12, Boolean *succeeded) {
-    if (doForce24) doForce12 = false; // if both are set, Force24 wins, period
-    if (!locale || (!doForce24 && !doForce12)) {
-        *succeeded = false;
-        return '\0';
-    }
-    CFStringRef localeName = locale ? CFLocaleGetIdentifier(locale) : CFSTR("");
-    char buffer[BUFFER_SIZE] = {0};
-    const char *cstr = CFStringGetCStringPtr(localeName, kCFStringEncodingASCII);
-    if (NULL == cstr) {
-        if (CFStringGetCString(localeName, buffer, BUFFER_SIZE, kCFStringEncodingASCII)) cstr = buffer;
-    }
-    
-    __block UChar hourPatternChar = '\0';
-    
-    useTemplatePatternGenerator(cstr, ^(UDateTimePatternGenerator *ptg) {
-        UChar hourPattern[256] = {0};
-        int32_t patternLen = -1;
-        if (ptg) {
-            UErrorCode errorCode = U_ZERO_ERROR;
-            patternLen = __cficu_udatpg_getBestPattern(ptg, (const UChar *)(doForce12 ? "h" : "H"), 1, hourPattern, sizeof(hourPattern) / sizeof(UChar), &errorCode);
-            if (errorCode != U_ZERO_ERROR) {
-                memset(hourPattern, 0, sizeof(hourPattern)); //make sure there's nothing there if we failed
-                patternLen = -1;
-            }
-        }
-        
-        /*
-         Blindly replacing HHHH with four copies of the entire udatpg_getBestPattern result is not going to work. Search for the first [hHkK] in the result and use just that
-         */
-        if (patternLen > 0) {
-            for (CFIndex idx = 0; hourPattern[idx] != '\0' && idx < patternLen && idx < sizeof(hourPattern) / sizeof(UChar); idx++) {
-                if (hourPattern[idx] == 'k' || hourPattern[idx] == 'K' || hourPattern[idx] == 'h' || hourPattern[idx] == 'H') {
-                    hourPatternChar = hourPattern[idx];
-                    break;
-                }
-            }
-        }
-    });
-
-    *succeeded = hourPatternChar != '\0';
-    return hourPatternChar;
-}
-    
-#define FORCE_CHAR(replacement, oldType, newType) do { \
-    if (!isInQuote) {\
-        if (-1 == firstHour) {\
-            firstHour = CFStringGetLength(outString);\
-        }\
-        had##oldType##Hour = true;\
-        if (doForce##newType) {\
-            ch = useSpecialHourChar ? hourPatternChar : replacement;\
-        }\
-    }\
-}while(0)
-#define FORCE_CHAR_12(replacement) FORCE_CHAR(replacement, 12, 24)
-#define FORCE_CHAR_24(replacement) FORCE_CHAR(replacement, 24, 12)
-
 static CFStringRef __CFDateFormatterCreateForcedString(CFDateFormatterRef formatter, CFStringRef inString) {
     if (!inString) return NULL;
-
-    Boolean doForce24 = false, doForce12 = false;
-    if (formatter->_property._Custom24Hour != NULL) {
-        doForce24 = CFBooleanGetValue((CFBooleanRef)formatter->_property._Custom24Hour);
+    
+    UDateTimePatternMatchOptions options = UDATPG_MATCH_NO_OPTIONS;
+    
+    if (formatter->_property._Custom12Hour != NULL && CFBooleanGetValue((CFBooleanRef)formatter->_property._Custom12Hour)) {
+        options = UADATPG_FORCE_12_HOUR_CYCLE;
     }
-    if (formatter->_property._Custom12Hour != NULL) {
-        doForce12 = CFBooleanGetValue((CFBooleanRef)formatter->_property._Custom12Hour);
+    if (formatter->_property._Custom24Hour != NULL && CFBooleanGetValue((CFBooleanRef)formatter->_property._Custom24Hour)) {
+        options = UADATPG_FORCE_24_HOUR_CYCLE; //force 24 hour always wins if both are specified
     }
-    if (doForce24) doForce12 = false; // if both are set, Force24 wins, period
+    if (options == UDATPG_MATCH_NO_OPTIONS) return (CFStringRef)CFRetain(inString);
     
     static CFCharacterSetRef hourCharacters;
     static dispatch_once_t onceToken;
@@ -1150,79 +1133,35 @@ static CFStringRef __CFDateFormatterCreateForcedString(CFDateFormatterRef format
     
     CFRange hourRange = CFRangeMake(kCFNotFound, 0);
     if (!CFStringFindCharacterFromSet(inString, hourCharacters, CFRangeMake(0, CFStringGetLength(inString)), 0, &hourRange) || hourRange.location == kCFNotFound) {
-        doForce12 = false;
-        doForce24 = false;
+        return (CFStringRef)CFRetain(inString);
     }
-    
-    if (!doForce24 && !doForce12) return (CFStringRef)CFRetain(inString);
-    
-    Boolean useSpecialHourChar = false;
-    UChar hourPatternChar = __CFDateFormatterForcedHourCharacterForLocale(formatter->_locale, doForce24, doForce12, &useSpecialHourChar);
-    
-    CFMutableStringRef outString = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
-    CFIndex cnt = CFStringGetLength(inString);
-    CFIndex lastSecond = -1, lastMinute = -1, firstHour = -1;
-    Boolean isInQuote = false, hasA = false, had12Hour = false, had24Hour = false;
-    for (CFIndex idx = 0; idx < cnt; idx++) {
-        Boolean emit = true;
-        UniChar ch = CFStringGetCharacterAtIndex(inString, idx);
-        switch (ch) {
-        case '\'': isInQuote = !isInQuote; break;
-        case 'h': FORCE_CHAR_12('H'); break; // switch 12-hour to 24-hour
-        case 'k': FORCE_CHAR_24('K'); break; // switch 24-hour to 12-hour
-        case 'H': FORCE_CHAR_24('h'); break; // switch 24-hour to 12-hour
-        case 'K': FORCE_CHAR_12('k'); break; // switch 12-hour to 24-hour
-        case 'm': if (!isInQuote) lastMinute = CFStringGetLength(outString); break;
-        case 's': if (!isInQuote) lastSecond = CFStringGetLength(outString); break;
-        case 'a': if (!isInQuote) hasA = true;
-            if (!isInQuote && doForce24) {
-                // skip 'a' and one optional trailing space
-                emit = false;
-                if (idx + 1 < cnt && ' ' == CFStringGetCharacterAtIndex(inString, idx + 1)) idx++;
-            }
-            break;
-        case ' ':
-            if (!isInQuote && doForce24) {
-                // if next character is 'a' AND we have seen the hour designator, skip space and 'a'
-                if (idx + 1 < cnt && 'a' == CFStringGetCharacterAtIndex(inString, idx + 1) && -1 != firstHour) {
-                    emit = false;
-                    idx++;
-                }
-            }
-            break;
+    __block CFStringRef result = NULL;
+    __block int32_t newPatternLen = 0;
+    Boolean success = useTemplatePatternGenerator(formatter->_locale, ^(UDateTimePatternGenerator *ptg) {
+        CFIndex cnt = CFStringGetLength(inString);
+        STACK_BUFFER_DECL(UChar, ubuffer, cnt);
+        const UChar *ustr = (UChar *)CFStringGetCharactersPtr(inString);
+        if (NULL == ustr) {
+            CFStringGetCharacters(inString, CFRangeMake(0, cnt), (UniChar *)ubuffer);
+            ustr = ubuffer;
         }
-        if (emit) CFStringAppendCharacters(outString, &ch, 1);
-    }
-    if (doForce12 && !hasA && had24Hour) {
-        CFStringRef locName = CFLocaleGetIdentifier(formatter->_locale);
-        if (-1 != firstHour && (CFStringHasPrefix(locName, CFSTR("ko")) || CFEqual(locName, CFSTR("zh_SG")))) {
-            CFStringInsert(outString, firstHour, CFSTR("a "));
-        } else if (-1 != firstHour && (CFStringHasPrefix(locName, CFSTR("zh")) || CFStringHasPrefix(locName, CFSTR("ja")))) {
-            CFStringInsert(outString, firstHour, CFSTR("a"));
-        } else {
-            CFIndex lastPos = (-1 != lastSecond) ? lastSecond : ((-1 != lastMinute) ? lastMinute : -1);
-            if (-1 != lastPos) {
-                cnt = CFStringGetLength(outString);
-                lastPos++;
-                UniChar ch = (lastPos < cnt) ? CFStringGetCharacterAtIndex(outString, lastPos) : 0;
-                switch (ch) {
-                case '\"': lastPos++; break;
-                case '\'':;
-		    again:;
-                    do {
-                        lastPos++;
-                        ch = (lastPos < cnt) ? CFStringGetCharacterAtIndex(outString, lastPos) : 0;
-                    } while ('\'' != ch && '\0' != ch);
-                    if ('\'' == ch) lastPos++;
-		    ch = (lastPos < cnt) ? CFStringGetCharacterAtIndex(outString, lastPos) : 0;
-                    if ('\'' == ch) goto again;
-                    break;
-                }
-                CFStringInsert(outString, lastPos, CFSTR(" a"));
+        STACK_BUFFER_DECL(UChar, outBuffer, 256);
+        
+        UErrorCode err = U_ZERO_ERROR;
+        newPatternLen = uadatpg_remapPatternWithOptions(ptg, ustr, cnt, options, outBuffer, 256, &err);
+        if (U_SUCCESS(err)) {
+            result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, outBuffer, newPatternLen);
+        } else if (err == U_BUFFER_OVERFLOW_ERROR) {
+            err = U_ZERO_ERROR;
+            UChar *largerBuffer = calloc(newPatternLen + 1, sizeof(UChar));
+            newPatternLen = uadatpg_remapPatternWithOptions(ptg, ustr, cnt, options, outBuffer, newPatternLen + 1, &err);
+            if (U_SUCCESS(err)) {
+                result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, largerBuffer, newPatternLen);
             }
+            free(largerBuffer);
         }
-    }
-    return outString;
+    });
+    return success && result && newPatternLen > 0 ? result : CFRetain(inString);
 }
 
 CFLocaleRef CFDateFormatterGetLocale(CFDateFormatterRef formatter) {
@@ -1915,6 +1854,18 @@ static void __CFDateFormatterSetProperty(CFDateFormatterRef formatter, CFStringR
         __CFGenericValidateType(value, CFBooleanGetTypeID());
         oldProperty = formatter->_property._UsesCharacterDirection;
         formatter->_property._UsesCharacterDirection = (CFBooleanRef)CFRetain(value);
+    } else if (CFEqual(key, kCFDateFormatterFormattingContextKey)) {
+        if (!directToICU) {
+            oldProperty = formatter->_property. _FormattingContext;
+            formatter->_property._FormattingContext = NULL;
+        }
+        __CFGenericValidateType(value, CFNumberGetTypeID());
+        int context = 0;
+        CFNumberGetValue(value, kCFNumberIntType, &context);
+        __cficu_udat_setContext(formatter->_df, context, &status);
+        if (!directToICU) {
+            formatter->_property._FormattingContext = (CFNumberRef)CFRetain(value);
+        }
     } else {
         CFAssert3(0, __kCFLogAssertion, "%s(): unknown key %p (%@)", __PRETTY_FUNCTION__, key, key);
     }
@@ -2037,6 +1988,10 @@ CFTypeRef CFDateFormatterCopyProperty(CFDateFormatterRef formatter, CFStringRef 
         if (formatter->_property._AmbiguousYearStrategy) return CFRetain(formatter->_property._AmbiguousYearStrategy);
     } else if (kCFDateFormatterUsesCharacterDirectionKey == key) {
         return formatter->_property._UsesCharacterDirection ? CFRetain(formatter->_property._UsesCharacterDirection) : CFRetain(kCFBooleanFalse);
+    } else if (CFEqual(key, kCFDateFormatterFormattingContextKey)) {
+        if (formatter->_property._FormattingContext) return CFRetain(formatter->_property._FormattingContext);
+        int value = __cficu_udat_getContext(formatter->_df, UDISPCTX_TYPE_CAPITALIZATION, &status);
+        return CFNumberCreate(CFGetAllocator(formatter), kCFNumberIntType, (const void *)&value);
     } else {
         CFAssert3(0, __kCFLogAssertion, "%s(): unknown key %p (%@)", __PRETTY_FUNCTION__, key, key);
     }

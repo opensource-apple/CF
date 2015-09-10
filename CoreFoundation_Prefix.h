@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CoreFoundation_Prefix.h
-	Copyright (c) 2005-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2005-2014, Apple Inc. All rights reserved.
 */
 
 
@@ -39,6 +39,17 @@
 extern "C" {
 #endif
 
+#if DEPLOYMENT_TARGET_IPHONESIMULATOR // work around <rdar://problem/16507706>
+#include <pthread/qos.h>
+#define qos_class_self() (QOS_CLASS_UTILITY)
+#define qos_class_main() (QOS_CLASS_UTILITY)
+#define pthread_set_qos_class_self_np(A, B) do {} while (0)
+#define pthread_override_qos_class_start_np(A, B, C) (NULL)
+#define pthread_override_qos_class_end_np(A) do {} while (0)
+#elif (DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
+#include <pthread/qos.h>
+#endif
+
 #define SystemIntegrityCheck(A, B)	do {} while (0)
 
     
@@ -48,9 +59,15 @@ extern "C" {
 typedef signed char	BOOL; 
 typedef char * id;
 typedef char * Class;
+#ifndef YES
 #define YES (BOOL)1
+#endif
+#ifndef NO
 #define NO (BOOL)0
+#endif
+#ifndef nil
 #define nil NULL
+#endif
 #endif
 
 #define CRSetCrashLogMessage(A) do {} while (0)
@@ -72,7 +89,7 @@ typedef char * Class;
 static dispatch_queue_t __ ## PREFIX ## Queue(void) {			\
     static volatile dispatch_queue_t __ ## PREFIX ## dq = NULL;		\
     if (!__ ## PREFIX ## dq) {						\
-        dispatch_queue_t dq = dispatch_queue_create(# QNAME, NULL);	\
+        dispatch_queue_t dq = dispatch_queue_create("com.apple." # QNAME, NULL); \
         void * volatile *loc = (void * volatile *)&__ ## PREFIX ## dq;	\
         if (!OSAtomicCompareAndSwapPtrBarrier(NULL, dq, loc)) {		\
             dispatch_release(dq);					\
@@ -273,8 +290,8 @@ typedef int gid_t;
 #define malloc_zone_free(zone,ptr) free(ptr)
 
 // implemented in CFInternal.h
-#define OSSpinLockLock(A) __CFSpinLock(A)
-#define OSSpinLockUnlock(A) __CFSpinUnlock(A)
+#define OSSpinLockLock(A) __CFLock(A)
+#define OSSpinLockUnlock(A) __CFUnlock(A)
     
 typedef int32_t OSSpinLock;
 

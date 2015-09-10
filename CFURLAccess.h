@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,14 +17,14 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFURLAccess.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 
-        CFURLAccess is deprecated as of Mac OS X 10.9 and iOS 7.0. The suggested replacement for URLs with network schemes (http, https, ftp, data) is the NSURLConnection class. The suggested replacement for URLs with the file scheme are the foundation classes NSFileManager, NSFileHandle and NSURL, or the CoreFoundation classes CFStream and CFURL.
+        CFURLAccess is deprecated as of Mac OS X 10.9 and iOS 7.0. The suggested replacement for URLs with network schemes (http, https, ftp, data) are the NSURLSession or NSURLConnection classes. The suggested replacement for URLs with the file scheme are the foundation classes NSFileManager, NSFileHandle and NSURL, or the CoreFoundation classes CFStream and CFURL.
 */
 
 #if !defined(__COREFOUNDATION_CFURLACCESS__)
@@ -38,6 +38,7 @@
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFURL.h>
 
+CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
 
@@ -66,7 +67,7 @@ large files.
 */
 /* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+Boolean CFURLCreateDataAndPropertiesFromResource(CFAllocatorRef alloc, CFURLRef url, CFDataRef *resourceData, CFDictionaryRef *properties, CFArrayRef desiredProperties, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "For resource data, use the CFReadStream API. For file resource properties, use CFURLCopyResourcePropertiesForKeys.");
 
 /* Attempts to write the given data and properties to the given URL.
 If dataToWrite is NULL, only properties are written out (use
@@ -78,21 +79,21 @@ CFURLCreateDataAndPropertiesFromResource(), above.
 */
 /* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+Boolean CFURLWriteDataAndPropertiesToResource(CFURLRef url, CFDataRef dataToWrite, CFDictionaryRef propertiesToWrite, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "For resource data, use the CFWriteStream API. For file resource properties, use CFURLSetResourcePropertiesForKeys.");
 
 /* Destroys the resource indicated by url.
 Returns success or failure; errorCode set as above.
 */
 /* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+Boolean CFURLDestroyResource(CFURLRef url, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLGetFileSystemRepresentation and removefile(3) instead.");
 
 /* Convenience method which calls through to CFURLCreateDataAndPropertiesFromResource().
 Returns NULL on error and sets errorCode accordingly.
 */
 /* Deprecated -- see top of this file for suggested replacement classes */
 CF_EXPORT
-CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+CFTypeRef CFURLCreatePropertyFromResource(CFAllocatorRef alloc, CFURLRef url, CFStringRef property, SInt32 *errorCode) CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "For file resource properties, use CFURLCopyResourcePropertyForKey.");
 
 
 /* Common error codes (returned only by the older APIs that predate CFError) */
@@ -111,21 +112,21 @@ typedef CF_ENUM(CFIndex, CFURLError) {
 /* Older property keys */
 
 CF_EXPORT
-const CFStringRef kCFURLFileExists CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFileExists CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLResourceIsReachable instead.");
 CF_EXPORT
-const CFStringRef kCFURLFileDirectoryContents CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFileDirectoryContents CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use the CFURLEnumerator API instead.");
 CF_EXPORT
-const CFStringRef kCFURLFileLength CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFileLength CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLCopyResourcePropertyForKey with kCFURLFileSizeKey instead.");
 CF_EXPORT 
-const CFStringRef kCFURLFileLastModificationTime CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFileLastModificationTime CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLCopyResourcePropertyForKey with kCFURLContentModificationDateKey instead.");
 CF_EXPORT
-const CFStringRef kCFURLFilePOSIXMode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFilePOSIXMode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLCopyResourcePropertyForKey with kCFURLFileSecurityKey and then the CFFileSecurity API instead.");
 CF_EXPORT
-const CFStringRef kCFURLFileOwnerID CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLFileOwnerID CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use CFURLCopyResourcePropertyForKey with kCFURLFileSecurityKey and then the CFFileSecurity API instead.");
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusCode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLHTTPStatusCode CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use NSHTTPURLResponse methods instead.");
 CF_EXPORT
-const CFStringRef kCFURLHTTPStatusLine CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
+const CFStringRef kCFURLHTTPStatusLine CF_DEPRECATED(10_0, 10_9, 2_0, 7_0, "Use NSHTTPURLResponse methods instead.");
 
 /* The value of kCFURLFileExists is a CFBoolean */
 /* The value of kCFURLFileDirectoryContents is a CFArray containing CFURLs.  An empty array means the directory exists, but is empty */
@@ -139,6 +140,7 @@ const CFStringRef kCFURLHTTPStatusLine CF_DEPRECATED(10_0, 10_9, 2_0, 7_0);
 /* The value of kCFURLHTTPStatusLine is a CFString */
 
 CF_EXTERN_C_END
+CF_IMPLICIT_BRIDGING_DISABLED
 
 #endif /* ! __COREFOUNDATION_CFURLACCESS__ */
 

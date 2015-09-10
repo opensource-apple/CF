@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,22 +17,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFAvailability.h
-	Copyright (c) 2013-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2013-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFAVAILABILITY__)
 #define __COREFOUNDATION_CFAVAILABILITY__ 1
 
 #include <TargetConditionals.h>
+#include <Availability.h>
 
 #if (TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE || TARGET_OS_WIN32)
 // Even if unused, these must remain here for compatibility, because projects rely on them being included.
-#include <Availability.h>
 #include <AvailabilityMacros.h>
 #endif
 
@@ -65,8 +65,11 @@
 #define __NSi_6_0 introduced=6.0
 #define __NSi_6_1 introduced=6.1
 #define __NSi_7_0 introduced=7.0
+#define __NSi_7_1 introduced=7.1
 #define __NSi_8_0 introduced=8.0
+#define __NSi_8_1 introduced=8.1
 #define __NSi_9_0 introduced=9.0
+#define __NSi_9_1 introduced=9.1
 #define __NSi_10_0 introduced=10.0
 #define __NSi_10_1 introduced=10.1
 #define __NSi_10_2 introduced=10.2
@@ -77,6 +80,7 @@
 #define __NSi_10_7 introduced=10.7
 #define __NSi_10_8 introduced=10.8
 #define __NSi_10_9 introduced=10.9
+#define __NSi_10_10 introduced=10.10
 
 #define __NSd_2_0 ,deprecated=2.0
 #define __NSd_2_1 ,deprecated=2.1
@@ -93,8 +97,11 @@
 #define __NSd_6_0 ,deprecated=6.0
 #define __NSd_6_1 ,deprecated=6.1
 #define __NSd_7_0 ,deprecated=7.0
+#define __NSd_7_1 ,deprecated=7.1
 #define __NSd_8_0 ,deprecated=8.0
+#define __NSd_8_1 ,deprecated=8.1
 #define __NSd_9_0 ,deprecated=9.0
+#define __NSd_9_1 ,deprecated=9.1
 #define __NSd_10_0 ,deprecated=10.0
 #define __NSd_10_1 ,deprecated=10.1
 #define __NSd_10_2 ,deprecated=10.2
@@ -105,6 +112,7 @@
 #define __NSd_10_7 ,deprecated=10.7
 #define __NSd_10_8 ,deprecated=10.8
 #define __NSd_10_9 ,deprecated=10.9
+#define __NSd_10_10 ,deprecated=10.10
 
 #define __NSi_NA unavailable
 #define __NSd_NA
@@ -193,5 +201,10 @@
 #define CF_ENUM(_type, _name) _type _name; enum
 #define CF_OPTIONS(_type, _name) _type _name; enum
 #endif
+
+// Extension availability macros
+#define CF_EXTENSION_UNAVAILABLE(_msg)      __OS_EXTENSION_UNAVAILABLE(_msg)
+#define CF_EXTENSION_UNAVAILABLE_MAC(_msg)  __OSX_EXTENSION_UNAVAILABLE(_msg)
+#define CF_EXTENSION_UNAVAILABLE_IOS(_msg)  __IOS_EXTENSION_UNAVAILABLE(_msg)
 
 #endif // __COREFOUNDATION_CFAVAILABILITY__

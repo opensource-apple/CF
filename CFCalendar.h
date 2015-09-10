@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFCalendar.h
-	Copyright (c) 2004-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFCALENDAR__)
@@ -36,7 +36,7 @@
 CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
-typedef struct __CFCalendar * CFCalendarRef;
+typedef struct CF_BRIDGED_MUTABLE_TYPE(NSCalendar) __CFCalendar * CFCalendarRef;
 
 CF_EXPORT
 CFTypeID CFCalendarGetTypeID(void);
@@ -86,7 +86,7 @@ typedef CF_OPTIONS(CFOptionFlags, CFCalendarUnit) {
 	kCFCalendarUnitHour = (1UL << 5),
 	kCFCalendarUnitMinute = (1UL << 6),
 	kCFCalendarUnitSecond = (1UL << 7),
-	kCFCalendarUnitWeek = (1UL << 8) /* CF_DEPRECATED(10_4, 10_7, 2_0, 5_0) */,
+	kCFCalendarUnitWeek CF_ENUM_DEPRECATED(10_4, 10_10, 2_0, 8_0) = (1UL << 8),
 	kCFCalendarUnitWeekday = (1UL << 9),
 	kCFCalendarUnitWeekdayOrdinal = (1UL << 10),
 	kCFCalendarUnitQuarter CF_ENUM_AVAILABLE(10_6, 4_0) = (1UL << 11),

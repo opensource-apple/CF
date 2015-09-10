@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFUtilities.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -35,8 +35,6 @@
 #endif
 #include <CoreFoundation/CFURLAccess.h>
 #include <CoreFoundation/CFPropertyList.h>
-#include <CoreFoundation/CFTimeZone.h>
-#include <CoreFoundation/CFCalendar.h>
 #if DEPLOYMENT_TARGET_WINDOWS
 #include <process.h>
 #endif
@@ -50,6 +48,7 @@
 #define ASL_LEVEL_EMERG 0
 #define ASL_LEVEL_DEBUG 7
 #endif
+
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #include <unistd.h>
@@ -180,51 +179,6 @@ CF_PRIVATE void __CFDumpAllPointerLocations(uintptr_t ptr) {
 }
 #endif
 
-#if DEPLOYMENT_TARGET_WINDOWS
-struct _args {
-    void *func;
-    void *arg;
-    HANDLE handle;
-};
-static unsigned __stdcall __CFWinThreadFunc(void *arg) {
-    struct _args *args = (struct _args*)arg; 
-    ((void (*)(void *))args->func)(args->arg);
-    CloseHandle(args->handle);
-    CFAllocatorDeallocate(kCFAllocatorSystemDefault, arg);
-    _endthreadex(0);
-    return 0; 
-}
-#endif
-
-CF_PRIVATE void *__CFStartSimpleThread(void *func, void *arg) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
-    pthread_attr_t attr;
-    pthread_t tid = 0;
-    pthread_attr_init(&attr);
-    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstacksize(&attr, 60 * 1024);	// 60K stack for our internal threads is sufficient
-    OSMemoryBarrier(); // ensure arg is fully initialized and set in memory
-    pthread_create(&tid, &attr, func, arg);
-    pthread_attr_destroy(&attr);
-//warning CF: we dont actually know that a pthread_t is the same size as void *
-    return (void *)tid;
-#elif DEPLOYMENT_TARGET_WINDOWS
-    unsigned tid;
-    struct _args *args = (struct _args*)CFAllocatorAllocate(kCFAllocatorSystemDefault, sizeof(struct _args), 0);
-    if (__CFOASafe) __CFSetLastAllocationEventName(args, "CFUtilities (thread-args)");
-    HANDLE handle;
-    args->func = func;
-    args->arg = arg;
-    /* The thread is created suspended, because otherwise there would be a race between the assignment below of the handle field, and it's possible use in the thread func above. */
-    args->handle = (HANDLE)_beginthreadex(NULL, 0, __CFWinThreadFunc, args, CREATE_SUSPENDED, &tid);
-    handle = args->handle;
-    ResumeThread(handle);
-    return handle;
-#endif
-}
-
-
 // Looks for localized version of "nonLocalized" in the SystemVersion bundle
 // If not found, and returnNonLocalizedFlag == true, will return the non localized string (retained of course), otherwise NULL
 // If bundlePtr != NULL, will use *bundlePtr and will return the bundle in there; otherwise bundle is created and released
@@ -259,7 +213,7 @@ static CFDictionaryRef _CFCopyVersionDictionary(CFStringRef path) {
 #pragma GCC diagnostic ignored "-Wdeprecated"
     if (url && CFURLCreateDataAndPropertiesFromResource(kCFAllocatorSystemDefault, url, &data, NULL, NULL, NULL)) {
 #pragma GCC diagnostic pop
-	plist = CFPropertyListCreateFromXMLData(kCFAllocatorSystemDefault, data, kCFPropertyListMutableContainers, NULL);
+        plist = CFPropertyListCreateWithData(kCFAllocatorSystemDefault, data, kCFPropertyListMutableContainers, NULL, NULL);
 	CFRelease(data);
     }
     if (url) CFRelease(url);
@@ -341,15 +295,29 @@ CFStringRef CFCopySystemVersionString(void) {
 // Proper caching and testing to see if the file has changed, without race
 // conditions, would require semi-convoluted use of fstat().
 
+static CFStringRef copySystemVersionPath(CFStringRef suffix) {
+#if TARGET_IPHONE_SIMULATOR
+    const char *simulatorRoot = getenv("IPHONE_SIMULATOR_ROOT");
+    if (!simulatorRoot) simulatorRoot = getenv("CFFIXED_USER_HOME");
+    if (!simulatorRoot) simulatorRoot = "/";
+    return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%s%@"), simulatorRoot, suffix);
+#else
+    return suffix;
+#endif
+}
+
+
 CFDictionaryRef _CFCopySystemVersionDictionary(void) {
-    CFPropertyListRef plist = NULL;
-	plist = _CFCopyVersionDictionary(CFSTR("/System/Library/CoreServices/SystemVersion.plist"));
+    CFStringRef path = copySystemVersionPath(CFSTR("/System/Library/CoreServices/SystemVersion.plist"));
+    CFPropertyListRef plist = _CFCopyVersionDictionary(path);
+    CFRelease(path);
     return (CFDictionaryRef)plist;
 }
 
 CFDictionaryRef _CFCopyServerVersionDictionary(void) {
-    CFPropertyListRef plist = NULL;
-	plist = _CFCopyVersionDictionary(CFSTR("/System/Library/CoreServices/ServerVersion.plist"));
+    CFStringRef path = copySystemVersionPath(CFSTR("/System/Library/CoreServices/ServerVersion.plist"));
+    CFPropertyListRef plist = _CFCopyVersionDictionary(path);
+    CFRelease(path);
     return (CFDictionaryRef)plist;
 }
 
@@ -415,15 +383,6 @@ CF_PRIVATE void *__CFLookupCFNetworkFunction(const char *name) {
     }
     return dyfunc;
 }
-#endif
-
-
-#ifndef __CFGetSessionID_defined
-
-CF_PRIVATE uint32_t __CFGetSessionID(void) {
-    return 0;
-}
-
 #endif
 
 CF_PRIVATE CFIndex __CFActiveProcessorCount() {
@@ -603,24 +562,22 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
     // The banner path may use CF functions, but the rest of this function should not. It may be called at times when CF is not fully setup or torn down.
     if (withBanner) {
+	double dummy;
 	CFAbsoluteTime at = CFAbsoluteTimeGetCurrent();
-	CFCalendarRef calendar = CFCalendarCreateWithIdentifier(kCFAllocatorSystemDefault, kCFCalendarIdentifierGregorian);
-	if (!calendar) goto after_banner;
-	CFTimeZoneRef tz = CFTimeZoneCopySystem();
-	if (!tz) {
-	    CFRelease(calendar);
-	    goto after_banner;
-	}
-	CFCalendarSetTimeZone(calendar, tz);
-	CFRelease(tz);
-	int32_t year, month, day, hour, minute, second;
-	Boolean dec = CFCalendarDecomposeAbsoluteTime(calendar, at, "yMdHms", &year, &month, &day, &hour, &minute, &second);
-	CFRelease(calendar);
-	if (!dec) goto after_banner;
-	double atf;
-	int32_t ms = (int32_t)floor(1000.0 * modf(at, &atf));
+        time_t tv = floor(at + kCFAbsoluteTimeIntervalSince1970);
+        struct tm mine;
+        localtime_r(&tv, &mine);
+        int32_t year = mine.tm_year + 1900;
+        int32_t month = mine.tm_mon + 1;
+        int32_t day = mine.tm_mday;
+        int32_t hour = mine.tm_hour;
+        int32_t minute = mine.tm_min;
+        int32_t second = mine.tm_sec;
+	int32_t ms = (int32_t)floor(1000.0 * modf(at, &dummy));
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
-        asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%x] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), pthread_mach_thread_np(pthread_self()));
+        uint64_t tid = 0;
+        if (0 != pthread_threadid_np(NULL, &tid)) tid = pthread_mach_thread_np(pthread_self());
+        asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%llu] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), tid);
 	asprintf(&thread, "%x", pthread_mach_thread_np(pthread_self()));
 #elif DEPLOYMENT_TARGET_WINDOWS
 	bannerLen = asprintf(&banner, "%04d-%02d-%02d %02d:%02d:%02d.%03d %s[%d:%x] ", year, month, day, hour, minute, second, ms, *_CFGetProgname(), getpid(), GetCurrentThreadId());
@@ -632,7 +589,6 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 	asprintf(&time, "%04d-%02d-%02d %02d:%02d:%02d.%03d", year, month, day, hour, minute, second, ms);
 
     }
-    after_banner:;
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
     uid_t euid;
     __CFGetUGIDs(&euid, NULL);
@@ -661,10 +617,10 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
 	v[2].iov_base = "\n";
 	v[2].iov_len = (message[length - 1] != '\n') ? 1 : 0;
 	int nv = (v[0].iov_base ? 1 : 0) + 1 + (v[2].iov_len ? 1 : 0);
-	static CFSpinLock_t lock = CFSpinLockInit;
-	__CFSpinLock(&lock);
+	static CFLock_t lock = CFLockInit;
+	__CFLock(&lock);
 	writev(STDERR_FILENO, v[0].iov_base ? v : v + 1, nv);
-	__CFSpinUnlock(&lock);
+	__CFUnlock(&lock);
 #elif DEPLOYMENT_TARGET_WINDOWS
         size_t bufLen = bannerLen + length + 1;
         char *buf = (char *)malloc(sizeof(char) * bufLen);
@@ -705,14 +661,14 @@ static void __CFLogCString(int32_t lev, const char *message, size_t length, char
     if (banner) free(banner);
     if (uid) free(uid);
 }
-
-CF_EXPORT void _CFLogvEx(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, int32_t lev, CFStringRef format, va_list args) {
+    
+CF_EXPORT void _CFLogvEx2(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, const void *), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, int32_t lev, CFStringRef format, va_list args) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     uintptr_t val = (uintptr_t)_CFGetTSD(__CFTSDKeyIsInCFLog);
     if (3 < val) return; // allow up to 4 nested invocations
     _CFSetTSD(__CFTSDKeyIsInCFLog, (void *)(val + 1), NULL);
 #endif
-    CFStringRef str = format ? _CFStringCreateWithFormatAndArgumentsAux(kCFAllocatorSystemDefault, copyDescFunc, formatOptions, (CFStringRef)format, args) : 0;
+    CFStringRef str = format ? _CFStringCreateWithFormatAndArgumentsAux2(kCFAllocatorSystemDefault, copyDescFunc, contextDescFunc, formatOptions, (CFStringRef)format, args) : 0;
     CFIndex blen = str ? CFStringGetMaximumSizeForEncoding(CFStringGetLength(str), kCFStringEncodingUTF8) + 1 : 0;
     char *buf = str ? (char *)malloc(blen) : 0;
     if (str && buf) {
@@ -728,6 +684,10 @@ CF_EXPORT void _CFLogvEx(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, co
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     _CFSetTSD(__CFTSDKeyIsInCFLog, (void *)val, NULL);
 #endif
+}
+    
+CF_EXPORT void _CFLogvEx(CFLogFunc logit, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, int32_t lev, CFStringRef format, va_list args) {
+    _CFLogvEx2(logit, copyDescFunc, NULL, formatOptions, lev, format, args);
 }
 
 // This CF-only log function uses no CF functionality, so it may be called anywhere within CF - including thread teardown or prior to full CF setup
@@ -745,7 +705,7 @@ CF_PRIVATE void _CFLogSimple(int32_t lev, char *format, ...) {
 void CFLog(int32_t lev, CFStringRef format, ...) {
     va_list args;
     va_start(args, format); 
-    _CFLogvEx(NULL, NULL, NULL, lev, format, args);
+    _CFLogvEx2(NULL, NULL, NULL, NULL, lev, format, args);
     va_end(args);
 }
 
@@ -814,20 +774,20 @@ kern_return_t _CFDiscorporateMemoryMaterialize(CFDiscorporateMemory *hm) {
 
 #if SUDDEN_TERMINATION_ENABLE_VPROC
 
-static CFSpinLock_t __CFProcessKillingLock = CFSpinLockInit;
+static OSSpinLock __CFProcessKillingLock = OS_SPINLOCK_INIT;
 static CFIndex __CFProcessKillingDisablingCount = 1;
 static Boolean __CFProcessKillingWasTurnedOn = false;
 
 void _CFSuddenTerminationDisable(void) {
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     __CFProcessKillingDisablingCount++;
     _vproc_transaction_begin();
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationEnable(void) {
     // In our model the first call of _CFSuddenTerminationEnable() that does not balance a previous call of _CFSuddenTerminationDisable() actually enables sudden termination so we have to keep a count that's almost redundant with vproc's.
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     __CFProcessKillingDisablingCount--;
     if (__CFProcessKillingDisablingCount==0 && !__CFProcessKillingWasTurnedOn) {
 	_vproc_transactions_enable();
@@ -840,26 +800,25 @@ void _CFSuddenTerminationEnable(void) {
 	    CFLog(kCFLogLevelError, CFSTR("-[NSProcessInfo enableSuddenTermination] has been invoked more times than necessary to balance invocations of -[NSProcessInfo disableSuddenTermination]. Ignoring."));
 	}
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationExitIfTerminationEnabled(int exitStatus) {
     // This is for when the caller wants to try to exit quickly if possible but not automatically exit the process when it next becomes clean, because quitting might still be cancelled by the user.
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     // Check _vproc_transaction_count() because other code in the process might go straight to the vproc APIs but also check __CFProcessKillingWasTurnedOn because  _vproc_transaction_count() can return 0 when transactions didn't even get enabled.
-    if (_vproc_transaction_count()==0 && __CFProcessKillingWasTurnedOn) {
-        _exit(exitStatus);
+    if (__CFProcessKillingWasTurnedOn) {
+        _vproc_transaction_try_exit(exitStatus);
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationExitWhenTerminationEnabled(int exitStatus) {
     // The user has had their final opportunity to cancel quitting. Exit as soon as the process is clean. Same carefulness as in _CFSuddenTerminationExitIfTerminationEnabled().
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     if (__CFProcessKillingWasTurnedOn) {
-	_vproc_transaction_try_exit(exitStatus);
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 size_t _CFSuddenTerminationDisablingCount(void) {
@@ -871,7 +830,7 @@ size_t _CFSuddenTerminationDisablingCount(void) {
 
 #warning Building with vproc sudden termination API disabled.
 
-static CFSpinLock_t __CFProcessKillingLock = CFSpinLockInit;
+static OSSpinLockUnlock __CFProcessKillingLock = OS_SPINLOCK_INIT;
 static size_t __CFProcessKillingDisablingCount = 1;
 static Boolean __CFProcessExitNextTimeKillingIsEnabled = false;
 static int32_t __CFProcessExitStatus = 0;
@@ -896,16 +855,16 @@ CF_PRIVATE void _CFSetSuddenTerminationEnabled(Boolean isEnabled) {
 }
 
 void _CFSuddenTerminationDisable(void) {
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     if (__CFProcessKillingDisablingCount == 0) {
         _CFSetSuddenTerminationEnabled(false);
     }
     __CFProcessKillingDisablingCount++;
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationEnable(void) {
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     __CFProcessKillingDisablingCount--;
     if (__CFProcessKillingDisablingCount == 0) {
         if (__CFProcessExitNextTimeKillingIsEnabled) {
@@ -914,26 +873,26 @@ void _CFSuddenTerminationEnable(void) {
             _CFSetSuddenTerminationEnabled(true);
         }
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationExitIfTerminationEnabled(int exitStatus) {
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     if (__CFProcessKillingDisablingCount == 0) {
         _exit(exitStatus);
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 void _CFSuddenTerminationExitWhenTerminationEnabled(int exitStatus) {
-    __CFSpinLock(&__CFProcessKillingLock);
+    OSSpinLockLock(&__CFProcessKillingLock);
     if (__CFProcessKillingDisablingCount == 0) {
         _exit(exitStatus);
     } else {
         __CFProcessExitNextTimeKillingIsEnabled = YES;
         __CFProcessExitStatus = exitStatus;
     }
-    __CFSpinUnlock(&__CFProcessKillingLock);
+    OSSpinLockUnlock(&__CFProcessKillingLock);
 }
 
 size_t _CFSuddenTerminationDisablingCount(void) {

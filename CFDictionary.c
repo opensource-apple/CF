@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFDictionary.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 	Machine generated from Notes/HashingCode.template
 */
@@ -47,8 +47,6 @@
 const CFDictionaryKeyCallBacks kCFTypeDictionaryKeyCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryKeyCallBacks kCFCopyStringDictionaryKeyCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryValueCallBacks kCFTypeDictionaryValueCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual};
-static const CFDictionaryKeyCallBacks __kCFNullDictionaryKeyCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
-static const CFDictionaryValueCallBacks __kCFNullDictionaryValueCallBacks = {0, NULL, NULL, NULL, NULL};
 
 #define CFHashRef CFDictionaryRef
 #define CFMutableHashRef CFMutableDictionaryRef
@@ -59,14 +57,11 @@ static const CFDictionaryValueCallBacks __kCFNullDictionaryValueCallBacks = {0, 
 #if CFSet
 const CFDictionaryCallBacks kCFTypeDictionaryCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryCallBacks kCFCopyStringDictionaryCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
-static const CFDictionaryCallBacks __kCFNullDictionaryCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
 
 #define CFDictionaryKeyCallBacks CFDictionaryCallBacks
 #define CFDictionaryValueCallBacks CFDictionaryCallBacks
 #define kCFTypeDictionaryKeyCallBacks kCFTypeDictionaryCallBacks
 #define kCFTypeDictionaryValueCallBacks kCFTypeDictionaryCallBacks
-#define __kCFNullDictionaryKeyCallBacks __kCFNullDictionaryCallBacks
-#define __kCFNullDictionaryValueCallBacks __kCFNullDictionaryCallBacks
 
 #define CFHashRef CFSetRef
 #define CFMutableHashRef CFMutableSetRef
@@ -77,14 +72,11 @@ static const CFDictionaryCallBacks __kCFNullDictionaryCallBacks = {0, NULL, NULL
 #if CFBag
 const CFDictionaryCallBacks kCFTypeDictionaryCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFDictionaryCallBacks kCFCopyStringDictionaryCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
-static const CFDictionaryCallBacks __kCFNullDictionaryCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
 
 #define CFDictionaryKeyCallBacks CFDictionaryCallBacks
 #define CFDictionaryValueCallBacks CFDictionaryCallBacks
 #define kCFTypeDictionaryKeyCallBacks kCFTypeDictionaryCallBacks
 #define kCFTypeDictionaryValueCallBacks kCFTypeDictionaryCallBacks
-#define __kCFNullDictionaryKeyCallBacks __kCFNullDictionaryCallBacks
-#define __kCFNullDictionaryValueCallBacks __kCFNullDictionaryCallBacks
 
 #define CFHashRef CFBagRef
 #define CFMutableHashRef CFMutableBagRef
@@ -128,7 +120,8 @@ static const CFRuntimeClass __CFDictionaryClass = {
 };
 
 CFTypeID CFDictionaryGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFDictionaryTypeID) __kCFDictionaryTypeID = _CFRuntimeRegisterClass(&__CFDictionaryClass);
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFDictionaryTypeID = _CFRuntimeRegisterClass(&__CFDictionaryClass); });
     return __kCFDictionaryTypeID;
 }
 
@@ -368,9 +361,13 @@ CFMutableHashRef CFDictionaryCreateMutableCopy(CFAllocatorRef allocator, CFIndex
 }
 
 CFIndex CFDictionaryGetCount(CFHashRef hc) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, CFIndex, (NSDictionary *)hc, count);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, CFIndex, (NSSet *)hc, count);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), CFIndex, (NSDictionary *)hc, count);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), CFIndex, (NSSet *)hc, count);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return CFBasicHashGetCount((CFBasicHashRef)hc);
 }
 
@@ -380,9 +377,13 @@ CFIndex CFDictionaryGetCountOfKey(CFHashRef hc, const_any_pointer_t key) {
 #if CFSet || CFBag
 CFIndex CFDictionaryGetCountOfValue(CFHashRef hc, const_any_pointer_t key) {
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, CFIndex, (NSDictionary *)hc, countForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, CFIndex, (NSSet *)hc, countForObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), CFIndex, (NSDictionary *)hc, countForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), CFIndex, (NSSet *)hc, countForObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return CFBasicHashGetCountOfKey((CFBasicHashRef)hc, (uintptr_t)key);
 }
 
@@ -392,24 +393,36 @@ Boolean CFDictionaryContainsKey(CFHashRef hc, const_any_pointer_t key) {
 #if CFSet || CFBag
 Boolean CFDictionaryContainsValue(CFHashRef hc, const_any_pointer_t key) {
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, char, (NSDictionary *)hc, containsKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, char, (NSSet *)hc, containsObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), char, (NSDictionary *)hc, containsKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), char, (NSSet *)hc, containsObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return (0 < CFBasicHashGetCountOfKey((CFBasicHashRef)hc, (uintptr_t)key));
 }
 
 const_any_pointer_t CFDictionaryGetValue(CFHashRef hc, const_any_pointer_t key) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, const_any_pointer_t, (NSDictionary *)hc, objectForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, const_any_pointer_t, (NSSet *)hc, member:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), const_any_pointer_t, (NSDictionary *)hc, objectForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), const_any_pointer_t, (NSSet *)hc, member:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     return (0 < bkt.count ? (const_any_pointer_t)bkt.weak_value : 0);
 }
 
 Boolean CFDictionaryGetValueIfPresent(CFHashRef hc, const_any_pointer_t key, const_any_pointer_t *value) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, Boolean, (NSDictionary *)hc, __getValue:(id *)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, Boolean, (NSSet *)hc, __getValue:(id *)value forObj:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), Boolean, (NSDictionary *)hc, __getValue:(id *)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), Boolean, (NSSet *)hc, __getValue:(id *)value forObj:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     if (0 < bkt.count) {
         if (value) {
@@ -426,19 +439,19 @@ Boolean CFDictionaryGetValueIfPresent(CFHashRef hc, const_any_pointer_t key, con
 
 #if CFDictionary
 CFIndex CFDictionaryGetCountOfValue(CFHashRef hc, const_any_pointer_t value) {
-    CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, CFIndex, (NSDictionary *)hc, countForObject:(id)value);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), CFIndex, (NSDictionary *)hc, countForObject:(id)value);
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return CFBasicHashGetCountOfValue((CFBasicHashRef)hc, (uintptr_t)value);
 }
 
 Boolean CFDictionaryContainsValue(CFHashRef hc, const_any_pointer_t value) {
-    CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, char, (NSDictionary *)hc, containsObject:(id)value);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), char, (NSDictionary *)hc, containsObject:(id)value);
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return (0 < CFBasicHashGetCountOfValue((CFBasicHashRef)hc, (uintptr_t)value));
 }
 
 CF_EXPORT Boolean CFDictionaryGetKeyIfPresent(CFHashRef hc, const_any_pointer_t key, const_any_pointer_t *actualkey) {
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     if (0 < bkt.count) {
         if (actualkey) {
@@ -461,9 +474,13 @@ void CFDictionaryGetKeysAndValues(CFHashRef hc, const_any_pointer_t *keybuf, con
 void CFDictionaryGetValues(CFHashRef hc, const_any_pointer_t *keybuf) {
     const_any_pointer_t *valuebuf = 0;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSDictionary *)hc, getObjects:(id *)valuebuf andKeys:(id *)keybuf);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSSet *)hc, getObjects:(id *)keybuf);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSDictionary *)hc, getObjects:(id *)valuebuf andKeys:(id *)keybuf);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSSet *)hc, getObjects:(id *)keybuf);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     if (kCFUseCollectableAllocator) {
         CFOptionFlags flags = CFBasicHashGetFlags((CFBasicHashRef)hc);
         __block const_any_pointer_t *keys = keybuf;
@@ -484,9 +501,13 @@ void CFDictionaryGetValues(CFHashRef hc, const_any_pointer_t *keybuf) {
 
 void CFDictionaryApplyFunction(CFHashRef hc, CFDictionaryApplierFunction applier, any_pointer_t context) {
     FAULT_CALLBACK((void **)&(applier));
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSDictionary *)hc, __apply:(void (*)(const void *, const void *, void *))applier context:(void *)context);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSSet *)hc, __applyValues:(void (*)(const void *, void *))applier context:(void *)context);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSDictionary *)hc, __apply:(void (*)(const void *, const void *, void *))applier context:(void *)context);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSSet *)hc, __applyValues:(void (*)(const void *, void *))applier context:(void *)context);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFBasicHashApply((CFBasicHashRef)hc, ^(CFBasicHashBucket bkt) {
 #if CFDictionary
             INVOKE_CALLBACK3(applier, (const_any_pointer_t)bkt.weak_key, (const_any_pointer_t)bkt.weak_value, context);
@@ -505,22 +526,22 @@ void CFDictionaryApplyFunction(CFHashRef hc, CFDictionaryApplierFunction applier
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT unsigned long _CFDictionaryFastEnumeration(CFHashRef hc, struct __objcFastEnumerationStateEquivalent *state, void *stackbuffer, unsigned long count) {
-    if (CF_IS_OBJC(__kCFDictionaryTypeID, hc)) return 0;
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    if (CF_IS_OBJC(CFDictionaryGetTypeID(), hc)) return 0;
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return __CFBasicHashFastEnumeration((CFBasicHashRef)hc, (struct __objcFastEnumerationStateEquivalent2 *)state, stackbuffer, count);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT Boolean _CFDictionaryIsMutable(CFHashRef hc) {
-    if (CF_IS_OBJC(__kCFDictionaryTypeID, hc)) return false;
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    if (CF_IS_OBJC(CFDictionaryGetTypeID(), hc)) return false;
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     return CFBasicHashIsMutable((CFBasicHashRef)hc);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT void _CFDictionarySetCapacity(CFMutableHashRef hc, CFIndex cap) {
-    if (CF_IS_OBJC(__kCFDictionaryTypeID, hc)) return;
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+    if (CF_IS_OBJC(CFDictionaryGetTypeID(), hc)) return;
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     CFAssert3(CFDictionaryGetCount(hc) <= cap, __kCFLogAssertion, "%s(): desired capacity (%ld) is less than count (%ld)", __PRETTY_FUNCTION__, cap, CFDictionaryGetCount(hc));
     CFBasicHashSetCapacity((CFBasicHashRef)hc, cap);
@@ -559,9 +580,13 @@ void CFDictionaryAddValue(CFMutableHashRef hc, const_any_pointer_t key, const_an
 void CFDictionaryAddValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableDictionary *)hc, __addObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableSet *)hc, addObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableDictionary *)hc, __addObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableSet *)hc, addObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -578,9 +603,13 @@ void CFDictionaryReplaceValue(CFMutableHashRef hc, const_any_pointer_t key, cons
 void CFDictionaryReplaceValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableDictionary *)hc, replaceObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableSet *)hc, replaceObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableDictionary *)hc, replaceObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableSet *)hc, replaceObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -597,9 +626,13 @@ void CFDictionarySetValue(CFMutableHashRef hc, const_any_pointer_t key, const_an
 void CFDictionarySetValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableDictionary *)hc, __setObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableSet *)hc, setObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableDictionary *)hc, __setObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableSet *)hc, setObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -611,9 +644,13 @@ void CFDictionarySetValue(CFMutableHashRef hc, const_any_pointer_t key) {
 }
 
 void CFDictionaryRemoveValue(CFMutableHashRef hc, const_any_pointer_t key) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableDictionary *)hc, removeObjectForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableSet *)hc, removeObject:(id)key);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableDictionary *)hc, removeObjectForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableSet *)hc, removeObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -624,9 +661,13 @@ void CFDictionaryRemoveValue(CFMutableHashRef hc, const_any_pointer_t key) {
 }
 
 void CFDictionaryRemoveAllValues(CFMutableHashRef hc) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableDictionary *)hc, removeAllObjects);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFDictionaryTypeID, void, (NSMutableSet *)hc, removeAllObjects);
-    __CFGenericValidateType(hc, __kCFDictionaryTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableDictionary *)hc, removeAllObjects);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFDictionaryGetTypeID(), void, (NSMutableSet *)hc, removeAllObjects);
+#endif
+    __CFGenericValidateType(hc, CFDictionaryGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);

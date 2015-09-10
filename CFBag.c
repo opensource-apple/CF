@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBag.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 	Machine generated from Notes/HashingCode.template
 */
@@ -47,8 +47,6 @@
 const CFBagKeyCallBacks kCFTypeBagKeyCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFBagKeyCallBacks kCFCopyStringBagKeyCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFBagValueCallBacks kCFTypeBagValueCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual};
-static const CFBagKeyCallBacks __kCFNullBagKeyCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
-static const CFBagValueCallBacks __kCFNullBagValueCallBacks = {0, NULL, NULL, NULL, NULL};
 
 #define CFHashRef CFDictionaryRef
 #define CFMutableHashRef CFMutableDictionaryRef
@@ -59,14 +57,11 @@ static const CFBagValueCallBacks __kCFNullBagValueCallBacks = {0, NULL, NULL, NU
 #if CFSet
 const CFBagCallBacks kCFTypeBagCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFBagCallBacks kCFCopyStringBagCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
-static const CFBagCallBacks __kCFNullBagCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
 
 #define CFBagKeyCallBacks CFBagCallBacks
 #define CFBagValueCallBacks CFBagCallBacks
 #define kCFTypeBagKeyCallBacks kCFTypeBagCallBacks
 #define kCFTypeBagValueCallBacks kCFTypeBagCallBacks
-#define __kCFNullBagKeyCallBacks __kCFNullBagCallBacks
-#define __kCFNullBagValueCallBacks __kCFNullBagCallBacks
 
 #define CFHashRef CFSetRef
 #define CFMutableHashRef CFMutableSetRef
@@ -77,14 +72,11 @@ static const CFBagCallBacks __kCFNullBagCallBacks = {0, NULL, NULL, NULL, NULL, 
 #if CFBag
 const CFBagCallBacks kCFTypeBagCallBacks = {0, __CFTypeCollectionRetain, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
 const CFBagCallBacks kCFCopyStringBagCallBacks = {0, __CFStringCollectionCopy, __CFTypeCollectionRelease, CFCopyDescription, CFEqual, CFHash};
-static const CFBagCallBacks __kCFNullBagCallBacks = {0, NULL, NULL, NULL, NULL, NULL};
 
 #define CFBagKeyCallBacks CFBagCallBacks
 #define CFBagValueCallBacks CFBagCallBacks
 #define kCFTypeBagKeyCallBacks kCFTypeBagCallBacks
 #define kCFTypeBagValueCallBacks kCFTypeBagCallBacks
-#define __kCFNullBagKeyCallBacks __kCFNullBagCallBacks
-#define __kCFNullBagValueCallBacks __kCFNullBagCallBacks
 
 #define CFHashRef CFBagRef
 #define CFMutableHashRef CFMutableBagRef
@@ -128,7 +120,8 @@ static const CFRuntimeClass __CFBagClass = {
 };
 
 CFTypeID CFBagGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFBagTypeID) __kCFBagTypeID = _CFRuntimeRegisterClass(&__CFBagClass);
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFBagTypeID = _CFRuntimeRegisterClass(&__CFBagClass); });
     return __kCFBagTypeID;
 }
 
@@ -368,9 +361,13 @@ CFMutableHashRef CFBagCreateMutableCopy(CFAllocatorRef allocator, CFIndex capaci
 }
 
 CFIndex CFBagGetCount(CFHashRef hc) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, CFIndex, (NSDictionary *)hc, count);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, CFIndex, (NSSet *)hc, count);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), CFIndex, (NSDictionary *)hc, count);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), CFIndex, (NSSet *)hc, count);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return CFBasicHashGetCount((CFBasicHashRef)hc);
 }
 
@@ -380,9 +377,13 @@ CFIndex CFBagGetCountOfKey(CFHashRef hc, const_any_pointer_t key) {
 #if CFSet || CFBag
 CFIndex CFBagGetCountOfValue(CFHashRef hc, const_any_pointer_t key) {
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, CFIndex, (NSDictionary *)hc, countForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, CFIndex, (NSSet *)hc, countForObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), CFIndex, (NSDictionary *)hc, countForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), CFIndex, (NSSet *)hc, countForObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return CFBasicHashGetCountOfKey((CFBasicHashRef)hc, (uintptr_t)key);
 }
 
@@ -392,24 +393,36 @@ Boolean CFBagContainsKey(CFHashRef hc, const_any_pointer_t key) {
 #if CFSet || CFBag
 Boolean CFBagContainsValue(CFHashRef hc, const_any_pointer_t key) {
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, char, (NSDictionary *)hc, containsKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, char, (NSSet *)hc, containsObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), char, (NSDictionary *)hc, containsKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), char, (NSSet *)hc, containsObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return (0 < CFBasicHashGetCountOfKey((CFBasicHashRef)hc, (uintptr_t)key));
 }
 
 const_any_pointer_t CFBagGetValue(CFHashRef hc, const_any_pointer_t key) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, const_any_pointer_t, (NSDictionary *)hc, objectForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, const_any_pointer_t, (NSSet *)hc, member:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), const_any_pointer_t, (NSDictionary *)hc, objectForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), const_any_pointer_t, (NSSet *)hc, member:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     return (0 < bkt.count ? (const_any_pointer_t)bkt.weak_value : 0);
 }
 
 Boolean CFBagGetValueIfPresent(CFHashRef hc, const_any_pointer_t key, const_any_pointer_t *value) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, Boolean, (NSDictionary *)hc, __getValue:(id *)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, Boolean, (NSSet *)hc, __getValue:(id *)value forObj:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), Boolean, (NSDictionary *)hc, __getValue:(id *)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), Boolean, (NSSet *)hc, __getValue:(id *)value forObj:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     if (0 < bkt.count) {
         if (value) {
@@ -426,19 +439,19 @@ Boolean CFBagGetValueIfPresent(CFHashRef hc, const_any_pointer_t key, const_any_
 
 #if CFDictionary
 CFIndex CFDictionaryGetCountOfValue(CFHashRef hc, const_any_pointer_t value) {
-    CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, CFIndex, (NSDictionary *)hc, countForObject:(id)value);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), CFIndex, (NSDictionary *)hc, countForObject:(id)value);
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return CFBasicHashGetCountOfValue((CFBasicHashRef)hc, (uintptr_t)value);
 }
 
 Boolean CFDictionaryContainsValue(CFHashRef hc, const_any_pointer_t value) {
-    CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, char, (NSDictionary *)hc, containsObject:(id)value);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), char, (NSDictionary *)hc, containsObject:(id)value);
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return (0 < CFBasicHashGetCountOfValue((CFBasicHashRef)hc, (uintptr_t)value));
 }
 
 CF_EXPORT Boolean CFDictionaryGetKeyIfPresent(CFHashRef hc, const_any_pointer_t key, const_any_pointer_t *actualkey) {
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFBasicHashBucket bkt = CFBasicHashFindBucket((CFBasicHashRef)hc, (uintptr_t)key);
     if (0 < bkt.count) {
         if (actualkey) {
@@ -461,9 +474,13 @@ void CFBagGetKeysAndValues(CFHashRef hc, const_any_pointer_t *keybuf, const_any_
 void CFBagGetValues(CFHashRef hc, const_any_pointer_t *keybuf) {
     const_any_pointer_t *valuebuf = 0;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSDictionary *)hc, getObjects:(id *)valuebuf andKeys:(id *)keybuf);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSSet *)hc, getObjects:(id *)keybuf);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSDictionary *)hc, getObjects:(id *)valuebuf andKeys:(id *)keybuf);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSSet *)hc, getObjects:(id *)keybuf);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     if (kCFUseCollectableAllocator) {
         CFOptionFlags flags = CFBasicHashGetFlags((CFBasicHashRef)hc);
         __block const_any_pointer_t *keys = keybuf;
@@ -484,9 +501,13 @@ void CFBagGetValues(CFHashRef hc, const_any_pointer_t *keybuf) {
 
 void CFBagApplyFunction(CFHashRef hc, CFBagApplierFunction applier, any_pointer_t context) {
     FAULT_CALLBACK((void **)&(applier));
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSDictionary *)hc, __apply:(void (*)(const void *, const void *, void *))applier context:(void *)context);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSSet *)hc, __applyValues:(void (*)(const void *, void *))applier context:(void *)context);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSDictionary *)hc, __apply:(void (*)(const void *, const void *, void *))applier context:(void *)context);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSSet *)hc, __applyValues:(void (*)(const void *, void *))applier context:(void *)context);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFBasicHashApply((CFBasicHashRef)hc, ^(CFBasicHashBucket bkt) {
 #if CFDictionary
             INVOKE_CALLBACK3(applier, (const_any_pointer_t)bkt.weak_key, (const_any_pointer_t)bkt.weak_value, context);
@@ -505,22 +526,22 @@ void CFBagApplyFunction(CFHashRef hc, CFBagApplierFunction applier, any_pointer_
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT unsigned long _CFBagFastEnumeration(CFHashRef hc, struct __objcFastEnumerationStateEquivalent *state, void *stackbuffer, unsigned long count) {
-    if (CF_IS_OBJC(__kCFBagTypeID, hc)) return 0;
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    if (CF_IS_OBJC(CFBagGetTypeID(), hc)) return 0;
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return __CFBasicHashFastEnumeration((CFBasicHashRef)hc, (struct __objcFastEnumerationStateEquivalent2 *)state, stackbuffer, count);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT Boolean _CFBagIsMutable(CFHashRef hc) {
-    if (CF_IS_OBJC(__kCFBagTypeID, hc)) return false;
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    if (CF_IS_OBJC(CFBagGetTypeID(), hc)) return false;
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     return CFBasicHashIsMutable((CFBasicHashRef)hc);
 }
 
 // This function is for Foundation's benefit; no one else should use it.
 CF_EXPORT void _CFBagSetCapacity(CFMutableHashRef hc, CFIndex cap) {
-    if (CF_IS_OBJC(__kCFBagTypeID, hc)) return;
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+    if (CF_IS_OBJC(CFBagGetTypeID(), hc)) return;
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     CFAssert3(CFBagGetCount(hc) <= cap, __kCFLogAssertion, "%s(): desired capacity (%ld) is less than count (%ld)", __PRETTY_FUNCTION__, cap, CFBagGetCount(hc));
     CFBasicHashSetCapacity((CFBasicHashRef)hc, cap);
@@ -559,9 +580,13 @@ void CFBagAddValue(CFMutableHashRef hc, const_any_pointer_t key, const_any_point
 void CFBagAddValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableDictionary *)hc, __addObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableSet *)hc, addObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableDictionary *)hc, __addObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableSet *)hc, addObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -578,9 +603,13 @@ void CFBagReplaceValue(CFMutableHashRef hc, const_any_pointer_t key, const_any_p
 void CFBagReplaceValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableDictionary *)hc, replaceObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableSet *)hc, replaceObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableDictionary *)hc, replaceObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableSet *)hc, replaceObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -597,9 +626,13 @@ void CFBagSetValue(CFMutableHashRef hc, const_any_pointer_t key, const_any_point
 void CFBagSetValue(CFMutableHashRef hc, const_any_pointer_t key) {
     const_any_pointer_t value = key;
 #endif
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableDictionary *)hc, __setObject:(id)value forKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableSet *)hc, setObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableDictionary *)hc, __setObject:(id)value forKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableSet *)hc, setObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -611,9 +644,13 @@ void CFBagSetValue(CFMutableHashRef hc, const_any_pointer_t key) {
 }
 
 void CFBagRemoveValue(CFMutableHashRef hc, const_any_pointer_t key) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableDictionary *)hc, removeObjectForKey:(id)key);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableSet *)hc, removeObject:(id)key);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableDictionary *)hc, removeObjectForKey:(id)key);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableSet *)hc, removeObject:(id)key);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);
@@ -624,9 +661,13 @@ void CFBagRemoveValue(CFMutableHashRef hc, const_any_pointer_t key) {
 }
 
 void CFBagRemoveAllValues(CFMutableHashRef hc) {
-    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableDictionary *)hc, removeAllObjects);
-    if (CFSet) CF_OBJC_FUNCDISPATCHV(__kCFBagTypeID, void, (NSMutableSet *)hc, removeAllObjects);
-    __CFGenericValidateType(hc, __kCFBagTypeID);
+#if CFDictionary
+    if (CFDictionary) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableDictionary *)hc, removeAllObjects);
+#endif
+#if CFSet
+    if (CFSet) CF_OBJC_FUNCDISPATCHV(CFBagGetTypeID(), void, (NSMutableSet *)hc, removeAllObjects);
+#endif
+    __CFGenericValidateType(hc, CFBagGetTypeID());
     CFAssert2(CFBasicHashIsMutable((CFBasicHashRef)hc), __kCFLogAssertion, "%s(): immutable collection %p passed to mutating operation", __PRETTY_FUNCTION__, hc);
     if (!CFBasicHashIsMutable((CFBasicHashRef)hc)) {
         CFLog(3, CFSTR("%s(): immutable collection %p given to mutating function"), __PRETTY_FUNCTION__, hc);

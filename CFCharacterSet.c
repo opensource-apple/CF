@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFCharacterSet.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -467,17 +467,6 @@ CF_INLINE uint32_t __CFCSetGetCompactBitmapSize(const uint8_t *compactBitmap) {
     return size;
 }
 
-/* Take a private "set" structure and make a bitmap from it.  Return the bitmap.  THE CALLER MUST RELEASE THE RETURNED MEMORY as necessary.
-*/
-
-CF_INLINE void __CFCSetBitmapProcessManyCharacters(unsigned char *map, unsigned n, unsigned m, Boolean isInverted) {
-    if (isInverted) {
-        __CFCSetBitmapRemoveCharactersInRange(map, n, m);
-    } else {
-        __CFCSetBitmapAddCharactersInRange(map, n, m);
-    }
-}
-
 CF_INLINE void __CFExpandCompactBitmap(const uint8_t *src, uint8_t *dst) {
     const uint8_t *srcBody = src + __kCFCompactBitmapNumPages;
     int i;
@@ -894,7 +883,7 @@ static CFCharacterSetRef *__CFBuiltinSets = NULL;
 
 /* Global lock for character set
 */
-static CFSpinLock_t __CFCharacterSetLock = CFSpinLockInit;
+static OSSpinLock __CFCharacterSetLock = OS_SPINLOCK_INIT;
 
 /* CFBase API functions
 */
@@ -1298,11 +1287,14 @@ static const CFRuntimeClass __CFCharacterSetClass = {
 static bool __CFCheckForExapendedSet = false;
 
 CF_PRIVATE void __CFCharacterSetInitialize(void) {
-    const char *checkForExpandedSet = __CFgetenv("__CF_DEBUG_EXPANDED_SET");
-
-    __kCFCharacterSetTypeID = _CFRuntimeRegisterClass(&__CFCharacterSetClass);
-
-    if (checkForExpandedSet && (*checkForExpandedSet == 'Y')) __CFCheckForExapendedSet = true;
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFCharacterSetTypeID = _CFRuntimeRegisterClass(&__CFCharacterSetClass); // initOnce covered
+        const char *checkForExpandedSet = __CFgetenv("__CF_DEBUG_EXPANDED_SET");
+        if (checkForExpandedSet && (*checkForExpandedSet == 'Y')) __CFCheckForExapendedSet = true;
+        __CFBuiltinSets = (CFCharacterSetRef *)CFAllocatorAllocate((CFAllocatorRef)CFRetain(__CFGetDefaultAllocator()), sizeof(CFCharacterSetRef) * __kCFLastBuiltinSetID, 0);
+        memset(__CFBuiltinSets, 0, sizeof(CFCharacterSetRef) * __kCFLastBuiltinSetID);
+    });
 }
 
 /* Public functions
@@ -1320,23 +1312,18 @@ CFCharacterSetRef CFCharacterSetGetPredefined(CFCharacterSetPredefinedSet theSet
 
     __CFCSetValidateBuiltinType(theSetIdentifier, __PRETTY_FUNCTION__);
 
-    __CFSpinLock(&__CFCharacterSetLock);
+    OSSpinLockLock(&__CFCharacterSetLock);
     cset = ((NULL != __CFBuiltinSets) ? __CFBuiltinSets[theSetIdentifier - 1] : NULL);
-    __CFSpinUnlock(&__CFCharacterSetLock);
+    OSSpinLockUnlock(&__CFCharacterSetLock);
 
     if (NULL != cset) return cset;
 
     if (!(cset = __CFCSetGenericCreate(kCFAllocatorSystemDefault, __kCFCharSetClassBuiltin))) return NULL;
     __CFCSetPutBuiltinType((CFMutableCharacterSetRef)cset, theSetIdentifier);
 
-    __CFSpinLock(&__CFCharacterSetLock);
-    if (!__CFBuiltinSets) {
-	__CFBuiltinSets = (CFCharacterSetRef *)CFAllocatorAllocate((CFAllocatorRef)CFRetain(__CFGetDefaultAllocator()), sizeof(CFCharacterSetRef) * __kCFLastBuiltinSetID, 0);
-	memset(__CFBuiltinSets, 0, sizeof(CFCharacterSetRef) * __kCFLastBuiltinSetID);
-    }
-
+    OSSpinLockLock(&__CFCharacterSetLock);
     __CFBuiltinSets[theSetIdentifier - 1] = cset;
-    __CFSpinUnlock(&__CFCharacterSetLock);
+    OSSpinLockUnlock(&__CFCharacterSetLock);
 
     return cset;
 }
@@ -2622,18 +2609,34 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
             if (__CFCSetHasNonBMPPlane(theOtherSet)) {
                 CFMutableCharacterSetRef annexPlane;
                 CFMutableCharacterSetRef otherSetPlane;
+                CFMutableCharacterSetRef emptySet = CFCharacterSetCreateMutable(NULL);
                 int idx;
                 for (idx = 1;idx <= MAX_ANNEX_PLANE;idx++) {
                     if ((otherSetPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theOtherSet, idx))) {
+                        if (__CFCSetAnnexIsInverted(theOtherSet)) CFCharacterSetInvert(otherSetPlane);
                         annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
                         if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         CFCharacterSetIntersect(annexPlane, otherSetPlane);
                         if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
+                        if (__CFCSetAnnexIsInverted(theOtherSet)) CFCharacterSetInvert(otherSetPlane);
                         if (__CFCSetIsEmpty(annexPlane) && !__CFCSetIsInverted(annexPlane)) __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
-                    } else if (__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx)) {
-                        __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
+                    } else if ((annexPlane = (CFMutableCharacterSetRef) __CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx))) {
+                        if (__CFCSetAnnexIsInverted(theSet)) { // if the annexPlane is inverted, we need to set the plane to empty
+                            CFCharacterSetInvert(annexPlane);
+                            CFCharacterSetIntersect(annexPlane, emptySet);
+                            CFCharacterSetInvert(annexPlane);
+                        } else {  // the annexPlane is not inverted, we can clear the plane
+                            __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
+                        }
+                    } else if ((__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx) == NULL) && __CFCSetAnnexIsInverted(theSet)) {
+                        // the set has no such annex plane and the annex plane is inverted, it means the set contains everything in the annex plane
+                        annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
+                        CFCharacterSetIntersect(annexPlane, emptySet);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                     }
                 }
+                CFRelease(emptySet);
                 if (!__CFCSetHasNonBMPPlane(theSet)) __CFCSetDeallocateAnnexPlane(theSet);
             } else if (__CFCSetIsBuiltin(theOtherSet) && !__CFCSetAnnexIsInverted(theOtherSet)) {
                 CFMutableCharacterSetRef annexPlane;
@@ -2670,6 +2673,7 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                 CFMutableCharacterSetRef tempOtherSet = CFCharacterSetCreateMutable(CFGetAllocator(theSet));
                 CFMutableCharacterSetRef annexPlane;
                 CFMutableCharacterSetRef otherSetPlane;
+                CFMutableCharacterSetRef emptySet = CFCharacterSetCreateMutable(NULL);
                 int idx;
 
                 __CFCSetAddNonBMPPlanesInRange(tempOtherSet, CFRangeMake(__CFCSetRangeFirstChar(theOtherSet), __CFCSetRangeLength(theOtherSet)));
@@ -2677,16 +2681,31 @@ void CFCharacterSetIntersect(CFMutableCharacterSetRef theSet, CFCharacterSetRef 
                 for (idx = 1;idx <= MAX_ANNEX_PLANE;idx++) {
                     if ((otherSetPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSetNoAlloc(tempOtherSet, idx))) {
                         annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
+                        if (__CFCSetAnnexIsInverted(tempOtherSet)) CFCharacterSetInvert(otherSetPlane);
                         if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                         CFCharacterSetIntersect(annexPlane, otherSetPlane);
                         if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
+                        if (__CFCSetAnnexIsInverted(tempOtherSet)) CFCharacterSetInvert(otherSetPlane);
                         if (__CFCSetIsEmpty(annexPlane) && !__CFCSetIsInverted(annexPlane)) __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
-                    } else if (__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx)) {
-                        __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
+                    } else if ((annexPlane = (CFMutableCharacterSetRef) __CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx))) {
+                        if (__CFCSetAnnexIsInverted(theSet)) {
+                            CFCharacterSetInvert(annexPlane);
+                            CFCharacterSetIntersect(annexPlane, emptySet);
+                            CFCharacterSetInvert(annexPlane);
+                        } else {
+                            __CFCSetPutCharacterSetToAnnexPlane(theSet, NULL, idx);
+                        }
+                    } else if ((__CFCSetGetAnnexPlaneCharacterSetNoAlloc(theSet, idx) == NULL) && __CFCSetAnnexIsInverted(theSet)) {
+                        // the set has no such annex plane and the annex plane is inverted, it means the set contains everything in the annex plane
+                        annexPlane = (CFMutableCharacterSetRef)__CFCSetGetAnnexPlaneCharacterSet(theSet, idx);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
+                        CFCharacterSetIntersect(annexPlane, emptySet);
+                        if (__CFCSetAnnexIsInverted(theSet)) CFCharacterSetInvert(annexPlane);
                     }
                 }
                 if (!__CFCSetHasNonBMPPlane(theSet)) __CFCSetDeallocateAnnexPlane(theSet);
                 CFRelease(tempOtherSet);
+                CFRelease(emptySet);
             } else if ((__CFCSetHasNonBMPPlane(theSet) || __CFCSetAnnexIsInverted(theSet)) && !__CFCSetAnnexIsInverted(theOtherSet)) {
                 __CFCSetDeallocateAnnexPlane(theSet);
             }

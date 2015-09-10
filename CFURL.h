@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFURL.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFURL__)
@@ -42,7 +42,7 @@ typedef CF_ENUM(CFIndex, CFURLPathStyle) {
     kCFURLWindowsPathStyle
 };
     
-typedef const struct __CFURL * CFURLRef;
+typedef const struct CF_BRIDGED_TYPE(NSURL) __CFURL * CFURLRef;
 
 /* CFURLs are composed of two fundamental pieces - their string, and a */
 /* (possibly NULL) base URL.  A relative URL is one in which the string */
@@ -832,6 +832,22 @@ const CFStringRef kCFURLIsMountTriggerKey CF_AVAILABLE(10_7, 4_0);
     /* true if this URL is a file system trigger directory. Traversing or opening a file system trigger will cause an attempt to mount a file system on the trigger directory. (Read-only, value type CFBoolean) */
 
 CF_EXPORT
+const CFStringRef kCFURLGenerationIdentifierKey CF_AVAILABLE(10_10, 8_0);
+    /* An opaque generation identifier which can be compared using CFEqual() to determine if the data in a document has been modified. For URLs which refer to the same file inode, the generation identifier will change when the data in the file's data fork is changed (changes to extended attributes or other file system metadata do not change the generation identifier). For URLs which refer to the same directory inode, the generation identifier will change when direct children of that directory are added, removed or renamed (changes to the data of the direct children of that directory will not change the generation identifier). The generation identifier is persistent across system restarts. The generation identifier is tied to a specific document on a specific volume and is not transferred when the document is copied to another volume. This property is not supported by all volumes. (Read-only, value type CFType) */
+
+CF_EXPORT
+const CFStringRef kCFURLDocumentIdentifierKey CF_AVAILABLE(10_10, 8_0);
+    /* The document identifier -- a value assigned by the kernel to a document (which can be either a file or directory) and is used to identify the document regardless of where it gets moved on a volume. The document identifier survives "safe save” operations; i.e it is sticky to the path it was assigned to (-replaceItemAtURL:withItemAtURL:backupItemName:options:resultingItemURL:error: is the preferred safe-save API). The document identifier is persistent across system restarts. The document identifier is not transferred when the file is copied. Document identifiers are only unique within a single volume. This property is not supported by all volumes. (Read-only, value type CFNumber) */
+
+CF_EXPORT
+const CFStringRef kCFURLAddedToDirectoryDateKey CF_AVAILABLE(10_10, 8_0);
+    /* The date the resource was created, or renamed into or within its parent directory. Note that inconsistent behavior may be observed when this attribute is requested on hard-linked items. This property is not supported by all volumes. (Read-only, value type CFDate) */
+
+CF_EXPORT
+const CFStringRef kCFURLQuarantinePropertiesKey CF_AVAILABLE(10_10, NA);
+    /* The quarantine properties as defined in LSQuarantine.h. To remove quarantine information from a file, pass kCFNull as the value when setting this property. (Read-write, value type CFDictionary) */
+
+CF_EXPORT
 const CFStringRef kCFURLFileResourceTypeKey CF_AVAILABLE(10_7, 5_0);
     /* Returns the file system object type. (Read-only, value type CFString) */
 
@@ -1044,11 +1060,11 @@ const CFStringRef kCFURLUbiquitousItemDownloadingStatusKey CF_AVAILABLE(10_9, 7_
 
 CF_EXPORT
 const CFStringRef kCFURLUbiquitousItemDownloadingErrorKey CF_AVAILABLE(10_9, 7_0);
-    /* returns the error when downloading the item from iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. */
+    /* returns the error when downloading the item from iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. (Read-only, value type CFError) */
 
 CF_EXPORT
 const CFStringRef kCFURLUbiquitousItemUploadingErrorKey CF_AVAILABLE(10_9, 7_0);
-    /* returns the error when uploading the item to iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. */
+    /* returns the error when uploading the item to iCloud failed. See the NSUbiquitousFile section in FoundationErrors.h. (Read-only, value type CFError) */
 
 /* The values returned for kCFURLUbiquitousItemDownloadingStatusKey
  */
@@ -1066,145 +1082,74 @@ const CFStringRef kCFURLUbiquitousItemDownloadingStatusCurrent CF_AVAILABLE(10_9
 
 
 typedef CF_OPTIONS(CFOptionFlags, CFURLBookmarkCreationOptions) {
-    kCFURLBookmarkCreationPreferFileIDResolutionMask CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0, "kCFURLBookmarkCreationPreferFileIDResolutionMask does nothing and has no effect on bookmark resolution" ) = ( 1UL << 8 ),  // This option does nothing and has no effect on bookmark resolution
-    kCFURLBookmarkCreationMinimalBookmarkMask = ( 1UL << 9 ), // Creates a bookmark with "less" information, which may be smaller but still be able to resolve in certain ways
-    kCFURLBookmarkCreationSuitableForBookmarkFile = ( 1UL << 10 ), // includes in the created bookmark those properties which are needed for a bookmark/alias file
-    kCFURLBookmarkCreationWithSecurityScope CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
-    kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 12 ), // Mac OS X 10.7.3 and later, if used with kCFURLBookmarkCreationWithSecurityScope, at resolution time only read access to the resource will be granted
-};
+    kCFURLBookmarkCreationMinimalBookmarkMask = ( 1UL << 9 ), // creates bookmark data with "less" information, which may be smaller but still be able to resolve in certain ways
+    kCFURLBookmarkCreationSuitableForBookmarkFile = ( 1UL << 10 ), // include the properties required by CFURLWriteBookmarkDataToFile() in the bookmark data created
+    kCFURLBookmarkCreationWithSecurityScope CF_ENUM_AVAILABLE(10_7, NA) = ( 1UL << 11 ), // Mac OS X 10.7.3 and later, include information in the bookmark data which allows the same sandboxed process to access the resource after being relaunched
+    kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess CF_ENUM_AVAILABLE(10_7, NA) = ( 1UL << 12 ), // Mac OS X 10.7.3 and later, if used with kCFURLBookmarkCreationWithSecurityScope, at resolution time only read access to the resource will be granted
+    
+    // deprecated
+    kCFURLBookmarkCreationPreferFileIDResolutionMask CF_ENUM_DEPRECATED(10_6, 10_9, 4_0, 7_0, "kCFURLBookmarkCreationPreferFileIDResolutionMask does nothing and has no effect on bookmark resolution" ) = ( 1UL << 8 ),
+} CF_ENUM_AVAILABLE(10_6, 4_0);
 
-enum  {
-    kCFBookmarkResolutionWithoutUIMask = ( 1UL << 8 ),		// don't perform any UI during bookmark resolution
-    kCFBookmarkResolutionWithoutMountingMask = ( 1UL << 9 ),	// don't mount a volume during bookmark resolution
-};
-
-enum {
-    kCFURLBookmarkResolutionWithSecurityScope CF_ENUM_AVAILABLE(10_7,NA) = ( 1UL << 10 ), // Mac OS X 10.7.3 and later, extract the security scope included at creation time to provide the ability to access the resource.
-};
-
-typedef CFOptionFlags CFURLBookmarkResolutionOptions;
+typedef CF_OPTIONS(CFOptionFlags, CFURLBookmarkResolutionOptions) {
+    kCFURLBookmarkResolutionWithoutUIMask = ( 1UL << 8 ), // don't perform any user interaction during bookmark resolution
+    kCFURLBookmarkResolutionWithoutMountingMask = ( 1UL << 9 ), // don't mount a volume during bookmark resolution
+    kCFURLBookmarkResolutionWithSecurityScope CF_ENUM_AVAILABLE(10_7, NA) = ( 1UL << 10 ), // Mac OS X 10.7.3 and later, use the secure information included at creation time to provide the ability to access the resource in a sandboxed process.
+    
+    kCFBookmarkResolutionWithoutUIMask = kCFURLBookmarkResolutionWithoutUIMask,
+    kCFBookmarkResolutionWithoutMountingMask = kCFURLBookmarkResolutionWithoutMountingMask,
+} CF_ENUM_AVAILABLE(10_6, 4_0);
 
 typedef CFOptionFlags CFURLBookmarkFileCreationOptions;
 
 CF_IMPLICIT_BRIDGING_DISABLED
 
-/*	@function CFURLCreateBookmarkData
-	@discussion	Create a CFDataRef containing an externalizable representation from a CFURLRef, modified with the given options, including ( at the minimum ) any
-		properties in the propertiesToInclude array which are retrievable from the given url.
-	@param	allocator		the CFAllocator to use to create this object
-	@param	url	the CFURLRef to create a bookmark data from.
-	@param	options	a set of options which control creation of the bookmark data
-	@param resourcePropertiesToInclude	If non-NULL, an CFArrayRef of additional properties copied from the url to include in the created bookmark data.
-	@param relativeToURL If non-NULL, the created bookmark will be relative to the given url.  If kCFURLBookmarkCreationWithSecurityScope is given as
-                an option and relativeToURL is non-NULL, then a collection-scoped bookmark is created which enables future access to url provided the caller has
-                access to relativeURL.
-	@param error	If non-NULL, on exit will be filled in with a CFErrorRef representing any error which occured during creation of the bookmark data
-	@result	A CFDataRef containing an data, which can be later be passed to CFURLCreateByResolvingBookmarkData() or to CFURLCopyPropertiesForKeysFromBookmarkData() / CFURLCopyPropertyForKeyFromBookmarkData() */
+/* Returns bookmark data for the URL, created with specified options and resource properties. If this function returns NULL, the optional error is populated.
+ */
 CF_EXPORT
 CFDataRef CFURLCreateBookmarkData ( CFAllocatorRef allocator, CFURLRef url, CFURLBookmarkCreationOptions options, CFArrayRef resourcePropertiesToInclude, CFURLRef relativeToURL, CFErrorRef* error ) CF_AVAILABLE(10_6, 4_0);
 
-/*	@function CFURLCreateByResolvingBookmarkData
-	@discussion Given a CFDataRef created with CFURLCreateBookmarkRepresentation(), return a CFURLRef of the item it was a bookmark to, and
-		attempt to pre-cache those properties in propertiesToInclude in the resulting url.  If in the process of resolving the bookmark into the CFURLRef
-	 	it points to this determines that  some properties in the bookmark are out of date or not correct for the item it resolves to, set *isStale to YES,
-		which the client may want to use to decide to make a new bookmark from the returned item and replace the saved bookmark it has.  If the bookmarked
-		item cannot be found, return NULL.  A bookmark created with security scope may fail to resolve if the caller does not have the same code signing identity
-               as the caller which created the bookmark.
-                After resolving a security scoped bookmark, the caller must call CFURLStartAccessingSecurityScopedResource() in order to gain access to the resource.
-                If an error ( other than "original item can not be found" ) occurs during the process, return NULL and fill in error )
-	@param	allocator	 the CFAllocator to use to create this object
-	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
-	@param	options options which affect the resolution
-	@param relativeToURL If non-NULL, and if the bookmark was created relative to another url, then resolve it relative to this url.  If
-                kCFURLBookmarkCreationWithSecurityScope was provided at creation, and kCFURLBookmarkResolutionWithSecurityScope is set, then relativeURL
-                should point to the same item which was passed as relavitiveURL at creation time.
-	@param resourcePropertiesToInclude If non-NULL, a CFArray containing those properties which the caller would like to already be cached on the given url
-	@param isStale If non-NULL, on exit will be set to true if during resolution any of the properties in the bookmark no longer seemed to match the
-		corresponding properties on the returned file.  Clients, upon seeing a stale representation, may want to replace whatever stored bookmark data they
-		have saved and create a new one.
-	@param error	If non-NULL, on exit will be filled in with a CFErrorRef representing any error which occured during resolution of the bookmark data
-	@result A CFURLRef of a file which is the closest match to the file the bookmark data */
+/* Return a URL that refers to a location specified by resolving bookmark data. If this function returns NULL, the optional error is populated.
+ */
 CF_EXPORT
 CFURLRef CFURLCreateByResolvingBookmarkData ( CFAllocatorRef allocator, CFDataRef bookmark, CFURLBookmarkResolutionOptions options, CFURLRef relativeToURL, CFArrayRef resourcePropertiesToInclude, Boolean* isStale, CFErrorRef* error ) CF_AVAILABLE(10_6, 4_0);
 
-/*	@function	CFURLCreatePropertiesForKeysFromBookmarkData
-	@discussion	Given a bookmark, return a dictionary of properties .
-			This returns only the properties stored within the bookmark and will not attempt to resolve the bookmark or do i/o.
-	@param	allocator	 the CFAllocator to use to create this object
-	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
-	@param	propertiesToReturn a CFArrayRef of the properties of the bookmark data which the client would like returned.
-	@result	a CFDictionaryRef containing the values for the properties passed in obtained from the bookmark data ( not by attempting to resolve it or do i/o in any way ) */
+/* Returns the resource propertyies identified by a specified array of keys contained in specified bookmark data. If the result dictionary does not contain a resource value for one or more of the requested resource keys, it means those resource properties are not available in the bookmark data.
+ */
 CF_EXPORT
 CFDictionaryRef CFURLCreateResourcePropertiesForKeysFromBookmarkData ( CFAllocatorRef allocator, CFArrayRef resourcePropertiesToReturn, CFDataRef bookmark ) CF_AVAILABLE(10_6, 4_0);
 
-/*	@function	CFURLCreatePropertyForKeyFromBookmarkData
-	@discussion	Given a bookmark, return the value for a given property from the bookmark data
-				This returns only the properties stored within the bookmark and will not attempt to resolve the bookmark or do i/o.
-	@param	allocator	 the CFAllocator to use to create this object
-	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
-	@param	propertyKey the property key to return.
-	@result	a CFTypeRef value for the property passed in obtained from the bookmark data ( not by attempting to resolve it or do i/o in any way ) */
+/*  Returns the resource property identified by a given resource key contained in specified bookmark data. If this function returns NULL, it means the resource property is not available in the bookmark data.
+ */
 CF_EXPORT
 CFTypeRef  CFURLCreateResourcePropertyForKeyFromBookmarkData( CFAllocatorRef allocator, CFStringRef resourcePropertyKey, CFDataRef bookmark ) CF_AVAILABLE(10_6, 4_0);
 
-/*!	@function 	CFURLCreateBookmarkDataFromFile
-	@description	Given a fileURL of a file which is a Finder "alias" file, return a CFDataRef with the bookmark data from the file.  If urlRef points to an alias file
-			created before SnowLeopard which contains Alias Manager information and no bookmark data, then a CFDataRef will be synthesized which contains
-			a approximation of the alias information in a format which can be used to resolve the bookmark.  If an error prevents reading the data or
-			if it is corrupt, NULL will be returned and error will be filled in if errorRef is non-NULL.
-	@param	allocator the CFAllocator to use to create this object
-	@param	fileURL a CFURLRef to to the alias file to create the bookmark data from
-	@param	errorRef    if non-NULL, on exit will be filled in with a CFErrorRef representing any error which occurred during the creation of the bookmark data from the file
-	@result	A CFDataRef containing bookmark data, or NULL if there was an error creating bookmark data from the file, such as if the file is not an alias file.
+/* Returns bookmark data derived from an alias file referred to by fileURL. If fileURL refers to an alias file created prior to OS X v10.6 that contains Alias Manager information but no bookmark data, this method synthesizes bookmark data for the file. If this method returns NULL, the optional error is populated.
  */
 CF_EXPORT
 CFDataRef CFURLCreateBookmarkDataFromFile(CFAllocatorRef allocator, CFURLRef fileURL, CFErrorRef *errorRef ) CF_AVAILABLE(10_6, 5_0);
 
-/*!	@function	CFURLWriteBookmarkDataToFile
-	@description	Given a created bookmarkData object, create a new Finder "alias" file at fileURL which contains the bookmark data.  If fileURL is a url to a directory, an alias file
-			will be created with the same name as the bookmarked item and a ".alias" extension.  If fileURL is a url for a file and it exists it will be overwritten.  If a
-			.alias extension is not present it will be added.  In addition to the bookmark data, sufficient pre-SnowLeopard alias data will added to the file to allow
-			systems running something before SnowLeopard to resolve this file using Alias Manager routines and get back the same file as the bookmark routines.
-			The bookmark data must have been created with the kCFURLBookmarkCreationSuitableForBookmarkFile option and an error will be returned if not.
-	@param	allocator	 the CFAllocator to use to create this object
-	@param	 bookmark a CFDataRef containing a bookmark data, created with CFURLCreateBookmarkData
-	@param	options	options flags 
-	@param	errorRef    if non-NULL, on exit will be filled in with a CFErrorRef representing any error which occurred during the creation of the alias file
+/* Creates an alias file on disk at a specified location with specified bookmark data. The bookmark data must have been created with the kCFURLBookmarkCreationSuitableForBookmarkFile option. fileURL must either refer to an existing file (which will be overwritten), or to location in an existing directory. If this method returns FALSE, the optional error is populated.
  */
 CF_EXPORT
 Boolean CFURLWriteBookmarkDataToFile( CFDataRef bookmarkRef, CFURLRef fileURL, CFURLBookmarkFileCreationOptions options, CFErrorRef *errorRef ) CF_AVAILABLE(10_6, 5_0);
 
-/*!	@function	CFURLCreateBookmarkDataFromAliasRecord
-	@discussion	Create a CFDataRef containing bookmarkdata by converting the alias data in aliasRecordDataRef, which should be the contents of an AliasRecord copied into a CFDataRef object.
-		The created bookmarkdata can be passed into CFURLCreateByResolvingBookmarkData() to resolve the item into a CFURLRef, or a small set of information can be returned from
-		CFURLCreateResourcePropertiesForKeysFromBookmarkData() / CFURLCreateResourcePropertyForKeyFromBookmarkData().
-		@param	allocator		the CFAllocator to use to create this object
-		@param	aliasRecordDataRef	the contents of an AliasRecord to create bookmark data for
-		@result	A CFDataRef containing an data, which can be later be passed to CFURLCreateByResolvingBookmarkData() or to CFURLCopyPropertiesForKeysFromBookmarkData() / CFURLCopyPropertyForKeyFromBookmarkData()
+/* Returns bookmark data derived from an alias record.
  */
 CF_EXPORT
 CFDataRef CFURLCreateBookmarkDataFromAliasRecord ( CFAllocatorRef allocatorRef, CFDataRef aliasRecordDataRef ) CF_AVAILABLE_MAC(10_6);
 
 CF_IMPLICIT_BRIDGING_ENABLED
 
-/*!     @function	CFURLStartAccessingSecurityScopedResource
-        @discussion	Given a CFURLRef created by resolving a bookmark data created with security scope, make the resource referenced by the
-                        url accessible to the process.  When access to this resource is no longer needed the client should call
-                        CFURLStopAccessingSecurityScopedResource().  Each call to CFURLStartAccessingSecurityScopedResource() must be balanced
-                        with a call to CFURLStopAccessingSecurityScopedResource().
-        @param	url     the CFURLRef for the resource returned by CFURLCreateByResolvingBookmarkData() using kCFURLBookmarkResolutionWithSecurityScope.
-        @result        returns TRUE if access was granted and FALSE if the url does not reference a security scoped resource, or if some error occurred
-                        which didn't allow access to be granted
+/* Given a CFURLRef created by resolving a bookmark data created with security scope, make the resource referenced by the url accessible to the process. When access to this resource is no longer needed the client must call CFURLStopAccessingSecurityScopedResource(). Each call to CFURLStartAccessingSecurityScopedResource() must be balanced with a call to CFURLStopAccessingSecurityScopedResource() (Note: this is not reference counted).
  */
 CF_EXPORT
-Boolean CFURLStartAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA); // Available in MacOS X 10.7.3 and later
+Boolean CFURLStartAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, 8_0); // On OSX, available in MacOS X 10.7.3 and later
 
-/*!     @function	CFURLStopAccessingSecurityScopedResource
-        @discussion    Revokes the access granted to the url by a prior successful call to CFURLStartAccessingSecurityScopedResource().
-        @param	url     the CFURLRef for the resource to stop accessing.
+/* Revokes the access granted to the url by a prior successful call to CFURLStartAccessingSecurityScopedResource().
  */
 CF_EXPORT
-void CFURLStopAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, NA);
+void CFURLStopAccessingSecurityScopedResource(CFURLRef url) CF_AVAILABLE(10_7, 8_0); // On OSX, available in MacOS X 10.7.3 and later
 
 #endif /* TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_IPHONE */
 

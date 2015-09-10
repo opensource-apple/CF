@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFCalendar.c
-	Copyright (c) 2004-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2004-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -83,12 +83,9 @@ static const CFRuntimeClass __CFCalendarClass = {
     __CFCalendarCopyDescription
 };
 
-CF_PRIVATE void __CFCalendarInitialize(void) {
-    __kCFCalendarTypeID = _CFRuntimeRegisterClass(&__CFCalendarClass);
-}
-
 CFTypeID CFCalendarGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFCalendarTypeID) __CFCalendarInitialize();
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFCalendarTypeID = _CFRuntimeRegisterClass(&__CFCalendarClass); });
     return __kCFCalendarTypeID;
 }
 
@@ -501,106 +498,6 @@ static Boolean __validUnits(CFCalendarUnit smaller, CFCalendarUnit bigger) {
     }
     return false;
 };
-
-static CFRange __CFCalendarGetRangeOfUnit1(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {
-    CFRange range = {kCFNotFound, kCFNotFound};
-    if (!__validUnits(smallerUnit, biggerUnit)) return range;
-    CF_OBJC_FUNCDISPATCHV(CFCalendarGetTypeID(), CFRange, calendar, _rangeOfUnit:smallerUnit inUnit:biggerUnit forAT:at);
-    __CFGenericValidateType(calendar, CFCalendarGetTypeID());
-    if (!calendar->_cal) __CFCalendarSetupCal(calendar);
-    if (calendar->_cal) {
-	int32_t dow = -1;
-	ucal_clear(calendar->_cal);
-	UCalendarDateFields smallField = __CFCalendarGetICUFieldCode(smallerUnit);
-	UCalendarDateFields bigField = __CFCalendarGetICUFieldCode(biggerUnit);
-	if (kCFCalendarUnitWeekdayOrdinal == smallerUnit) {
-	    UErrorCode status = U_ZERO_ERROR;
-	    UDate udate = floor((at + kCFAbsoluteTimeIntervalSince1970) * 1000.0);
-	    ucal_setMillis(calendar->_cal, udate, &status);
-	    dow = ucal_get(calendar->_cal, UCAL_DAY_OF_WEEK, &status);
-	}
-	// Set calendar to first instant of big unit
-	__CFCalendarSetToFirstInstant(calendar, biggerUnit, at);
-	UErrorCode status = U_ZERO_ERROR;
-	UDate start = ucal_getMillis(calendar->_cal, &status);
-	if (kCFCalendarUnitWeek == biggerUnit) {
-	    range.location = ucal_get(calendar->_cal, smallField, &status);
-	    if (kCFCalendarUnitMonth == smallerUnit) range.location++;
-	} else {
-	    range.location = (kCFCalendarUnitHour == smallerUnit || kCFCalendarUnitMinute == smallerUnit || kCFCalendarUnitSecond == smallerUnit) ? 0 : 1;
-	}
-	// Set calendar to first instant of next value of big unit
-	if (UCAL_ERA == bigField) {
-	    // ICU refuses to do the addition, probably because we are
-	    // at the limit of UCAL_ERA.  Use alternate strategy.
-	    CFIndex limit = ucal_getLimit(calendar->_cal, UCAL_YEAR, UCAL_MAXIMUM, &status);
-	    if (100000 < limit) limit = 100000;
-	    ucal_add(calendar->_cal, UCAL_YEAR, limit, &status);
-	} else {
-	    ucal_add(calendar->_cal, bigField, 1, &status);
-	}
-	if (kCFCalendarUnitWeek == smallerUnit && kCFCalendarUnitYear == biggerUnit) {
-	    ucal_add(calendar->_cal, UCAL_SECOND, -1, &status);
-	    range.length = ucal_get(calendar->_cal, UCAL_WEEK_OF_YEAR, &status);
-	    while (1 == range.length) {
-		ucal_add(calendar->_cal, UCAL_DAY_OF_MONTH, -1, &status);
-		range.length = ucal_get(calendar->_cal, UCAL_WEEK_OF_YEAR, &status);
-	    }
-	    range.location = 1;
-	    return range;
-	} else if (kCFCalendarUnitWeek == smallerUnit && kCFCalendarUnitMonth == biggerUnit) {
-	    ucal_add(calendar->_cal, UCAL_SECOND, -1, &status);
-	    range.length = ucal_get(calendar->_cal, UCAL_WEEK_OF_YEAR, &status);
-	    range.location = 1;
-	    return range;
-	}
-	UDate goal = ucal_getMillis(calendar->_cal, &status);
-	// Set calendar back to first instant of big unit
-	ucal_setMillis(calendar->_cal, start, &status);
-	if (kCFCalendarUnitWeekdayOrdinal == smallerUnit) {
-	    // roll day forward to first 'dow'
-	    while (ucal_get(calendar->_cal, (kCFCalendarUnitMonth == biggerUnit) ? UCAL_WEEK_OF_MONTH : UCAL_WEEK_OF_YEAR, &status) != 1) {
-		ucal_add(calendar->_cal, UCAL_DAY_OF_MONTH, 1, &status);
-	    }
-	    while (ucal_get(calendar->_cal, UCAL_DAY_OF_WEEK, &status) != dow) {
-		ucal_add(calendar->_cal, UCAL_DAY_OF_MONTH, 1, &status);
-	    }
-	    start = ucal_getMillis(calendar->_cal, &status);
-	    goal -= 1000;
-	    range.location = 1;  // constant here works around ICU -- see 3948293
-	}
-	UDate curr = start;
-	range.length = 	(kCFCalendarUnitWeekdayOrdinal == smallerUnit) ? 1 : 0;
-	const int multiple_table[] = {0, 0, 16, 19, 24, 26, 24, 28, 14, 14, 14};
-	int multiple = (1 << multiple_table[flsl(smallerUnit) - 1]);
-	Boolean divide = false, alwaysDivide = false;
-	while (curr < goal) {
-	    ucal_add(calendar->_cal, smallField, multiple, &status);
-	    UDate newcurr = ucal_getMillis(calendar->_cal, &status);
-	    if (curr < newcurr && newcurr <= goal) {
-		range.length += multiple;
-		curr = newcurr;
-	    } else {
-		// Either newcurr is going backwards, or not making
-		// progress, or has overshot the goal; reset date
-		// and try smaller multiples.
-		ucal_setMillis(calendar->_cal, curr, &status);
-		divide = true;
-		// once we start overshooting the goal, the add at
-		// smaller multiples will succeed at most once for
-		// each multiple, so we reduce it every time through
-		// the loop.
-		if (goal < newcurr) alwaysDivide = true;
-	    }
-	    if (divide) {
-		multiple = multiple / 2;
-		if (0 == multiple) break;
-		divide = alwaysDivide;
-	    }
-	}
-    }
-    return range;
-}
 
 static CFRange __CFCalendarGetRangeOfUnit2(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) __attribute__((noinline));
 static CFRange __CFCalendarGetRangeOfUnit2(CFCalendarRef calendar, CFCalendarUnit smallerUnit, CFCalendarUnit biggerUnit, CFAbsoluteTime at) {

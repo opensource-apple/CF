@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFUUID.c
-	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc.  All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -36,7 +36,10 @@ static CFMutableDictionaryRef _uniquedUUIDs = NULL;
 CF_INLINE void LOCKED(dispatch_block_t work) {
     static dispatch_once_t guard;
     static dispatch_queue_t CFUUIDGlobalDataLock;
-    dispatch_once(&guard, ^{ CFUUIDGlobalDataLock = dispatch_queue_create("CFUUID global uniquing table lock", 0); });
+    dispatch_once(&guard, ^{
+        dispatch_queue_attr_t dqattr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, qos_class_main(), 0);
+        CFUUIDGlobalDataLock = dispatch_queue_create("com.apple.CFUUID", dqattr);
+    });
     dispatch_sync(CFUUIDGlobalDataLock, work);
 }
 
@@ -44,12 +47,12 @@ CF_INLINE void LOCKED(dispatch_block_t work) {
 // Platforms without dispatch
 
 static CFMutableDictionaryRef _uniquedUUIDs = NULL;
-static CFSpinLock_t _uniquedUUIDsLock = CFSpinLockInit;
+static CFLock_t _uniquedUUIDsLock = CFLockInit;
 
 CF_INLINE void LOCKED(void (^work)(void)) {
-    __CFSpinLock(&_uniquedUUIDsLock);
+    __CFLock(&_uniquedUUIDsLock);
     work();
-    __CFSpinUnlock(&_uniquedUUIDsLock);
+    __CFUnlock(&_uniquedUUIDsLock);
 }
 
 #endif
@@ -232,11 +235,9 @@ static const CFRuntimeClass __CFUUIDClass = {
     __CFUUIDCopyDescription
 };
 
-CF_PRIVATE void __CFUUIDInitialize(void) {
-    __kCFUUIDTypeID = _CFRuntimeRegisterClass(&__CFUUIDClass);
-}
-
 CFTypeID CFUUIDGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFUUIDTypeID = _CFRuntimeRegisterClass(&__CFUUIDClass); });
     return __kCFUUIDTypeID;
 }
 
@@ -247,7 +248,7 @@ static CFUUIDRef __CFUUIDCreateWithBytesPrimitive(CFAllocatorRef allocator, CFUU
         if (!uuid) {
             size_t size;
             size = sizeof(__CFUUID_t) - sizeof(CFRuntimeBase);
-            uuid = (__CFUUID_t *)_CFRuntimeCreateInstance(kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : allocator, __kCFUUIDTypeID, size, NULL);
+            uuid = (__CFUUID_t *)_CFRuntimeCreateInstance(kCFUseCollectableAllocator ? kCFAllocatorSystemDefault : allocator, CFUUIDGetTypeID(), size, NULL);
             
             if (!uuid) return;
             

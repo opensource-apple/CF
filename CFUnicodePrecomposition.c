@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFUnicodePrecomposition.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Aki Inoue
 */
 
@@ -43,18 +43,18 @@ static uint32_t *__CFUniCharNonBMPPrecompDestinationTable = NULL;
 static const uint8_t *__CFUniCharNonBaseBitmapForBMP_P = NULL; // Adding _P so the symbol name is different from the one in CFUnicodeDecomposition.c
 static const uint8_t *__CFUniCharCombiningClassForBMP = NULL;
 
-static CFSpinLock_t __CFUniCharPrecompositionTableLock = CFSpinLockInit;
+static CFLock_t __CFUniCharPrecompositionTableLock = CFLockInit;
 
 static void __CFUniCharLoadPrecompositionTable(void) {
 
-    __CFSpinLock(&__CFUniCharPrecompositionTableLock);
+    __CFLock(&__CFUniCharPrecompositionTableLock);
 
     if (NULL == __CFUniCharPrecompSourceTable) {
         const uint32_t *bytes = (const uint32_t *)CFUniCharGetMappingData(kCFUniCharCanonicalPrecompMapping);
         uint32_t bmpMappingLength;
 
         if (NULL == bytes) {
-            __CFSpinUnlock(&__CFUniCharPrecompositionTableLock);
+            __CFUnlock(&__CFUniCharPrecompositionTableLock);
             return;
         }
 
@@ -68,7 +68,7 @@ static void __CFUniCharLoadPrecompositionTable(void) {
         __CFUniCharCombiningClassForBMP = (const uint8_t *)CFUniCharGetUnicodePropertyDataForPlane(kCFUniCharCombiningProperty, 0);
     }
 
-    __CFSpinUnlock(&__CFUniCharPrecompositionTableLock);
+    __CFUnlock(&__CFUniCharPrecompositionTableLock);
 }
 
  // Adding _P so the symbol name is different from the one in CFUnicodeDecomposition.c

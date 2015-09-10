@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFString.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
         
 !!! For performance reasons, it's important that all functions marked CF_INLINE in this file are inlined.
@@ -70,11 +70,11 @@ CF_PRIVATE const CFStringRef __kCFLocaleCollatorID;
 #include <sys/stat.h> /* for umask() */
 
 static void __CFRecordStringAllocationEvent(const char *encoding, const char *bytes, CFIndex byteCount) {
-    static CFSpinLock_t lock = CFSpinLockInit;
+    static CFLock_t lock = CFLockInit;
     
     if (memchr(bytes, '\n', byteCount)) return; //never record string allocation events for strings with newlines, because those confuse our parser and because they'll never go into the ROM
     
-    __CFSpinLock(&lock);
+    __CFLock(&lock);
     static int fd;
     if (! fd) {
 	extern char **_NSGetProgname(void);
@@ -99,11 +99,9 @@ static void __CFRecordStringAllocationEvent(const char *encoding, const char *by
 	else puts("Couldn't record allocation event");
 	free(buffer);
     }
-    __CFSpinUnlock(&lock);
+    __CFUnlock(&lock);
 }
 #endif //INSTRUMENT_SHARED_STRINGS
-
-
 
 typedef Boolean (*UNI_CHAR_FUNC)(UInt32 flags, UInt8 ch, UniChar *unicodeChar);
 
@@ -112,7 +110,7 @@ extern size_t malloc_good_size(size_t size);
 #endif
 extern void __CFStrConvertBytesToUnicode(const uint8_t *bytes, UniChar *buffer, CFIndex numChars);
 
-static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFDictionaryRef stringsDictConfig, CFStringRef formatString, CFIndex initialArgPosition, const void *origValues, CFIndex originalValuesSize, va_list args);
+static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, CFDictionaryRef stringsDictConfig, CFStringRef formatString, CFIndex initialArgPosition, const void *origValues, CFIndex originalValuesSize, va_list args);
 
 #if defined(DEBUG)
 
@@ -134,6 +132,7 @@ void _CFStringSetCompatibility(CFOptionFlags mask) {
     _CFStringCompatibilityMask |= mask;
 }
 
+__attribute__((used))
 CF_INLINE Boolean __CFStringGetCompatibility(CFOptionFlags mask) {
     return (_CFStringCompatibilityMask & mask) == mask;
 }
@@ -264,7 +263,7 @@ CF_INLINE Boolean __CFStrIsConstant(CFStringRef str) {
 
 CF_INLINE SInt32 __CFStrSkipAnyLengthByte(CFStringRef str)          {return ((str->base._cfinfo[CF_INFO_BITS] & __kCFHasLengthByteMask) == __kCFHasLengthByte) ? 1 : 0;}	// Number of bytes to skip over the length byte in the contents
 
-/* Returns ptr to the buffer (which might include the length byte)
+/* Returns ptr to the buffer (which might include the length byte).
 */
 CF_INLINE const void *__CFStrContents(CFStringRef str) {
     if (__CFStrIsInline(str)) {
@@ -364,7 +363,7 @@ CF_INLINE Boolean __CFStrIsExternalMutable(CFStringRef str)	{return str->variant
 CF_INLINE Boolean __CFStrHasContentsAllocator(CFStringRef str)	{return (str->base._cfinfo[CF_INFO_BITS] & __kCFHasContentsAllocatorMask) == __kCFHasContentsAllocator;}
 CF_INLINE void __CFStrSetIsFixed(CFMutableStringRef str)		    {str->variants.notInlineMutable.isFixedCapacity = 1;}
 CF_INLINE void __CFStrSetIsExternalMutable(CFMutableStringRef str)	    {str->variants.notInlineMutable.isExternalMutable = 1;}
-CF_INLINE void __CFStrSetHasGap(CFMutableStringRef str)			    {str->variants.notInlineMutable.hasGap = 1;}
+//CF_INLINE void __CFStrSetHasGap(CFMutableStringRef str)			    {str->variants.notInlineMutable.hasGap = 1;} currently unused
 
 // If capacity is provided externally, we only change it when we need to grow beyond it
 CF_INLINE Boolean __CFStrCapacityProvidedExternally(CFStringRef str)   		{return str->variants.notInlineMutable.capacityProvidedExternally;}
@@ -1113,6 +1112,11 @@ CF_INLINE CFHashCode __CFStrHashEightBit(const uint8_t *cContents, CFIndex len) 
     return result + (result << (len & 31));
 }
 
+// This is for NSStringROMKeySet.
+CF_PRIVATE CFHashCode __CFStrHashEightBit2(const uint8_t *cContents, CFIndex len) {
+    return __CFStrHashEightBit(cContents, len);
+}
+
 CFHashCode CFStringHashISOLatin1CString(const uint8_t *bytes, CFIndex len) {
     CFHashCode result = len;
     if (len <= HashEverythingLimit) {
@@ -1203,8 +1207,10 @@ static const CFRuntimeClass __CFStringClass = {
 };
 
 CF_PRIVATE void __CFStringInitialize(void) {
-    __kCFStringTypeID = _CFRuntimeRegisterClass(&__CFStringClass);
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFStringTypeID = _CFRuntimeRegisterClass(&__CFStringClass); });
 }
+
 
 CFTypeID CFStringGetTypeID(void) {
     return __kCFStringTypeID;
@@ -1216,8 +1222,7 @@ static Boolean CFStrIsUnicode(CFStringRef str) {
     return __CFStrIsUnicode(str);
 }
 
-
-
+    
 #define ALLOCATORSFREEFUNC ((CFAllocatorRef)-1)
 
 /* contentsDeallocator indicates how to free the data if it's noCopy == true:
@@ -1239,7 +1244,7 @@ CF_PRIVATE CFStringRef __CFStringCreateImmutableFunnel3(
                         Boolean possiblyExternalFormat, Boolean tryToReduceUnicode, Boolean hasLengthByte, Boolean hasNullByte, Boolean noCopy,
                         CFAllocatorRef contentsDeallocator, UInt32 converterFlags) {
     
-    CFMutableStringRef str;
+    CFMutableStringRef str = NULL;
     CFVarWidthCharBuffer vBuf;
     CFIndex size;
     Boolean useLengthByte = false;
@@ -1393,122 +1398,139 @@ CF_PRIVATE CFStringRef __CFStringCreateImmutableFunnel3(
         // At this point, all necessary input arguments have been changed to reflect the new state
     }
 
-    // Now determine the necessary size
+#if USE_STRING_ROM || ENABLE_TAGGED_POINTER_STRINGS || INSTRUMENT_SHARED_STRINGS
+    CFIndex lengthByte = (hasLengthByte ? 1 : 0);
+    CFIndex realNumBytes = numBytes - lengthByte;
+    const uint8_t *realBytes = bytes + lengthByte;
+#endif
+
+
+    if (!str) {
+        // Now determine the necessary size
 #if INSTRUMENT_SHARED_STRINGS || USE_STRING_ROM
-    Boolean stringSupportsROM = stringSupportsEightBitCFRepresentation;
+        Boolean stringSupportsROM = stringSupportsEightBitCFRepresentation;
 #endif
 
 #if INSTRUMENT_SHARED_STRINGS
-    if (stringSupportsROM) {
-        const void *realBytes = (uint8_t *) bytes + (hasLengthByte ? 1 : 0);
-        CFIndex realNumBytes = numBytes - !! hasLengthByte;
-	__CFRecordStringAllocationEvent(recordedEncoding, realBytes, realNumBytes);
-    }
+        if (stringSupportsROM) __CFRecordStringAllocationEvent(recordedEncoding, realBytes, realNumBytes);
 #endif
 
 #if USE_STRING_ROM
-    CFStringRef romResult = NULL;
+        CFStringRef romResult = NULL;
 
 
-    if (stringSupportsROM) {
-        // Disable the string ROM if necessary
-	static char sDisableStringROM = -1;
-	if (sDisableStringROM == -1) sDisableStringROM = !! __CFgetenv("CFStringDisableROM");
+        if (stringSupportsROM) {
+            // Disable the string ROM if necessary
+            static char sDisableStringROM = -1;
+            if (sDisableStringROM == -1) sDisableStringROM = !! __CFgetenv("CFStringDisableROM");
 
-	if (sDisableStringROM == 0) romResult = _CFSearchStringROM(bytes + !! hasLengthByte, numBytes - !! hasLengthByte);
-    }
-    /* if we get a result from our ROM, and noCopy is set, then deallocate the buffer immediately */
-    if (romResult) {
-	if (noCopy && (contentsDeallocator != kCFAllocatorNull)) {
-	    CFAllocatorDeallocate(contentsDeallocator, (void *)bytes);
-	}
-	
-	/* these don't get used again, but clear them for consistency */
-	noCopy = false;
-	bytes = NULL;
-	
-	/* set our result to the ROM result which is not really mutable, of course, but that's OK because we don't try to modify it. */
-	str = (CFMutableStringRef)romResult;
-    }
-
-    if (! romResult) {
-#else
-    if (1) {
+            if (sDisableStringROM == 0) romResult = __CFSearchStringROM((const char *)realBytes, realNumBytes);
+        }
+        /* if we get a result from our ROM, and noCopy is set, then deallocate the buffer immediately */
+        if (romResult) {
+            if (noCopy && (contentsDeallocator != kCFAllocatorNull)) {
+                CFAllocatorDeallocate(contentsDeallocator, (void *)bytes);
+            }
+            
+            /* these don't get used again, but clear them for consistency */
+            noCopy = false;
+            bytes = NULL;
+            
+            /* set our result to the ROM result which is not really mutable, of course, but that's OK because we don't try to modify it. */
+            str = (CFMutableStringRef)romResult;
+            
+#if INSTRUMENT_TAGGED_POINTER_STRINGS
+            _CFTaggedPointerStringStats.stringROMCount++;
 #endif
-	// Now determine the necessary size
+        }
 
-	if (noCopy) {
+        if (! romResult) {
+#else
+        if (1) {
+#endif
+            
+#if INSTRUMENT_SHARED_STRINGS
+            if (stringSupportsROM) __CFRecordStringAllocationEvent(recordedEncoding, realBytes, realNumBytes);
+#endif
+#if INSTRUMENT_TAGGED_POINTER_STRINGS
+            _CFTaggedPointerStringStats.otherStringCount++;
+#endif
+            
+            // Now determine the necessary size
 
-	    size = sizeof(void *);				// Pointer to the buffer
-	    if ((0) || (contentsDeallocator != alloc && contentsDeallocator != kCFAllocatorNull)) {
-		size += sizeof(void *);	// The contentsDeallocator
-	    }
-	    if (!hasLengthByte) size += sizeof(CFIndex);	// Explicit length
-	    useLengthByte = hasLengthByte;
-	    useNullByte = hasNullByte;
+            if (noCopy) {
 
-	} else {	// Inline data; reserve space for it
+                size = sizeof(void *);				// Pointer to the buffer
+                if ((0) || (contentsDeallocator != alloc && contentsDeallocator != kCFAllocatorNull)) {
+                    size += sizeof(void *);	// The contentsDeallocator
+                }
+                if (!hasLengthByte) size += sizeof(CFIndex);	// Explicit length
+                useLengthByte = hasLengthByte;
+                useNullByte = hasNullByte;
 
-	    useInlineData = true;
-	    size = numBytes;
+            } else {	// Inline data; reserve space for it
 
-	    if (hasLengthByte || (encoding != kCFStringEncodingUnicode && __CFCanUseLengthByte(numBytes))) {
-		useLengthByte = true;
-		if (!hasLengthByte) size += 1;
-	    } else {
-		size += sizeof(CFIndex);	// Explicit length
-	    }	    
-	    if (hasNullByte || encoding != kCFStringEncodingUnicode) {
-		useNullByte = true;
-		size += 1;
-	    }
-	}
+                useInlineData = true;
+                size = numBytes;
+
+                if (hasLengthByte || (encoding != kCFStringEncodingUnicode && __CFCanUseLengthByte(numBytes))) {
+                    useLengthByte = true;
+                    if (!hasLengthByte) size += 1;
+                } else {
+                    size += sizeof(CFIndex);	// Explicit length
+                }	    
+                if (hasNullByte || encoding != kCFStringEncodingUnicode) {
+                    useNullByte = true;
+                    size += 1;
+                }
+            }
 
 #ifdef STRING_SIZE_STATS
-	// Dump alloced CFString size info every so often
-	static int cnt = 0;
-	static unsigned sizes[256] = {0};
-	int allocedSize = size + sizeof(CFRuntimeBase);
-	if (allocedSize < 255) sizes[allocedSize]++; else sizes[255]++;
-	if ((++cnt % 1000) == 0) {
-	    printf ("\nTotal: %d\n", cnt);
-	    int i; for (i = 0; i < 256; i++) printf("%03d: %5d%s", i, sizes[i], ((i % 8) == 7) ? "\n" : " ");
-	}
+            // Dump alloced CFString size info every so often
+            static int cnt = 0;
+            static unsigned sizes[256] = {0};
+            int allocedSize = size + sizeof(CFRuntimeBase);
+            if (allocedSize < 255) sizes[allocedSize]++; else sizes[255]++;
+            if ((++cnt % 1000) == 0) {
+                printf ("\nTotal: %d\n", cnt);
+                int i; for (i = 0; i < 256; i++) printf("%03d: %5d%s", i, sizes[i], ((i % 8) == 7) ? "\n" : " ");
+            }
 #endif
-     
-	// Finally, allocate!
+         
+            // Finally, allocate!
 
-	str = (CFMutableStringRef)_CFRuntimeCreateInstance(alloc, __kCFStringTypeID, size, NULL);
-	if (str) {
-	    if (__CFOASafe) __CFSetLastAllocationEventName(str, "CFString (immutable)");
+            str = (CFMutableStringRef)_CFRuntimeCreateInstance(alloc, __kCFStringTypeID, size, NULL);
+            if (str) {
+                if (__CFOASafe) __CFSetLastAllocationEventName(str, "CFString (immutable)");
 
-            CFOptionFlags allocBits = (0) ? __kCFHasContentsDeallocator : (contentsDeallocator == alloc ? __kCFNotInlineContentsDefaultFree : (contentsDeallocator == kCFAllocatorNull ? __kCFNotInlineContentsNoFree : __kCFNotInlineContentsCustomFree));
-	    __CFStrSetInfoBits(str,
-				(useInlineData ? __kCFHasInlineContents : allocBits) |
-				((encoding == kCFStringEncodingUnicode) ? __kCFIsUnicode : 0) |
-				(useNullByte ? __kCFHasNullByte : 0) |
-				(useLengthByte ? __kCFHasLengthByte : 0));
+                CFOptionFlags allocBits = (0) ? __kCFHasContentsDeallocator : (contentsDeallocator == alloc ? __kCFNotInlineContentsDefaultFree : (contentsDeallocator == kCFAllocatorNull ? __kCFNotInlineContentsNoFree : __kCFNotInlineContentsCustomFree));
+                __CFStrSetInfoBits(str,
+                                    (useInlineData ? __kCFHasInlineContents : allocBits) |
+                                    ((encoding == kCFStringEncodingUnicode) ? __kCFIsUnicode : 0) |
+                                    (useNullByte ? __kCFHasNullByte : 0) |
+                                    (useLengthByte ? __kCFHasLengthByte : 0));
 
-	    if (!useLengthByte) {
-		CFIndex length = numBytes - (hasLengthByte ? 1 : 0);
-		if (encoding == kCFStringEncodingUnicode) length /= sizeof(UniChar);
-		__CFStrSetExplicitLength(str, length);
-	    }
+                if (!useLengthByte) {
+                    CFIndex length = numBytes - (hasLengthByte ? 1 : 0);
+                    if (encoding == kCFStringEncodingUnicode) length /= sizeof(UniChar);
+                    __CFStrSetExplicitLength(str, length);
+                }
 
-	    if (useInlineData) {
-		uint8_t *contents = (uint8_t *)__CFStrContents(str);
-		if (useLengthByte && !hasLengthByte) *contents++ = (uint8_t)numBytes;
-		memmove(contents, bytes, numBytes);
-		if (useNullByte) contents[numBytes] = 0;
-	    } else {
-		__CFStrSetContentPtr(str, bytes);
-		if (__CFStrHasContentsDeallocator(str)) __CFStrSetContentsDeallocator(str, contentsDeallocator); 
-	    }
-	} else {
-	    if (noCopy && (contentsDeallocator != kCFAllocatorNull)) {
-		CFAllocatorDeallocate(contentsDeallocator, (void *)bytes); 
-	    }
-	}
+                if (useInlineData) {
+                    uint8_t *contents = (uint8_t *)__CFStrContents(str);
+                    if (useLengthByte && !hasLengthByte) *contents++ = (uint8_t)numBytes;
+                    memmove(contents, bytes, numBytes);
+                    if (useNullByte) contents[numBytes] = 0;
+                } else {
+                    __CFStrSetContentPtr(str, bytes);
+                    if (__CFStrHasContentsDeallocator(str)) __CFStrSetContentsDeallocator(str, contentsDeallocator); 
+                }
+            } else {
+                if (noCopy && (contentsDeallocator != kCFAllocatorNull)) {
+                    CFAllocatorDeallocate(contentsDeallocator, (void *)bytes); 
+                }
+            }
+        }
     }
     if (vBuf.shouldFreeChars) CFAllocatorDeallocate(vBuf.allocator, (void *)bytes);
 
@@ -1585,19 +1607,23 @@ CFStringRef  CFStringCreateWithBytesNoCopy(CFAllocatorRef alloc, const uint8_t *
 }
 
 CFStringRef  CFStringCreateWithFormatAndArguments(CFAllocatorRef alloc, CFDictionaryRef formatOptions, CFStringRef format, va_list arguments) {
-    return _CFStringCreateWithFormatAndArgumentsAux(alloc, NULL, formatOptions, format, arguments);
+    return _CFStringCreateWithFormatAndArgumentsAux2(alloc, NULL, NULL, formatOptions, format, arguments);
 }
 
-CFStringRef  _CFStringCreateWithFormatAndArgumentsAux(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments) {
+CFStringRef  _CFStringCreateWithFormatAndArgumentsAux2(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, const void *), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool , bool *), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments) {
     CFStringRef str;
     CFMutableStringRef outputString = CFStringCreateMutable(kCFAllocatorSystemDefault, 0); //should use alloc if no copy/release
     __CFStrSetDesiredCapacity(outputString, 120);	// Given this will be tightened later, choosing a larger working string is fine
-    __CFStringAppendFormatCore(outputString, copyDescFunc, formatOptions, NULL, format, 0, NULL, 0, arguments);
+    __CFStringAppendFormatCore(outputString, copyDescFunc, contextDescFunc, formatOptions, NULL, format, 0, NULL, 0, arguments);
     // ??? copy/release should not be necessary here -- just make immutable, compress if possible
     // (However, this does make the string inline, and cause the supplied allocator to be used...)
     str = (CFStringRef)CFStringCreateCopy(alloc, outputString);
     CFRelease(outputString);
     return str;
+}
+    
+CFStringRef  _CFStringCreateWithFormatAndArgumentsAux(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments) {
+    return _CFStringCreateWithFormatAndArgumentsAux2(alloc, copyDescFunc, NULL, formatOptions, format, arguments);
 }
 
 CFStringRef  CFStringCreateWithFormat(CFAllocatorRef alloc, CFDictionaryRef formatOptions, CFStringRef format, ...) {
@@ -1654,7 +1680,7 @@ CFStringRef CFStringCreateCopy(CFAllocatorRef alloc, CFStringRef str) {
 /* Table which holds constant strings created with CFSTR, when -fconstant-cfstrings option is not used. These dynamically created constant strings are stored in constantStringTable. The keys are the 8-bit constant C-strings from the compiler; the values are the CFStrings created for them. _CFSTRLock protects this table.
 */
 static CFMutableDictionaryRef constantStringTable = NULL;
-static CFSpinLock_t _CFSTRLock = CFSpinLockInit;
+static CFLock_t _CFSTRLock = CFLockInit;
 
 static CFStringRef __cStrCopyDescription(const void *ptr) {
     return CFStringCreateWithCStringNoCopy(kCFAllocatorSystemDefault, (const char *)ptr, __CFStringGetEightBitStringEncoding(), kCFAllocatorNull);
@@ -1695,74 +1721,77 @@ CFStringRef __CFStringMakeConstantString(const char *cStr) {
         constantStringValueCallBacks.equal = NULL;      // So that we only find strings that are ==
 	CFMutableDictionaryRef table = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &constantStringCallBacks, &constantStringValueCallBacks);
 	_CFDictionarySetCapacity(table, 2500);          // avoid lots of rehashing
-	__CFSpinLock(&_CFSTRLock);
+	__CFLock(&_CFSTRLock);
 	if (constantStringTable == NULL) constantStringTable = table;
-	__CFSpinUnlock(&_CFSTRLock);
+	__CFUnlock(&_CFSTRLock);
 	if (constantStringTable != table) CFRelease(table);
     }
 
-    __CFSpinLock(&_CFSTRLock);
+    __CFLock(&_CFSTRLock);
     if ((result = (CFStringRef)CFDictionaryGetValue(constantStringTable, cStr))) {
-	__CFSpinUnlock(&_CFSTRLock);
+	__CFUnlock(&_CFSTRLock);
     } else {
-	__CFSpinUnlock(&_CFSTRLock);
+	__CFUnlock(&_CFSTRLock);
 
         {
-	char *key;
-	Boolean isASCII = true;
-	// Given this code path is rarer these days, OK to do this extra work to verify the strings
-        const char *tmp = cStr;
-        while (*tmp) {
-            if (*(tmp++) & 0x80) {
-                isASCII = false;
-                break;
-            }
-        }
-	if (!isASCII) {
-            CFMutableStringRef ms = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
-            tmp = cStr;
+            char *key = NULL;
+            Boolean isASCII = true;
+            // Given this code path is rarer these days, OK to do this extra work to verify the strings
+            const char *tmp = cStr;
             while (*tmp) {
-                CFStringAppendFormat(ms, NULL, (*tmp & 0x80) ? CFSTR("\\%3o") : CFSTR("%1c"), *tmp);
-                tmp++;
+                if (*(tmp++) & 0x80) {
+                    isASCII = false;
+                    break;
+                }
             }
-            CFLog(kCFLogLevelWarning, CFSTR("WARNING: CFSTR(\"%@\") has non-7 bit chars, interpreting using MacOS Roman encoding for now, but this will change. Please eliminate usages of non-7 bit chars (including escaped characters above \\177 octal) in CFSTR()."), ms);
-            CFRelease(ms);
-	}
-	// Treat non-7 bit chars in CFSTR() as MacOSRoman, for compatibility
-	result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cStr, kCFStringEncodingMacRoman);
-	if (result == NULL) {
-	    CFLog(__kCFLogAssertion, CFSTR("Can't interpret CFSTR() as MacOS Roman, crashing"));
-	    HALT;
-	}
-	if (__CFOASafe) __CFSetLastAllocationEventName((void *)result, "CFString (CFSTR)");
-	if (__CFStrIsEightBit(result)) {	
-	    key = (char *)__CFStrContents(result) + __CFStrSkipAnyLengthByte(result);
-	} else {	// For some reason the string is not 8-bit!
-	    CFIndex keySize = strlen(cStr) + 1;
-	    key = (char *)CFAllocatorAllocate(kCFAllocatorSystemDefault, keySize, 0);
-	    if (__CFOASafe) __CFSetLastAllocationEventName((void *)key, "CFString (CFSTR key)");
-	    strlcpy(key, cStr, keySize);	// !!! We will leak this, if the string is removed from the table (or table is freed)
-	}
+            if (!isASCII) {
+                CFMutableStringRef ms = CFStringCreateMutable(kCFAllocatorSystemDefault, 0);
+                tmp = cStr;
+                while (*tmp) {
+                    CFStringAppendFormat(ms, NULL, (*tmp & 0x80) ? CFSTR("\\%3o") : CFSTR("%1c"), *tmp);
+                    tmp++;
+                }
+                CFLog(kCFLogLevelWarning, CFSTR("WARNING: CFSTR(\"%@\") has non-7 bit chars, interpreting using MacOS Roman encoding for now, but this will change. Please eliminate usages of non-7 bit chars (including escaped characters above \\177 octal) in CFSTR()."), ms);
+                CFRelease(ms);
+            }
+            // Treat non-7 bit chars in CFSTR() as MacOSRoman, for compatibility
+            result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cStr, kCFStringEncodingMacRoman);
+            if (result == NULL) {
+                CFLog(__kCFLogAssertion, CFSTR("Can't interpret CFSTR() as MacOS Roman, crashing"));
+                HALT;
+            }
+            Boolean isTaggedPointerString = CF_IS_OBJC(__kCFStringTypeID, result);
+            
+            if (!isTaggedPointerString) {
+                if (__CFOASafe) __CFSetLastAllocationEventName((void *)result, "CFString (CFSTR)");
+                if (__CFStrIsEightBit(result)) key = (char *)__CFStrContents(result) + __CFStrSkipAnyLengthByte(result);
+            }
+            if (!key) { // Either the string is not 8-bit or it's a tagged pointer string
+                CFIndex keySize = strlen(cStr) + 1;
+                key = (char *)CFAllocatorAllocate(kCFAllocatorSystemDefault, keySize, 0);
+                if (__CFOASafe) __CFSetLastAllocationEventName((void *)key, "CFString (CFSTR key)");
+                strlcpy(key, cStr, keySize);	// !!! We will leak this, if the string is removed from the table (or table is freed)
+            }
 
-	{
-            CFStringRef resultToBeReleased = result;
-	    CFIndex count;
-	    __CFSpinLock(&_CFSTRLock);
-	    count = CFDictionaryGetCount(constantStringTable);
-	    CFDictionaryAddValue(constantStringTable, key, result);
-	    if (CFDictionaryGetCount(constantStringTable) == count) { // add did nothing, someone already put it there
-		result = (CFStringRef)CFDictionaryGetValue(constantStringTable, key);
-            } else {
+            {
+                CFStringRef resultToBeReleased = result;
+                CFIndex count;
+                __CFLock(&_CFSTRLock);
+                count = CFDictionaryGetCount(constantStringTable);
+                CFDictionaryAddValue(constantStringTable, key, result);
+                if (CFDictionaryGetCount(constantStringTable) == count) { // add did nothing, someone already put it there
+                    result = (CFStringRef)CFDictionaryGetValue(constantStringTable, key);
+                } else if (!isTaggedPointerString) {
 #if __LP64__
-                ((struct __CFString *)result)->base._rc = 0;
+                    ((struct __CFString *)result)->base._rc = 0;
 #else
-                ((struct __CFString *)result)->base._cfinfo[CF_RC_BITS] = 0;
+                    ((struct __CFString *)result)->base._cfinfo[CF_RC_BITS] = 0;
 #endif
-	    }
-	    __CFSpinUnlock(&_CFSTRLock);
-	    // This either eliminates the extra retain on the freshly created string, or frees it, if it was actually not inserted into the table
-            CFRelease(resultToBeReleased);
-	}
+                }
+                __CFUnlock(&_CFSTRLock);
+                // This either eliminates the extra retain on the freshly created string, or frees it, if it was actually not inserted into the table
+                CFRelease(resultToBeReleased);
+            }
 	}
     }
     return result;
@@ -1772,9 +1801,9 @@ CFStringRef __CFStringMakeConstantString(const char *cStr) {
 static Boolean __CFStrIsConstantString(CFStringRef str) {
     Boolean found = false;
     if (constantStringTable) {
-	__CFSpinLock(&_CFSTRLock);
+	__CFLock(&_CFSTRLock);
 	found = CFDictionaryContainsValue(constantStringTable, str);
-	__CFSpinUnlock(&_CFSTRLock);
+	__CFUnlock(&_CFSTRLock);
     }
     return found;
 }
@@ -2010,10 +2039,9 @@ int _CFStringCheckAndGetCharacters(CFStringRef str, CFRange range, UniChar *buff
 
 CFIndex CFStringGetBytes(CFStringRef str, CFRange range, CFStringEncoding encoding, uint8_t lossByte, Boolean isExternalRepresentation, uint8_t *buffer, CFIndex maxBufLen, CFIndex *usedBufLen) {
 
-    /* No objc dispatch needed here since __CFStringEncodeByteStream works with both CFString and NSString */
     __CFAssertIsNotNegative(maxBufLen);
-
-    if (!CF_IS_OBJC(__kCFStringTypeID, str)) {	// If we can grope the ivars, let's do it...
+    
+    {
         __CFAssertIsString(str);
         __CFAssertRangeIsInStringBounds(str, range.location, range.length);
 
@@ -2182,60 +2210,55 @@ static const char *_CFStrGetLanguageIdentifierForLocale(CFLocaleRef locale, bool
     const char *langID = NULL;
     static const void *lastLocale = NULL;
     static const char *lastLangID = NULL;
-    static CFSpinLock_t lock = CFSpinLockInit;
+    static CFLock_t lock = CFLockInit;
 
     if (__CFLocaleGetNullLocale((struct __CFLocale *)locale)) return NULL;
 
-    __CFSpinLock(&lock);
+    __CFLock(&lock);
     if ((NULL != lastLocale) && (lastLocale == locale)) {
-        __CFSpinUnlock(&lock);
+        __CFUnlock(&lock);
         return lastLangID;
     }
-    __CFSpinUnlock(&lock);
+    __CFUnlock(&lock);
 
     localeID = (CFStringRef)CFLocaleGetValue(locale, __kCFLocaleCollatorID);
+    CFIndex length = CFStringGetLength(localeID);
 
     if (!collatorOnly) {
-        CFIndex length = __CFStrLength(localeID);
-
-        if ((length < 2) || ((4 == length) && CFEqual(localeID, CFSTR("root")))) localeID = (CFStringRef)CFLocaleGetIdentifier(locale);
+        if ((length < 2) || ((4 == length) && CFEqual(localeID, CFSTR("root")))) {
+            localeID = (CFStringRef)CFLocaleGetIdentifier(locale);
+            length = CFStringGetLength(localeID);
+        }
     }
 
-    // This is somewhat depending on CFLocale implementation always creating CFString for locale identifer ???
-    if (__CFStrLength(localeID) > 1) {
-        const void *contents = __CFStrContents(localeID);
-        const char *string;
-        char buffer[2];
-        
-        if (__CFStrIsEightBit(localeID)) {
-            string = ((const char *)contents) + __CFStrSkipAnyLengthByte(localeID);
-        } else {
-            const UTF16Char *characters = (const UTF16Char *)contents;
-            
-            buffer[0] = (char)*(characters++);
-            buffer[1] = (char)*characters;
-            string = buffer;
+    if (length > 1) {
+        uint8_t buffer[2];
+        const uint8_t *contents = (const uint8_t *)CFStringGetCStringPtr(localeID, kCFStringEncodingUTF8);
+        if (!contents) {
+            if (2 == CFStringGetBytes(localeID, CFRangeMake(0,2), kCFStringEncodingUTF8, 0, false, buffer, sizeof(buffer), NULL)) contents = buffer;
         }
-        
-        if (!strncmp(string, "az", 2)) { // Azerbaijani
-            langID = "az";
-        } else if (!strncmp(string, "lt", 2)) { // Lithuanian
-            langID = "lt";
-        } else if (!strncmp(string, "tr", 2)) { // Turkish
-            langID = "tr";
-        } else if (!strncmp(string, "nl", 2)) { // Dutch
-            langID = "nl";
-        } else if (!strncmp(string, "el", 2)) { // Greek
-            langID = "el";
+        if (contents) {
+            const char *string = (const char *)contents;
+            if (!strncmp(string, "az", 2)) { // Azerbaijani
+                langID = "az";
+            } else if (!strncmp(string, "lt", 2)) { // Lithuanian
+                langID = "lt";
+            } else if (!strncmp(string, "tr", 2)) { // Turkish
+                langID = "tr";
+            } else if (!strncmp(string, "nl", 2)) { // Dutch
+                langID = "nl";
+            } else if (!strncmp(string, "el", 2)) { // Greek
+                langID = "el";
+            }
         }
     }
 
     if (langID == NULL) __CFLocaleSetNullLocale((struct __CFLocale *)locale);
 
-    __CFSpinLock(&lock);
+    __CFLock(&lock);
     lastLocale = locale;
     lastLangID = langID;
-    __CFSpinUnlock(&lock);
+    __CFUnlock(&lock);
 
     return langID;
 }
@@ -2278,7 +2301,7 @@ static CFIndex __CFStringFoldCharacterClusterAtIndex(UTF32Char character, CFStri
             graphemeBMP = CFUniCharGetBitmapPtrForPlane(kCFUniCharGraphemeExtendCharacterSet, 0);
         }
 
-        ++currentIndex;
+        currentIndex += ((character > 0xFFFF) ? 2 : 1);
         
         if ((character < 0x0080) && ((NULL == langCode) || (character != 'I'))) { // ASCII
             if ((flags & kCFCompareCaseInsensitive) && (character >= 'A') && (character <= 'Z')) {
@@ -2508,7 +2531,6 @@ CFComparisonResult CFStringCompareWithOptionsAndLocale(CFStringRef string, CFStr
     bool equalityOptions = ((compareOptions & (kCFCompareCaseInsensitive|kCFCompareNonliteral|kCFCompareDiacriticInsensitive|kCFCompareWidthInsensitive)) ? true : false);
     bool numerically = ((compareOptions & kCFCompareNumerically) ? true : false);
     bool forceOrdering = ((compareOptions & kCFCompareForcedOrdering) ? true : false);
-    const uint8_t *graphemeBMP = CFUniCharGetBitmapPtrForPlane(kCFUniCharGraphemeExtendCharacterSet, 0);
     const uint8_t *langCode;
     CFComparisonResult compareResult = kCFCompareEqualTo;
     UTF16Char otherChar;
@@ -2607,7 +2629,9 @@ CFComparisonResult CFStringCompareWithOptionsAndLocale(CFStringRef string, CFStr
             return ((0 == cmpResult) ? kCFCompareEqualTo : ((cmpResult < 0) ? kCFCompareLessThan : kCFCompareGreaterThan));
         }
     }
-
+    
+    const uint8_t *graphemeBMP = CFUniCharGetBitmapPtrForPlane(kCFUniCharGraphemeExtendCharacterSet, 0);
+    
     CFStringInitInlineBuffer(string, &inlineBuf1, rangeToCompare);
     CFStringInitInlineBuffer(string2, &inlineBuf2, CFRangeMake(0, str2Len));
 
@@ -4395,7 +4419,7 @@ void CFStringTrim(CFMutableStringRef string, CFStringRef trimString) {
         uint8_t *contents = (uint8_t *)__CFStrContents(string) + __CFStrSkipAnyLengthByte(string);
 
         length -= newStartIndex;
-        if (__CFStrLength(trimString) < length) {
+        if (CFStringGetLength(trimString) < length) {
             while (CFStringFindWithOptions(string, trimString, CFRangeMake(newStartIndex, length), kCFCompareAnchored|kCFCompareBackwards, &range)) {
                 length = range.location - newStartIndex;
             }
@@ -5303,7 +5327,7 @@ enum {
 /* Only come in here if spec->type is CFFormatLongType or CFFormatDoubleType. Pass in 0 for width or precision if not specified. Returns false if couldn't do the format (with the assumption the caller falls back to unlocalized).
 */
 static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLocaleRef locale, const CFPrintValue *values, const CFFormatSpec *spec, SInt32 width, SInt32 precision, Boolean hasPrecision) {
-    static CFSpinLock_t formatterLock = CFSpinLockInit;
+    static CFLock_t formatterLock = CFLockInit;
     // These formatters are recached if the locale argument is different
     static CFNumberFormatterRef decimalFormatter = NULL;
     static CFNumberFormatterRef scientificFormatter = NULL;
@@ -5318,7 +5342,7 @@ static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLoca
 
     CFNumberFormatterRef formatter;
     
-    __CFSpinLock(&formatterLock);   // We use the formatter from one thread at one time; if this proves to be a bottleneck we need to get fancier
+    __CFLock(&formatterLock);   // We use the formatter from one thread at one time; if this proves to be a bottleneck we need to get fancier
 
     switch (spec->numericFormatStyle) {
         case CFFormatStyleUnsigned:
@@ -5398,26 +5422,6 @@ static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLoca
     CFRelease(tmp);
     CFRelease(zero);
 
-
-    // ??? use the right zero here for Arabic
-    Boolean padZero = spec->flags & kCFStringFormatZeroFlag;
-    if (hasPrecision && spec->type == CFFormatLongType) {  // if we have precision and %d or %u, we pad 0
-        padZero = true;
-    }
-    CFNumberFormatterSetProperty(formatter, kCFNumberFormatterPaddingCharacterKey, padZero ? CFSTR("0") : CFSTR(" "));
-    
-        
-    // Left (default) or right padding
-    SInt32 p = (spec->flags & kCFStringFormatMinusFlag) ? kCFNumberFormatterPadAfterSuffix : (padZero ? kCFNumberFormatterPadAfterPrefix : kCFNumberFormatterPadBeforePrefix);
-    if (hasPrecision && spec->type == CFFormatLongType) {
-        SInt32 tmpP = kCFNumberFormatterPadAfterPrefix;
-        tmp = CFNumberCreate(NULL, kCFNumberSInt32Type, &tmpP);
-    } else {
-        tmp = CFNumberCreate(NULL, kCFNumberSInt32Type, &p); 
-    }
-    CFNumberFormatterSetProperty(formatter, kCFNumberFormatterPaddingPositionKey, tmp);
-    CFRelease(tmp);
-
     Boolean isNegative = false;
     switch (values[spec->mainArgNum].type) {
         case CFFormatLongType:
@@ -5456,6 +5460,25 @@ static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLoca
     }
     CFNumberFormatterSetProperty(formatter, kCFNumberFormatterFormatWidthKey, tmp);
     CFRelease(tmp);
+    
+    // ??? use the right zero here for Arabic
+    Boolean padZero = spec->flags & kCFStringFormatZeroFlag;
+    if (hasPrecision && spec->type == CFFormatLongType) {  // if we have precision and %d or %u, we pad 0
+        padZero = true;
+    }
+    CFNumberFormatterSetProperty(formatter, kCFNumberFormatterPaddingCharacterKey, padZero ? CFSTR("0") : CFSTR(" "));
+    
+    
+    // Left (default) or right padding
+    SInt32 p = (spec->flags & kCFStringFormatMinusFlag) ? kCFNumberFormatterPadAfterSuffix : (padZero ? kCFNumberFormatterPadAfterPrefix : kCFNumberFormatterPadBeforePrefix);
+    if (hasPrecision && spec->type == CFFormatLongType) {
+        SInt32 tmpP = kCFNumberFormatterPadAfterPrefix;
+        tmp = CFNumberCreate(NULL, kCFNumberSInt32Type, &tmpP);
+    } else {
+        tmp = CFNumberCreate(NULL, kCFNumberSInt32Type, &p);
+    }
+    CFNumberFormatterSetProperty(formatter, kCFNumberFormatterPaddingPositionKey, tmp);
+    CFRelease(tmp);
 
     if (spec->numericFormatStyle == CFFormatStyleScientific) {
         prec++;  // for %e, precision+1 is the number of sig fig
@@ -5484,7 +5507,7 @@ static Boolean __CFStringFormatLocalizedNumber(CFMutableStringRef output, CFLoca
             break;
         }
     }
-    __CFSpinUnlock(&formatterLock);
+    __CFUnlock(&formatterLock);
     
     if (localizedNumberString) {
         // we need to pad space if we have %d or %u
@@ -5707,7 +5730,7 @@ reswtch:switch (ch) {
 /* ??? %s depends on handling of encodings by __CFStringAppendBytes
 */
 void CFStringAppendFormatAndArguments(CFMutableStringRef outputString, CFDictionaryRef formatOptions, CFStringRef formatString, va_list args) {
-    __CFStringAppendFormatCore(outputString, NULL, formatOptions, NULL, formatString, 0, NULL, 0, args);
+    __CFStringAppendFormatCore(outputString, NULL, NULL, formatOptions, NULL, formatString, 0, NULL, 0, args);
 }
         
 // Length of the buffer to call sprintf() with
@@ -5747,9 +5770,15 @@ void CFStringAppendFormatAndArguments(CFMutableStringRef outputString, CFDiction
     }}
 #endif
 
-void _CFStringAppendFormatAndArgumentsAux(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args) { __CFStringAppendFormatCore(outputString, copyDescFunc, formatOptions, NULL, formatString, 0, NULL, 0, args); }
-
-static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFDictionaryRef stringsDictConfig, CFStringRef formatString, CFIndex initialArgPosition, const void *origValues, CFIndex originalValuesSize, va_list args) {
+void _CFStringAppendFormatAndArgumentsAux2(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args) {
+    __CFStringAppendFormatCore(outputString, copyDescFunc, contextDescFunc, formatOptions, NULL, formatString, 0, NULL, 0, args);
+}
+    
+void _CFStringAppendFormatAndArgumentsAux(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args) {
+    _CFStringAppendFormatAndArgumentsAux2(outputString, copyDescFunc, NULL, formatOptions, formatString, args);
+}
+    
+static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, CFDictionaryRef stringsDictConfig, CFStringRef formatString, CFIndex initialArgPosition, const void *origValues, CFIndex originalValuesSize, va_list args) {
     SInt32 numSpecs, sizeSpecs, sizeArgNum, formatIdx, curSpec, argNum;
     CFIndex formatLen;
 #define FORMAT_BUFFER_LEN 400
@@ -5962,6 +5991,10 @@ static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFString
 	originalValuesSize = sizeArgNum;
     }
 
+    SInt32 numSpecsContext = 0;
+    CFFormatSpec *specsContext = (CFFormatSpec *)calloc(numSpecs, sizeof(CFFormatSpec));
+    static const CFStringRef replacement = CFSTR("%@NSCONTEXT");
+    
     for (curSpec = 0; curSpec < numSpecs; curSpec++) {
 	SInt32 width = 0, precision = 0;
 	UniChar *up, ch;
@@ -6166,8 +6199,6 @@ static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFString
 	case CFFormatObjectType:
 	    if (specs[curSpec].configDictIndex != -1) { // config dict
 		CFTypeRef object = NULL;
-		CFStringRef innerFormat = NULL;
-
 		switch (values[specs[curSpec].mainArgNum].type) {
 		    case CFFormatLongType:
 			object = CFNumberCreate(tmpAlloc, kCFNumberSInt64Type, &(values[specs[curSpec].mainArgNum].value.int64Value));
@@ -6276,14 +6307,25 @@ static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFString
 
 	    } else if (NULL != values[specs[curSpec].mainArgNum].value.pointerValue) {
                 CFStringRef str = NULL;
-		if (copyDescFunc) {
-		    str = copyDescFunc(values[specs[curSpec].mainArgNum].value.pointerValue, formatOptions);
-		} else {
-		    str = __CFCopyFormattingDescription(values[specs[curSpec].mainArgNum].value.pointerValue, formatOptions);
-		    if (NULL == str) {
-		        str = CFCopyDescription(values[specs[curSpec].mainArgNum].value.pointerValue);
-		    }
-		}
+                if (contextDescFunc) {
+                    bool found = NO;
+                    str = contextDescFunc(values[specs[curSpec].mainArgNum].value.pointerValue, formatString, replacement, NO, &found);
+                    if (found) {
+                        str = CFRetain(replacement);
+                        specsContext[numSpecsContext] = specs[curSpec];
+                        numSpecsContext++;
+                    }
+                }
+                if (!str) {
+                    if (copyDescFunc) {
+                        str = copyDescFunc(values[specs[curSpec].mainArgNum].value.pointerValue, formatOptions);
+                    } else {
+                        str = __CFCopyFormattingDescription(values[specs[curSpec].mainArgNum].value.pointerValue, formatOptions);
+                        if (NULL == str) {
+                            str = CFCopyDescription(values[specs[curSpec].mainArgNum].value.pointerValue);
+                        }
+                    }
+                }
                 if (str) {
                     CFStringAppend(outputString, str);
                     CFRelease(str);
@@ -6296,6 +6338,17 @@ static void __CFStringAppendFormatCore(CFMutableStringRef outputString, CFString
             break;
         }
     }
+    
+    for (SInt32 i = 0; i < numSpecsContext; i++) {
+        CFRange range = CFStringFind(outputString, replacement, 0);
+        CFStringRef str = contextDescFunc(values[specsContext[i].mainArgNum].value.pointerValue, outputString, replacement, true, NULL);
+        if (str) {
+            CFStringReplace(outputString, range, str);
+            CFRelease(str);
+        }
+    }
+    
+    free(specsContext);
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_FREEBSD
     // va_copy is a C99 extension. No support on Windows

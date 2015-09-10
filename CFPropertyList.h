@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFPropertyList.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFPROPERTYLIST__)
@@ -55,10 +55,10 @@ CF_IMPLICIT_BRIDGING_DISABLED
 	is returned in errorString. It is the caller's responsibility to release
 	either the returned object or the error string, whichever is applicable.
  
-        This function is obsolete and will be deprecated soon. See CFPropertyListCreateWithData() for a replacement.
+        This function is deprecated. See CFPropertyListCreateWithData() for a replacement.
 */
 CF_EXPORT
-CFPropertyListRef CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xmlData, CFOptionFlags mutabilityOption, CFStringRef *errorString);
+CFPropertyListRef CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDataRef xmlData, CFOptionFlags mutabilityOption, CFStringRef *errorString) CF_DEPRECATED(10_0, 10_10, 2_0, 8_0, "Use CFPropertyListCreateWithData instead.");
 
 /*
 	Returns the XML description of the given object; propertyList must
@@ -70,10 +70,10 @@ CFPropertyListRef CFPropertyListCreateFromXMLData(CFAllocatorRef allocator, CFDa
 	string, is returned because the bytes contain in them a description
 	of the string encoding used.
  
-        This function is obsolete and will be deprecated soon. See CFPropertyListCreateData() for a replacement.
+        This function is deprecated. See CFPropertyListCreateData() for a replacement.
 */
 CF_EXPORT
-CFDataRef CFPropertyListCreateXMLData(CFAllocatorRef allocator, CFPropertyListRef propertyList);
+CFDataRef CFPropertyListCreateXMLData(CFAllocatorRef allocator, CFPropertyListRef propertyList) CF_DEPRECATED(10_0, 10_10, 2_0, 8_0, "Use CFPropertyListCreateData instead.");
 
 CF_IMPLICIT_BRIDGING_ENABLED
 
@@ -112,9 +112,9 @@ CF_IMPLICIT_BRIDGING_DISABLED
  * written, or 0 on error. Error messages are not currently localized, but
  * may be in the future, so they are not suitable for comparison. 
  *
- * This function is obsolete and will be deprecated soon. See CFPropertyListWrite() for a replacement. */
+ * This function is deprecated. See CFPropertyListWrite() for a replacement. */
 CF_EXPORT
-CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStreamRef stream, CFPropertyListFormat format, CFStringRef *errorString);
+CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStreamRef stream, CFPropertyListFormat format, CFStringRef *errorString) CF_DEPRECATED(10_2, 10_10, 2_0, 8_0, "Use CFPropertyListWrite instead.");
 
 
 /* Same as current function CFPropertyListCreateFromXMLData()
@@ -127,9 +127,9 @@ CFIndex CFPropertyListWriteToStream(CFPropertyListRef propertyList, CFWriteStrea
  * are not currently localized, but may be in the future, so they are not
  * suitable for comparison. 
  *
- * This function is obsolete and will be deprecated soon. See CFPropertyListCreateWithStream() for a replacement. */
+ * This function is deprecated. See CFPropertyListCreateWithStream() for a replacement. */
 CF_EXPORT
-CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex streamLength, CFOptionFlags mutabilityOption, CFPropertyListFormat *format, CFStringRef *errorString);
+CFPropertyListRef CFPropertyListCreateFromStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex streamLength, CFOptionFlags mutabilityOption, CFPropertyListFormat *format, CFStringRef *errorString) CF_DEPRECATED(10_2, 10_10, 2_0, 8_0, "Use CFPropertyListCreateWithStream instead.");
 
 CF_IMPLICIT_BRIDGING_ENABLED
 #endif
@@ -150,7 +150,7 @@ CFPropertyListRef CFPropertyListCreateWithData(CFAllocatorRef allocator, CFDataR
 
 #if TARGET_OS_MAC || TARGET_OS_WIN32 || TARGET_OS_EMBEDDED
 
-/* Create and return a property list with a CFReadStream input. TIf the format parameter is non-NULL, it will be set to the format of the data after parsing is complete. The options parameter is used to specify CFPropertyListMutabilityOptions. The streamLength parameter specifies the number of bytes to read from the stream. Set streamLength to 0 to read until the end of the stream is detected. If an error occurs while parsing the data, the return value will be NULL. Additionally, if an error occurs and the error parameter is non-NULL, the error parameter will be set to a CFError describing the problem, which the caller must release. If the parse succeeds, the returned value is a reference to the new property list. It is the responsibility of the caller to release this value.
+/* Create and return a property list with a CFReadStream input. If the format parameter is non-NULL, it will be set to the format of the data after parsing is complete. The options parameter is used to specify CFPropertyListMutabilityOptions. The streamLength parameter specifies the number of bytes to read from the stream. Set streamLength to 0 to read until the end of the stream is detected. If an error occurs while parsing the data, the return value will be NULL. Additionally, if an error occurs and the error parameter is non-NULL, the error parameter will be set to a CFError describing the problem, which the caller must release. If the parse succeeds, the returned value is a reference to the new property list. It is the responsibility of the caller to release this value.
  */
 CF_EXPORT
 CFPropertyListRef CFPropertyListCreateWithStream(CFAllocatorRef allocator, CFReadStreamRef stream, CFIndex streamLength, CFOptionFlags options, CFPropertyListFormat *format, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);

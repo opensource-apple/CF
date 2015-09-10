@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFRuntime.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -34,6 +34,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <CoreFoundation/CFUUID.h>
+#include <CoreFoundation/CFCalendar.h>
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
@@ -47,7 +49,6 @@
 // This isn't in the embedded runtime.h header
 OBJC_EXPORT void *objc_destructInstance(id obj);
 #endif
-
 
 
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -198,7 +199,7 @@ static const CFRuntimeClass __CFTypeClass = {
 #endif //__cplusplus
 
 // the lock does not protect most reading of these; we just leak the old table to allow read-only accesses to continue to work
-static CFSpinLock_t __CFBigRuntimeFunnel = CFSpinLockInit;
+static CFLock_t __CFBigRuntimeFunnel = CFLockInit;
 CF_PRIVATE CFRuntimeClass * __CFRuntimeClassTable[__CFRuntimeClassTableSize] = {0};
 CF_PRIVATE int32_t __CFRuntimeClassTableCount = 0;
 
@@ -235,20 +236,20 @@ CFTypeID _CFRuntimeRegisterClass(const CFRuntimeClass * const cls) {
        CFLog(kCFLogLevelWarning, CFSTR("*** _CFRuntimeRegisterClass() given inconsistent class '%s'.  Program will crash soon."), cls->className);
        return _kCFRuntimeNotATypeID;
     }
-    __CFSpinLock(&__CFBigRuntimeFunnel);
+    __CFLock(&__CFBigRuntimeFunnel);
     if (__CFMaxRuntimeTypes <= __CFRuntimeClassTableCount) {
 	CFLog(kCFLogLevelWarning, CFSTR("*** CoreFoundation class table full; registration failing for class '%s'.  Program will crash soon."), cls->className);
-        __CFSpinUnlock(&__CFBigRuntimeFunnel);
+        __CFUnlock(&__CFBigRuntimeFunnel);
 	return _kCFRuntimeNotATypeID;
     }
     if (__CFRuntimeClassTableSize <= __CFRuntimeClassTableCount) {
 	CFLog(kCFLogLevelWarning, CFSTR("*** CoreFoundation class table full; registration failing for class '%s'.  Program will crash soon."), cls->className);
-        __CFSpinUnlock(&__CFBigRuntimeFunnel);
+        __CFUnlock(&__CFBigRuntimeFunnel);
 	return _kCFRuntimeNotATypeID;
     }
     __CFRuntimeClassTable[__CFRuntimeClassTableCount++] = (CFRuntimeClass *)cls;
     CFTypeID typeID = __CFRuntimeClassTableCount - 1;
-    __CFSpinUnlock(&__CFBigRuntimeFunnel);
+    __CFUnlock(&__CFBigRuntimeFunnel);
     return typeID;
 }
 
@@ -258,9 +259,9 @@ const CFRuntimeClass * _CFRuntimeGetClassWithTypeID(CFTypeID typeID) {
 }
 
 void _CFRuntimeUnregisterClassWithTypeID(CFTypeID typeID) {
-    __CFSpinLock(&__CFBigRuntimeFunnel);
+    __CFLock(&__CFBigRuntimeFunnel);
     __CFRuntimeClassTable[typeID] = NULL;
-    __CFSpinUnlock(&__CFBigRuntimeFunnel);
+    __CFUnlock(&__CFBigRuntimeFunnel);
 }
 
 
@@ -294,13 +295,12 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
     if (NULL == cls) {
 	return NULL;
     }
+    if (cls->version & _kCFRuntimeRequiresAlignment) {
+        allocator = kCFAllocatorSystemDefault;
+    }
     Boolean customRC = !!(cls->version & _kCFRuntimeCustomRefCount);
     if (customRC && !cls->refcount) {
         CFLog(kCFLogLevelWarning, CFSTR("*** _CFRuntimeCreateInstance() found inconsistent class '%s'."), cls->className);
-        return NULL;
-    }
-    if (customRC && kCFUseCollectableAllocator && (0 || 0)) {
-        CFLog(kCFLogLevelWarning, CFSTR("*** _CFRuntimeCreateInstance(): special zero-ref allocators cannot be used with class '%s' with custom ref counting."), cls->className);
         return NULL;
     }
     CFAllocatorRef realAllocator = (NULL == allocator) ? __CFGetDefaultAllocator() : allocator;
@@ -308,11 +308,17 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
 	return NULL;
     }
     Boolean usesSystemDefaultAllocator = _CFAllocatorIsSystemDefault(realAllocator);
+    size_t align = (cls->version & _kCFRuntimeRequiresAlignment) ? cls->requiredAlignment : 16;
     CFIndex size = sizeof(CFRuntimeBase) + extraBytes + (usesSystemDefaultAllocator ? 0 : sizeof(CFAllocatorRef));
     size = (size + 0xF) & ~0xF;	// CF objects are multiples of 16 in size
     // CFType version 0 objects are unscanned by default since they don't have write-barriers and hard retain their innards
     // CFType version 1 objects are scanned and use hand coded write-barriers to store collectable storage within
-    CFRuntimeBase *memory = (CFRuntimeBase *)CFAllocatorAllocate(allocator, size, CF_GET_COLLECTABLE_MEMORY_TYPE(cls));
+    CFRuntimeBase *memory = NULL;
+    if (cls->version & _kCFRuntimeRequiresAlignment) {
+        memory = malloc_zone_memalign(malloc_default_zone(), align, size);
+    } else {
+        memory = (CFRuntimeBase *)CFAllocatorAllocate(allocator, size, CF_GET_COLLECTABLE_MEMORY_TYPE(cls));
+    }
     if (NULL == memory) {
 	return NULL;
     }
@@ -421,37 +427,37 @@ enum {
 #define DISGUISE(O) (~(uintptr_t)(O))
 
 static struct {
-    CFSpinLock_t lock;
+    CFLock_t lock;
     CFBasicHashRef table;
-    uint8_t padding[64 - sizeof(CFBasicHashRef) - sizeof(CFSpinLock_t)];
+//    uint8_t padding[64 - sizeof(CFBasicHashRef) - sizeof(CFLock_t)];
 } __NSRetainCounters[NUM_EXTERN_TABLES];
 
 CF_EXPORT uintptr_t __CFDoExternRefOperation(uintptr_t op, id obj) {
     if (nil == obj) HALT;
     uintptr_t idx = EXTERN_TABLE_IDX(obj);
     uintptr_t disguised = DISGUISE(obj);
-    CFSpinLock_t *lock = &__NSRetainCounters[idx].lock;
+    CFLock_t *lock = &__NSRetainCounters[idx].lock;
     CFBasicHashRef table = __NSRetainCounters[idx].table;
     uintptr_t count;
     switch (op) {
     case 300:   // increment
     case 350:   // increment, no event
-        __CFSpinLock(lock);
+        __CFLock(lock);
 	CFBasicHashAddValue(table, disguised, disguised);
-        __CFSpinUnlock(lock);
+        __CFUnlock(lock);
         if (__CFOASafe && op != 350) __CFRecordAllocationEvent(__kCFObjectRetainedEvent, obj, 0, 0, NULL);
         return (uintptr_t)obj;
     case 400:   // decrement
         if (__CFOASafe) __CFRecordAllocationEvent(__kCFObjectReleasedEvent, obj, 0, 0, NULL);
     case 450:   // decrement, no event
-        __CFSpinLock(lock);
+        __CFLock(lock);
         count = (uintptr_t)CFBasicHashRemoveValue(table, disguised);
-        __CFSpinUnlock(lock);
+        __CFUnlock(lock);
         return 0 == count;
     case 500:
-        __CFSpinLock(lock);
+        __CFLock(lock);
         count = (uintptr_t)CFBasicHashGetCountOfKey(table, disguised);
-        __CFSpinUnlock(lock);
+        __CFUnlock(lock);
         return count;
     }
     return 0;
@@ -621,7 +627,7 @@ CF_PRIVATE void __CFTypeCollectionRelease(CFAllocatorRef allocator, const void *
 }
 
 #if !__LP64__
-static CFSpinLock_t __CFRuntimeExternRefCountTableLock = CFSpinLockInit;
+static CFLock_t __CFRuntimeExternRefCountTableLock = CFLockInit;
 #endif
 
 static uint64_t __CFGetFullRetainCount(CFTypeRef cf) {
@@ -744,34 +750,18 @@ CFAllocatorRef CFGetAllocator(CFTypeRef cf) {
     return __CFGetAllocator(cf);
 }
 
-extern void __CFNullInitialize(void);
+
+extern CFTypeID CFBinaryHeapGetTypeID();
+extern CFTypeID CFBitVectorGetTypeID();
+extern CFTypeID CFTreeGetTypeID();
+extern CFTypeID CFPlugInInstanceGetTypeID();
+extern CFTypeID CFStringTokenizerGetTypeID();
+extern CFTypeID CFStorageGetTypeID(void);
 extern void __CFAllocatorInitialize(void);
 extern void __CFStringInitialize(void);
-extern void __CFArrayInitialize(void);
-extern void __CFBooleanInitialize(void);
 extern void __CFCharacterSetInitialize(void);
-extern void __CFDataInitialize(void);
-extern void __CFNumberInitialize(void);
-extern void __CFStorageInitialize(void);
-extern void __CFErrorInitialize(void);
-extern void __CFTreeInitialize(void);
-extern void __CFURLInitialize(void);
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-extern void __CFMachPortInitialize(void);
-#endif
-extern void __CFMessagePortInitialize(void);
-extern void __CFRunLoopInitialize(void);
-extern void __CFRunLoopObserverInitialize(void);
-extern void __CFRunLoopSourceInitialize(void);
-extern void __CFRunLoopTimerInitialize(void);
 extern void __CFPFactoryInitialize(void);
-extern void __CFBundleInitialize(void);
 extern void __CFPlugInInitialize(void);
-extern void __CFPlugInInstanceInitialize(void);
-extern void __CFUUIDInitialize(void);
-extern void __CFBinaryHeapInitialize(void);
-extern void __CFBitVectorInitialize(void);
-CF_PRIVATE void __CFDateInitialize(void);
 #if DEPLOYMENT_TARGET_LINUX
 CF_PRIVATE void __CFTSDLinuxInitialize();
 #endif
@@ -782,12 +772,6 @@ CF_PRIVATE void __CFTSDWindowsCleanup(void);
 CF_PRIVATE void __CFFinalizeWindowsThreadData();
 #endif
 extern void __CFStreamInitialize(void);
-extern void __CFCalendarInitialize();
-extern void __CFTimeZoneInitialize();
-#if DEPLOYMENT_TARGET_LINUX
-extern void __CFCalendarInitialize();
-extern void __CFTimeZoneInitialize();
-#endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
 extern void __CFXPreferencesInitialize(void);
 #endif
@@ -862,8 +846,6 @@ static struct {
     {"CFStringDisableROM", NULL},
     {"CF_CHARSET_PATH", NULL},
     {"__CF_USER_TEXT_ENCODING", NULL},
-    {"__CFPREFERENCES_AUTOSYNC_INTERVAL", NULL},
-    {"__CFPREFERENCES_LOG_FAILURES", NULL},
     {"CFNumberDisableCache", NULL},
     {"__CFPREFERENCES_AVOID_DAEMON", NULL},
     {"APPLE_FRAMEWORKS_ROOT", NULL},
@@ -991,7 +973,7 @@ void __CFInitialize(void) {
             CFBasicHashCallbacks callbacks = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 	    __NSRetainCounters[idx].table = CFBasicHashCreate(kCFAllocatorSystemDefault, kCFBasicHashHasCounts | kCFBasicHashLinearHashing | kCFBasicHashAggressiveGrowth, &callbacks);
 	    CFBasicHashSetCapacity(__NSRetainCounters[idx].table, 40);
-	    __NSRetainCounters[idx].lock = CFSpinLockInit;
+	    __NSRetainCounters[idx].lock = CFLockInit;
 	}
 
         /*** _CFRuntimeCreateInstance() can finally be called generally after this line. ***/
@@ -1000,58 +982,58 @@ void __CFInitialize(void) {
         __CFStringInitialize();		// CFString's TypeID must be 0x7, now and forever
     
         __CFRuntimeClassTableCount = 16;
-        __CFNullInitialize();		// See above for hard-coding of this position
+        CFNullGetTypeID();		// See above for hard-coding of this position
         CFSetGetTypeID();		// See above for hard-coding of this position
         CFDictionaryGetTypeID();	// See above for hard-coding of this position
-        __CFArrayInitialize();		// See above for hard-coding of this position
-        __CFDataInitialize();		// See above for hard-coding of this position
-        __CFBooleanInitialize();	// See above for hard-coding of this position
-        __CFNumberInitialize();		// See above for hard-coding of this position
+        CFArrayGetTypeID();		// See above for hard-coding of this position
+        CFDataGetTypeID();		// See above for hard-coding of this position
+        CFBooleanGetTypeID();		// See above for hard-coding of this position
+        CFNumberGetTypeID();		// See above for hard-coding of this position
 
-        __CFBinaryHeapInitialize();
-        __CFBitVectorInitialize();
+        CFBinaryHeapGetTypeID();
+        CFBitVectorGetTypeID();
         __CFCharacterSetInitialize();
-        __CFStorageInitialize();
-        __CFErrorInitialize();
-        __CFTreeInitialize();
-        __CFURLInitialize();
+        CFStorageGetTypeID();
+        CFErrorGetTypeID();
+        CFTreeGetTypeID();
+        CFURLGetTypeID();
         
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
-        __CFBundleInitialize();
+        CFBundleGetTypeID();
         __CFPFactoryInitialize();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
         __CFPlugInInitialize();
-        __CFPlugInInstanceInitialize();
+        CFPlugInInstanceGetTypeID();
 #endif
-        __CFUUIDInitialize();
+        CFUUIDGetTypeID();
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
-	__CFMessagePortInitialize();
+	CFMessagePortGetTypeID();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-        __CFMachPortInitialize();
+        CFMachPortGetTypeID();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS
         __CFStreamInitialize();
 #endif
 #if DEPLOYMENT_TARGET_WINDOWS
-        __CFWindowsNamedPipeInitialize();
+        CFWindowsNamedPipeGetTypeID();
 #endif
         
-        __CFDateInitialize();
+        CFDateGetTypeID();
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI || DEPLOYMENT_TARGET_WINDOWS
-        __CFRunLoopInitialize();
-        __CFRunLoopObserverInitialize();
-        __CFRunLoopSourceInitialize();
-        __CFRunLoopTimerInitialize();
+        CFRunLoopGetTypeID();
+        CFRunLoopObserverGetTypeID();
+        CFRunLoopSourceGetTypeID();
+        CFRunLoopTimerGetTypeID();
 #endif
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
-        __CFTimeZoneInitialize();
-        __CFCalendarInitialize();
+        CFTimeZoneGetTypeID();
+        CFCalendarGetTypeID();
 #if DEPLOYMENT_TARGET_LINUX
-        __CFTimeZoneInitialize();
-        __CFCalendarInitialize();
+        CFTimeZoneGetTypeID();
+        CFCalendarGetTypeID();
 #endif
 #endif
 
@@ -1205,11 +1187,13 @@ int DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID pReserved ) {
 #define RC_MASK			(0xFFFFFFFFULL)
 #define RC_GET(V)		((V) & RC_MASK)
 #define RC_DEALLOCATING_BIT	(0x400000ULL << 32)
+#define RC_DEALLOCATED_BIT	(0x200000ULL << 32)
 #else
 #define RC_INCREMENT		(1ULL << 32)
 #define RC_MASK			(0xFFFFFFFFULL << 32)
 #define RC_GET(V)		(((V) & RC_MASK) >> 32)
 #define RC_DEALLOCATING_BIT	(0x400000ULL)
+#define RC_DEALLOCATED_BIT	(0x200000ULL)
 #endif
 
 #if !DEPLOYMENT_TARGET_WINDOWS && __LP64__
@@ -1239,6 +1223,7 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
     }
 
     Boolean didAuto = false;
+    if (tryR && (cfinfo & (0x400000 | 0x200000))) return NULL; // deallocating or deallocated
 #if __LP64__
     if (0 == ((CFRuntimeBase *)cf)->_rc && !CF_IS_COLLECTABLE(cf)) return cf;	// Constant CFTypeRef
 #if !DEPLOYMENT_TARGET_WINDOWS
@@ -1266,9 +1251,9 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
 #else
 #define RC_START 24
 #define RC_END 31
-    volatile uint32_t *infoLocation = (uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     CFIndex rcLowBits = __CFBitfieldGetValue(cfinfo, RC_END, RC_START);
     if (__builtin_expect(0 == rcLowBits, 0) && !CF_IS_COLLECTABLE(cf)) return cf;	// Constant CFTypeRef
+    volatile uint32_t *infoLocation = (uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     bool success = 0;
     do {
         cfinfo = *infoLocation;
@@ -1290,12 +1275,12 @@ static CFTypeRef _CFRetain(CFTypeRef cf, Boolean tryR) {
              */
             prospectiveNewInfo = cfinfo;
             __CFBitfieldSetValue(prospectiveNewInfo, RC_END, RC_START, ((1 << 7) | (1 << 6)));
-            __CFSpinLock(&__CFRuntimeExternRefCountTableLock);
+            __CFLock(&__CFRuntimeExternRefCountTableLock);
             success = CAS32(*(int32_t *)& cfinfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
             if (__builtin_expect(success, 1)) {
                 __CFDoExternRefOperation(350, (id)cf);
             }
-            __CFSpinUnlock(&__CFRuntimeExternRefCountTableLock);
+            __CFUnlock(&__CFRuntimeExternRefCountTableLock);
         } else {
             success = CAS32(*(int32_t *)& cfinfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
             // XXX_PCB:  0 --> 1 transition? then add a GC retain count, to root the object. we'll remove it on the 1 --> 0 transition.
@@ -1336,6 +1321,7 @@ Boolean _CFIsDeallocating(CFTypeRef cf) {
 static void _CFRelease(CFTypeRef cf) {
 
     uint32_t cfinfo = *(uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
+    if (cfinfo & 0x200000) return; // deallocated, or not a cf object
     CFTypeID typeID = (cfinfo >> 8) & 0x03FF; // mask up to 0x0FFF
     if (cfinfo & 0x800000) { // custom ref counting for object
         CFRuntimeClass *cfClass = __CFRuntimeClassTable[typeID];
@@ -1377,14 +1363,17 @@ static void _CFRelease(CFTypeRef cf) {
 		if (!CAS64(allBits, newAllBits, (int64_t *)&((CFRuntimeBase *)cf)->_cfinfo)) {
 		    goto again;
 		}
-		allBits = newAllBits;
                 void (*func)(CFTypeRef) = __CFRuntimeClassTable[typeID]->finalize;
 	        if (NULL != func) {
 		    func(cf);
 	        }
+		// Any further ref-count changes after this point are operating on a finalized object
 		allBits = *(uint64_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
 		lowBits = RC_GET(allBits);
-	        if (isAllocator || ((1 == lowBits) && CAS64(allBits, allBits - RC_INCREMENT, (int64_t *)&((CFRuntimeBase *)cf)->_cfinfo))) {
+	        if (isAllocator || (1 == lowBits)) {
+		    do { // hammer until it takes; trying to retain the object on another thread at this point? too late!
+                        allBits = *(uint64_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
+	            } while (!CAS64(allBits, (allBits | RC_DEALLOCATED_BIT) - RC_INCREMENT, (int64_t *)&((CFRuntimeBase *)cf)->_cfinfo));
 		    goto really_free;
 	        }
                 Boolean success = false;
@@ -1438,7 +1427,7 @@ static void _CFRelease(CFTypeRef cf) {
     again:;
     volatile uint32_t *infoLocation = (uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     CFIndex rcLowBits = __CFBitfieldGetValue(cfinfo, RC_END, RC_START);
-    if (__builtin_expect(0 == rcLowBits, 0)) {
+    if (0 == rcLowBits) {
         if (CF_IS_COLLECTABLE(cf)) auto_zone_release(objc_collectableZone(), (void*)cf);
         return;        // Constant CFTypeRef
     }
@@ -1447,7 +1436,7 @@ static void _CFRelease(CFTypeRef cf) {
     do {
         cfinfo = *infoLocation;
         rcLowBits = __CFBitfieldGetValue(cfinfo, RC_END, RC_START);
-        if (__builtin_expect(1 == rcLowBits, 0)) {
+        if (1 == rcLowBits) {
             // we think cf should be deallocated
             uint32_t prospectiveNewInfo = cfinfo | (0x400000);
             if (CF_IS_COLLECTABLE(cf)) {
@@ -1458,9 +1447,9 @@ static void _CFRelease(CFTypeRef cf) {
         } else {
             // not yet junk
             uint32_t prospectiveNewInfo = cfinfo; // don't want compiler to generate prospectiveNewInfo = *infoLocation.  This is why infoLocation is declared as a pointer to volatile memory.
-            if (__builtin_expect((1 << 7) == rcLowBits, 0)) {
+            if ((1 << 7) == rcLowBits) {
                 // Time to remove a bit from the external ref count
-                __CFSpinLock(&__CFRuntimeExternRefCountTableLock);
+                __CFLock(&__CFRuntimeExternRefCountTableLock);
                 CFIndex rcHighBitsCnt = __CFDoExternRefOperation(500, (id)cf);
                 if (1 == rcHighBitsCnt) {
                     __CFBitfieldSetValue(prospectiveNewInfo, RC_END, RC_START, (1 << 6) - 1);
@@ -1468,16 +1457,16 @@ static void _CFRelease(CFTypeRef cf) {
                     __CFBitfieldSetValue(prospectiveNewInfo, RC_END, RC_START, ((1 << 6) | (1 << 7)) - 1);
                 }
                 success = CAS32(*(int32_t *)& cfinfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
-                if (__builtin_expect(success, 1)) {
+                if (success) {
                     __CFDoExternRefOperation(450, (id)cf);
                 }
-                __CFSpinUnlock(&__CFRuntimeExternRefCountTableLock);
+                __CFUnlock(&__CFRuntimeExternRefCountTableLock);
             } else {
                 prospectiveNewInfo -= (1 << RC_START);
                 success = CAS32(*(int32_t *)& cfinfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
             }
         }
-    } while (__builtin_expect(!success, 0));
+    } while (!success);
 
     if (whack) {
             CFRuntimeClass *cfClass = __CFRuntimeClassTable[typeID];
@@ -1496,8 +1485,12 @@ static void _CFRelease(CFTypeRef cf) {
                     if (NULL != func) {
                         func(cf);
                     }
+		    // Any further ref-count changes after this point are operating on a finalized object
                     rcLowBits = __CFBitfieldGetValue(*infoLocation, RC_END, RC_START);
                     if (1 == rcLowBits) {
+                        do { // hammer until it takes; trying to retain the object on another thread at this point? too late!
+                            cfinfo = *infoLocation;
+                        } while (!CAS32(cfinfo, cfinfo | 0x200000, (int32_t *)infoLocation));
                         goto really_free;
                     }
                     do { // drop the deallocating bit; racey, but this resurrection stuff isn't thread-safe anyway
@@ -1512,7 +1505,7 @@ static void _CFRelease(CFTypeRef cf) {
 #else
     volatile uint32_t *infoLocation = (uint32_t *)&(((CFRuntimeBase *)cf)->_cfinfo);
     CFIndex rcLowBits = __CFBitfieldGetValue(*infoLocation, RC_END, RC_START);
-    if (__builtin_expect(0 == rcLowBits, 0)) {
+    if (0 == rcLowBits) {
         if (CF_IS_COLLECTABLE(cf)) auto_zone_release(objc_collectableZone(), (void*)cf);
         return;        // Constant CFTypeRef
     }
@@ -1520,7 +1513,7 @@ static void _CFRelease(CFTypeRef cf) {
     do {
         uint32_t initialCheckInfo = *infoLocation;
         rcLowBits = __CFBitfieldGetValue(initialCheckInfo, RC_END, RC_START);
-        if (__builtin_expect(1 == rcLowBits, 0)) {
+        if (1 == rcLowBits) {
             // we think cf should be deallocated
 	    // CANNOT WRITE ANY NEW VALUE INTO [CF_RC_BITS] UNTIL AFTER FINALIZATION
 	    CFRuntimeClass *cfClass = __CFRuntimeClassTable[typeID];
@@ -1551,7 +1544,7 @@ static void _CFRelease(CFTypeRef cf) {
 		    // which (that thread) would be the thing doing the extra retain in that case.
 		    rcLowBits = __CFBitfieldGetValue(*infoLocation, RC_END, RC_START);
 		    success = (1 == rcLowBits);
-		    if (__builtin_expect(success, 1)) {
+		    if (success) {
 			goto really_free;
 		    }
 		}
@@ -1559,9 +1552,9 @@ static void _CFRelease(CFTypeRef cf) {
         } else {
             // not yet junk
             uint32_t prospectiveNewInfo = initialCheckInfo; // don't want compiler to generate prospectiveNewInfo = *infoLocation.  This is why infoLocation is declared as a pointer to volatile memory.
-            if (__builtin_expect((1 << 7) == rcLowBits, 0)) {
+            if ((1 << 7) == rcLowBits) {
                 // Time to remove a bit from the external ref count
-                __CFSpinLock(&__CFRuntimeExternRefCountTableLock);
+                __CFLock(&__CFRuntimeExternRefCountTableLock);
                 CFIndex rcHighBitsCnt = __CFDoExternRefOperation(500, (id)cf);
                 if (1 == rcHighBitsCnt) {
                     __CFBitfieldSetValue(prospectiveNewInfo, RC_END, RC_START, (1 << 6) - 1);
@@ -1569,16 +1562,16 @@ static void _CFRelease(CFTypeRef cf) {
                     __CFBitfieldSetValue(prospectiveNewInfo, RC_END, RC_START, ((1 << 6) | (1 << 7)) - 1);
                 }
                 success = CAS32(*(int32_t *)&initialCheckInfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
-                if (__builtin_expect(success, 1)) {
+                if (success) {
 		    __CFDoExternRefOperation(450, (id)cf);
                 }
-                __CFSpinUnlock(&__CFRuntimeExternRefCountTableLock);
+                __CFUnlock(&__CFRuntimeExternRefCountTableLock);
             } else {
                 prospectiveNewInfo -= (1 << RC_START);
                 success = CAS32(*(int32_t *)&initialCheckInfo, *(int32_t *)&prospectiveNewInfo, (int32_t *)infoLocation);
             }
         }
-    } while (__builtin_expect(!success, 0));
+    } while (!success);
 #endif
 #endif
     if (!didAuto && __builtin_expect(__CFOASafe, 0)) {

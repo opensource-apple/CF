@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFPropertyList.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Tony Parker
 */
 
@@ -47,6 +47,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
 #include <ctype.h>
 
 
@@ -598,22 +599,38 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
     } else if (typeID == datetype) {
         // YYYY '-' MM '-' DD 'T' hh ':' mm ':' ss 'Z'
 	int32_t y = 0, M = 0, d = 0, H = 0, m = 0, s = 0;
-#if 1
-        CFGregorianDate date = CFAbsoluteTimeGetGregorianDate(CFDateGetAbsoluteTime((CFDateRef)object), NULL);
-	y = date.year;
-	M = date.month;
-	d = date.day;
-	H = date.hour;
-	m = date.minute;
-	s = (int32_t)date.second;
-#else
-	CFCalendarRef calendar = CFCalendarCreateWithIdentifier(kCFAllocatorSystemDefault, kCFCalendarIdentifierGregorian);
-	CFTimeZoneRef tz = CFTimeZoneCreateWithName(kCFAllocatorSystemDefault, CFSTR("GMT"), true);
-	CFCalendarSetTimeZone(calendar, tz);
-	CFCalendarDecomposeAbsoluteTime(calendar, CFDateGetAbsoluteTime((CFDateRef)object), (const uint8_t *)"yMdHms", &y, &M, &d, &H, &m, &s);
-	CFRelease(calendar);
-	CFRelease(tz);
+        CFAbsoluteTime at = CFDateGetAbsoluteTime((CFDateRef)object);
+#if 0
+        // Alternative to the CFAbsoluteTimeGetGregorianDate() code which works well
+        struct timeval tv;
+        struct tm mine;
+        tv.tv_sec = floor(at + kCFAbsoluteTimeIntervalSince1970);
+        gmtime_r(&tv.tv_sec, &mine);
+	y = mine.tm_year + 1900;
+	M = mine.tm_mon + 1;
+	d = mine.tm_mday;
+	H = mine.tm_hour;
+	m = mine.tm_min;
+	s = mine.tm_sec;
 #endif
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
+        CFGregorianDate date = CFAbsoluteTimeGetGregorianDate(at, NULL);
+#pragma GCC diagnostic pop
+
+#if 0
+if (date.year != y || date.month != M || date.day != d || date.hour != H || date.minute != m || (int32_t)date.second != s) {
+    CFLog(4, CFSTR("DATE ERROR {%d, %d, %d, %d, %d, %d} != {%d,  %d, %d, %d, %d, %d}\n"), (int)date.year, (int)date.month, (int)date.day, (int)date.hour, (int)date.minute, (int32_t)date.second, y, M, d, H, m, s);
+}
+#endif
+        y = date.year;
+        M = date.month;
+        d = date.day;
+        H = date.hour;
+        m = date.minute;
+        s = (int32_t)date.second;
+
         _plistAppendUTF8CString(xmlString, "<");
         _plistAppendCharacters(xmlString, CFXMLPlistTagsUnicode[DATE_IX], DATE_TAG_LENGTH);
         _plistAppendUTF8CString(xmlString, ">");
@@ -1708,18 +1725,39 @@ static Boolean parseDateTag(_CFXMLPlistParseInfo *pInfo, CFTypeRef *out) {
     }
 
     CFAbsoluteTime at = 0.0;
-#if 1
+
+#if 0
+    { // alternative to CFGregorianDateGetAbsoluteTime() below; also, cheaper than CFCalendar would be;
+      // clearly not thread-safe with that environment variable having to be set;
+      // timegm() could be used instead of mktime(), on platforms which have it
+        struct tm mine;
+        mine.tm_year = (yearIsNegative ? -year : year) - 1900;
+        mine.tm_mon = month - 1;
+        mine.tm_mday = day;
+        mine.tm_hour = hour;
+        mine.tm_min = minute;
+        mine.tm_sec = second;
+        char *tz = getenv("TZ");
+        setenv("TZ", "", 1);
+        tzset();
+        at = mktime(tm) - kCFAbsoluteTimeIntervalSince1970;
+        if (tz) {
+            setenv("TZ", tz, 1);
+        } else {
+            unsetenv("TZ");
+        }
+        tzset();
+    }
+#endif
+
+    // See <rdar://problem/5052483> Revisit the CFGregorianDate -> CFCalendar change in CFPropertyList.c
+    // for why we can't use CFCalendar
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
     CFGregorianDate date = {yearIsNegative ? -year : year, month, day, hour, minute, second};
     at = CFGregorianDateGetAbsoluteTime(date, NULL);
-#else
-    // this doesn't work
-    CFCalendarRef calendar = CFCalendarCreateWithIdentifier(kCFAllocatorSystemDefault, kCFCalendarIdentifierGregorian);
-    CFTimeZoneRef tz = CFTimeZoneCreateWithName(kCFAllocatorSystemDefault, CFSTR("GMT"), true);
-    CFCalendarSetTimeZone(calendar, tz);
-    CFCalendarComposeAbsoluteTime(calendar, &at, (const uint8_t *)"yMdHms", year, month, day, hour, minute, second);
-    CFRelease(calendar);
-    CFRelease(tz);
-#endif
+#pragma GCC diagnostic pop
+
     if (pInfo->skip) {
         *out = NULL;
     } else {

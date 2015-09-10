@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBitVector.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -90,10 +90,6 @@ CF_INLINE CFIndex __CFBitVectorCapacity(CFBitVectorRef bv) {
 
 CF_INLINE void __CFBitVectorSetCapacity(CFMutableBitVectorRef bv, CFIndex v) {
     bv->_capacity = v;
-}
-
-CF_INLINE CFIndex __CFBitVectorNumBucketsUsed(CFBitVectorRef bv) {
-    return bv->_count / __CF_BITS_PER_BUCKET + 1;
 }
 
 CF_INLINE void __CFBitVectorSetNumBucketsUsed(CFMutableBitVectorRef bv, CFIndex v) {
@@ -225,11 +221,9 @@ static const CFRuntimeClass __CFBitVectorClass = {
     __CFBitVectorCopyDescription
 };
 
-CF_PRIVATE void __CFBitVectorInitialize(void) {
-    __kCFBitVectorTypeID = _CFRuntimeRegisterClass(&__CFBitVectorClass);
-}
-
 CFTypeID CFBitVectorGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFBitVectorTypeID = _CFRuntimeRegisterClass(&__CFBitVectorClass); });
     return __kCFBitVectorTypeID;
 }
 
@@ -239,7 +233,7 @@ static CFMutableBitVectorRef __CFBitVectorInit(CFAllocatorRef allocator, CFOptio
     CFAssert2(0 <= capacity, __kCFLogAssertion, "%s(): capacity (%d) cannot be less than zero", __PRETTY_FUNCTION__, capacity);
     CFAssert2(0 <= numBits, __kCFLogAssertion, "%s(): numValues (%d) cannot be less than zero", __PRETTY_FUNCTION__, numBits);
     size = sizeof(struct __CFBitVector) - sizeof(CFRuntimeBase);
-    memory = (CFMutableBitVectorRef)_CFRuntimeCreateInstance(allocator, __kCFBitVectorTypeID, size, NULL);
+    memory = (CFMutableBitVectorRef)_CFRuntimeCreateInstance(allocator, CFBitVectorGetTypeID(), size, NULL);
     if (NULL == memory) {
 	return NULL;
     }
@@ -271,17 +265,17 @@ CFMutableBitVectorRef CFBitVectorCreateMutable(CFAllocatorRef allocator, CFIndex
 }
 
 CFBitVectorRef CFBitVectorCreateCopy(CFAllocatorRef allocator, CFBitVectorRef bv) {
-   __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+   __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     return __CFBitVectorInit(allocator, kCFBitVectorImmutable, __CFBitVectorCount(bv), (const uint8_t *)bv->_buckets, __CFBitVectorCount(bv));
 }
 
 CFMutableBitVectorRef CFBitVectorCreateMutableCopy(CFAllocatorRef allocator, CFIndex capacity, CFBitVectorRef bv) {
-   __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+   __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     return __CFBitVectorInit(allocator, kCFBitVectorMutable, capacity, (const uint8_t *)bv->_buckets, __CFBitVectorCount(bv));
 }
 
 CFIndex CFBitVectorGetCount(CFBitVectorRef bv) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     return __CFBitVectorCount(bv);
 }
 
@@ -340,7 +334,7 @@ static __CFBitVectorBucket __CFBitVectorCountBits(__CFBitVectorBucket bucketValu
 
 CFIndex CFBitVectorGetCountOfBit(CFBitVectorRef bv, CFRange range, CFBit value) {
     struct _occursContext context;
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     if (0 == range.length) return 0;
     context.value = value;
@@ -350,13 +344,13 @@ CFIndex CFBitVectorGetCountOfBit(CFBitVectorRef bv, CFRange range, CFBit value) 
 }
 
 Boolean CFBitVectorContainsBit(CFBitVectorRef bv, CFRange range, CFBit value) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     return (CFBitVectorGetCountOfBit(bv, range, value) != 0) ? true : false;
 }
 
 CFBit CFBitVectorGetBitAtIndex(CFBitVectorRef bv, CFIndex idx) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     CFAssert2(0 <= idx && idx < __CFBitVectorCount(bv), __kCFLogAssertion, "%s(): index (%d) out of bounds", __PRETTY_FUNCTION__, idx);
     return __CFBitVectorBit(bv->_buckets, idx);
 }
@@ -406,7 +400,7 @@ static __CFBitVectorBucket __CFBitVectorGetBits(__CFBitVectorBucket bucketValue,
 
 void CFBitVectorGetBits(CFBitVectorRef bv, CFRange range, uint8_t *bytes) {
     struct _getBitsContext context;
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     if (0 == range.length) return;
     context.curByte = bytes;
@@ -418,7 +412,7 @@ void CFBitVectorGetBits(CFBitVectorRef bv, CFRange range, uint8_t *bytes) {
 
 CFIndex CFBitVectorGetFirstIndexOfBit(CFBitVectorRef bv, CFRange range, CFBit value) {
     CFIndex idx;
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     for (idx = 0; idx < range.length; idx++) {
 	if (value == CFBitVectorGetBitAtIndex(bv, range.location + idx)) {
@@ -430,7 +424,7 @@ CFIndex CFBitVectorGetFirstIndexOfBit(CFBitVectorRef bv, CFRange range, CFBit va
 
 CFIndex CFBitVectorGetLastIndexOfBit(CFBitVectorRef bv, CFRange range, CFBit value) {
     CFIndex idx;
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     for (idx = range.length; idx--;) {
 	if (value == CFBitVectorGetBitAtIndex(bv, range.location + idx)) {
@@ -479,7 +473,7 @@ void CFBitVectorSetCount(CFMutableBitVectorRef bv, CFIndex count) {
 }
 
 void CFBitVectorFlipBitAtIndex(CFMutableBitVectorRef bv, CFIndex idx) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     CFAssert2(0 <= idx && idx < __CFBitVectorCount(bv), __kCFLogAssertion, "%s(): index (%d) out of bounds", __PRETTY_FUNCTION__, idx);
     CFAssert1(__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable, __kCFLogAssertion, "%s(): bit vector is immutable", __PRETTY_FUNCTION__);
     __CFFlipBitVectorBit(bv->_buckets, idx);
@@ -490,7 +484,7 @@ static __CFBitVectorBucket __CFBitVectorFlipBits(__CFBitVectorBucket bucketValue
 }
 
 void CFBitVectorFlipBits(CFMutableBitVectorRef bv, CFRange range) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     CFAssert1(__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable, __kCFLogAssertion, "%s(): bit vector is immutable", __PRETTY_FUNCTION__);
     if (0 == range.length) return;
@@ -498,14 +492,14 @@ void CFBitVectorFlipBits(CFMutableBitVectorRef bv, CFRange range) {
 }
 
 void CFBitVectorSetBitAtIndex(CFMutableBitVectorRef bv, CFIndex idx, CFBit value) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     CFAssert2(0 <= idx && idx < __CFBitVectorCount(bv), __kCFLogAssertion, "%s(): index (%d) out of bounds", __PRETTY_FUNCTION__, idx);
     CFAssert1(__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable, __kCFLogAssertion, "%s(): bit vector is immutable", __PRETTY_FUNCTION__);
     __CFSetBitVectorBit(bv->_buckets, idx, value);
 }
 
 void CFBitVectorSetBits(CFMutableBitVectorRef bv, CFRange range, CFBit value) {
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     __CFBitVectorValidateRange(bv, range, __PRETTY_FUNCTION__);
     CFAssert1(__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable , __kCFLogAssertion, "%s(): bit vector is immutable", __PRETTY_FUNCTION__);
     if (0 == range.length) return;
@@ -518,7 +512,7 @@ void CFBitVectorSetBits(CFMutableBitVectorRef bv, CFRange range, CFBit value) {
 
 void CFBitVectorSetAllBits(CFMutableBitVectorRef bv, CFBit value) {
     CFIndex nBuckets, leftover;
-    __CFGenericValidateType(bv, __kCFBitVectorTypeID);
+    __CFGenericValidateType(bv, CFBitVectorGetTypeID());
     CFAssert1(__CFBitVectorMutableVariety(bv) == kCFBitVectorMutable , __kCFLogAssertion, "%s(): bit vector is immutable", __PRETTY_FUNCTION__);
     nBuckets = __CFBitVectorCount(bv) / __CF_BITS_PER_BUCKET;
     leftover = __CFBitVectorCount(bv) - nBuckets * __CF_BITS_PER_BUCKET;

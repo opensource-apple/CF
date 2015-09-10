@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFString.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFSTRING__)
@@ -398,14 +398,15 @@ typedef CF_OPTIONS(CFOptionFlags, CFStringCompareFlags) {
 };
 
 /* The main comparison routine; compares specified range of the first string to (the full range of) the second string.
-locale == NULL indicates canonical locale (the return value from CFLocaleGetSystem()).
-kCFCompareNumerically, added in 10.2, does not work if kCFCompareLocalized is specified on systems before 10.3
-kCFCompareBackwards and kCFCompareAnchored are not applicable.
+   locale == NULL indicates canonical locale (the return value from CFLocaleGetSystem()).
+   kCFCompareNumerically, added in 10.2, does not work if kCFCompareLocalized is specified on systems before 10.3
+   kCFCompareBackwards and kCFCompareAnchored are not applicable.
+   rangeToCompare applies to the first string; that is, only the substring of theString1 specified by rangeToCompare is compared against all of theString2.
 */
 CF_EXPORT
 CFComparisonResult CFStringCompareWithOptionsAndLocale(CFStringRef theString1, CFStringRef theString2, CFRange rangeToCompare, CFStringCompareFlags compareOptions, CFLocaleRef locale) CF_AVAILABLE(10_5, 2_0);
 
-/* Comparison convenience. Uses the current user locale (the return value from CFLocaleCopyCurrent()) if kCFCompareLocalized.
+/* Comparison convenience. Uses the current user locale (the return value from CFLocaleCopyCurrent()) if kCFCompareLocalized. Refer to CFStringCompareWithOptionsAndLocale() for more info.
 */
 CF_EXPORT
 CFComparisonResult CFStringCompareWithOptions(CFStringRef theString1, CFStringRef theString2, CFRange rangeToCompare, CFStringCompareFlags compareOptions);
@@ -418,14 +419,15 @@ CF_EXPORT
 CFComparisonResult CFStringCompare(CFStringRef theString1, CFStringRef theString2, CFStringCompareFlags compareOptions);
 
 /* CFStringFindWithOptionsAndLocale() returns the found range in the CFRange * argument; you can pass NULL for simple discovery check.
- locale == NULL indicates canonical locale (the return value from CFLocaleGetSystem()).
- If stringToFind is the empty string (zero length), nothing is found.
- Ignores the kCFCompareNumerically option.
+   locale == NULL indicates canonical locale (the return value from CFLocaleGetSystem()).
+   If stringToFind is the empty string (zero length), nothing is found.
+   Ignores the kCFCompareNumerically option.
+   Only the substring of theString specified by rangeToSearch is searched for stringToFind.
 */
 CF_EXPORT
 Boolean CFStringFindWithOptionsAndLocale(CFStringRef theString, CFStringRef stringToFind, CFRange rangeToSearch, CFStringCompareFlags searchOptions, CFLocaleRef locale, CFRange *result) CF_AVAILABLE(10_5, 2_0);
 
-/* Find convenience. Uses the current user locale (the return value from CFLocaleCopyCurrent()) if kCFCompareLocalized.
+/* Find convenience. Uses the current user locale (the return value from CFLocaleCopyCurrent()) if kCFCompareLocalized. Refer to CFStringFindWithOptionsAndLocale() for more info.
 */
 CF_EXPORT
 Boolean CFStringFindWithOptions(CFStringRef theString, CFStringRef stringToFind, CFRange rangeToSearch, CFStringCompareFlags searchOptions, CFRange *result);
@@ -437,6 +439,7 @@ Boolean CFStringFindWithOptions(CFStringRef theString, CFStringRef stringToFind,
    If stringToFind is the empty string (zero length), nothing is found.
    kCFCompareAnchored causes just the consecutive instances at start (or end, if kCFCompareBackwards) to be reported. So, searching for "AB" in "ABABXAB..." you just get the first two occurrences.
    Ignores the kCFCompareNumerically option.
+   Only the substring of theString specified by rangeToSearch is searched for stringToFind.
 */
 CF_EXPORT
 CFArrayRef CFStringCreateArrayWithFindResults(CFAllocatorRef alloc, CFStringRef theString, CFStringRef stringToFind, CFRange rangeToSearch, CFStringCompareFlags compareOptions);

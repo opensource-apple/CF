@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFRuntime.h
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFRUNTIME__)
@@ -81,6 +81,7 @@ enum { // Version field constants
     _kCFRuntimeScannedObject =     (1UL << 0),
     _kCFRuntimeResourcefulObject = (1UL << 2),  // tells CFRuntime to make use of the reclaim field
     _kCFRuntimeCustomRefCount =    (1UL << 3),  // tells CFRuntime to make use of the refcount field
+    _kCFRuntimeRequiresAlignment = (1UL << 4),  // tells CFRuntime to make use of the requiredAlignment field
 };
 
 typedef struct __CFRuntimeClass {
@@ -95,10 +96,10 @@ typedef struct __CFRuntimeClass {
     CFStringRef (*copyDebugDesc)(CFTypeRef cf);	// return str with retain
 
 #define CF_RECLAIM_AVAILABLE 1
-    void (*reclaim)(CFTypeRef cf); // Set _kCFRuntimeResourcefulObject in the .version to indicate this field should be used
+    void (*reclaim)(CFTypeRef cf); // Or in _kCFRuntimeResourcefulObject in the .version to indicate this field should be used
 
 #define CF_REFCOUNT_AVAILABLE 1
-    uint32_t (*refcount)(intptr_t op, CFTypeRef cf); // Set _kCFRuntimeCustomRefCount in the .version to indicate this field should be used
+    uint32_t (*refcount)(intptr_t op, CFTypeRef cf); // Or in _kCFRuntimeCustomRefCount in the .version to indicate this field should be used
         // this field must be non-NULL when _kCFRuntimeCustomRefCount is in the .version field
         // - if the callback is passed 1 in 'op' it should increment the 'cf's reference count and return 0
         // - if the callback is passed 0 in 'op' it should return the 'cf's reference count, up to 32 bits
@@ -107,6 +108,11 @@ typedef struct __CFRuntimeClass {
         // remember that reference count incrementing/decrementing must be done thread-safely/atomically
         // objects should be created/initialized with a custom ref-count of 1 by the class creation functions
         // do not attempt to use any bits within the CFRuntimeBase for your reference count; store that in some additional field in your CF object
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#define CF_REQUIRED_ALIGNMENT_AVAILABLE 1
+    uintptr_t requiredAlignment; // Or in _kCFRuntimeRequiresAlignment in the .version field to indicate this field should be used; the allocator to _CFRuntimeCreateInstance() will be ignored in this case; if this is less than the minimum alignment the system supports, you'll get higher alignment; if this is not an alignment the system supports (e.g., most systems will only support powers of two, or if it is too high), the result (consequences) will be up to CF or the system to decide
 
 } CFRuntimeClass;
 
@@ -136,6 +142,8 @@ CF_EXPORT CFTypeID _CFRuntimeRegisterClass(const CFRuntimeClass * const cls);
 	 *   CFGetTypeID(), CFRetain(), CFRelease(), CFGetRetainCount(),
 	 *   and CFGetAllocator() are valid on it when the init
 	 *   function if any is called.
+         * - copy field should always be NULL. Generic copying of CF
+         *   objects has never been defined (and is unlikely).
 	 * - finalize field points to a function which destroys an
 	 *   instance when the retain count has fallen to zero; if
 	 *   this is NULL, finalization does nothing. Note that if
@@ -267,117 +275,7 @@ CF_EXPORT void _CFRuntimeInitStaticInstance(void *memory, CFTypeID typeID);
 	 */
 #define CF_HAS_INIT_STATIC_INSTANCE 1
 
-#if 0
-// ========================= EXAMPLE =========================
-
-// Example: EXRange -- a "range" object, which keeps the starting
-//       location and length of the range. ("EX" as in "EXample").
-
-// ---- API ----
-
-typedef const struct __EXRange * EXRangeRef;
-
-CFTypeID EXRangeGetTypeID(void);
-
-EXRangeRef EXRangeCreate(CFAllocatorRef allocator, uint32_t location, uint32_t length);
-
-uint32_t EXRangeGetLocation(EXRangeRef rangeref);
-uint32_t EXRangeGetLength(EXRangeRef rangeref);
-
-
-// ---- implementation ----
-
-#include <CoreFoundation/CFBase.h>
-#include <CoreFoundation/CFString.h>
-
-struct __EXRange {
-    CFRuntimeBase _base;
-    uint32_t _location;
-    uint32_t _length;
-};
-
-static Boolean __EXRangeEqual(CFTypeRef cf1, CFTypeRef cf2) {
-    EXRangeRef rangeref1 = (EXRangeRef)cf1;
-    EXRangeRef rangeref2 = (EXRangeRef)cf2;
-    if (rangeref1->_location != rangeref2->_location) return false;
-    if (rangeref1->_length != rangeref2->_length) return false;
-    return true;
-}
-
-static CFHashCode __EXRangeHash(CFTypeRef cf) {
-    EXRangeRef rangeref = (EXRangeRef)cf;
-    return (CFHashCode)(rangeref->_location + rangeref->_length);
-}
-
-static CFStringRef __EXRangeCopyFormattingDesc(CFTypeRef cf, CFDictionaryRef formatOpts) {
-    EXRangeRef rangeref = (EXRangeRef)cf;
-    return CFStringCreateWithFormat(CFGetAllocator(rangeref), formatOpts,
-		CFSTR("[%u, %u)"),
-		rangeref->_location,
-		rangeref->_location + rangeref->_length);
-}
-
-static CFStringRef __EXRangeCopyDebugDesc(CFTypeRef cf) {
-    EXRangeRef rangeref = (EXRangeRef)cf;
-    return CFStringCreateWithFormat(CFGetAllocator(rangeref), NULL,
-		CFSTR("<EXRange %p [%p]>{loc = %u, len = %u}"),
-		rangeref,
-		CFGetAllocator(rangeref),
-		rangeref->_location,
-		rangeref->_length);
-}
-
-static void __EXRangeEXRangeFinalize(CFTypeRef cf) {
-    EXRangeRef rangeref = (EXRangeRef)cf;
-    // nothing to finalize
-}
-
-static CFTypeID _kEXRangeID = _kCFRuntimeNotATypeID;
-
-static CFRuntimeClass _kEXRangeClass = {0};
-
-/* Something external to this file is assumed to call this
- * before the EXRange class is used.
- */
-void __EXRangeClassInitialize(void) {
-    _kEXRangeClass.version = 0;
-    _kEXRangeClass.className = "EXRange";
-    _kEXRangeClass.init = NULL;
-    _kEXRangeClass.copy = NULL;
-    _kEXRangeClass.finalize = __EXRangeEXRangeFinalize;
-    _kEXRangeClass.equal = __EXRangeEqual;
-    _kEXRangeClass.hash = __EXRangeHash;
-    _kEXRangeClass.copyFormattingDesc = __EXRangeCopyFormattingDesc;
-    _kEXRangeClass.copyDebugDesc = __EXRangeCopyDebugDesc;
-    _kEXRangeID = _CFRuntimeRegisterClass((const CFRuntimeClass * const)&_kEXRangeClass);
-}
-
-CFTypeID EXRangeGetTypeID(void) {
-    return _kEXRangeID;
-}
-
-EXRangeRef EXRangeCreate(CFAllocatorRef allocator, uint32_t location, uint32_t length) {
-    struct __EXRange *newrange;
-    uint32_t extra = sizeof(struct __EXRange) - sizeof(CFRuntimeBase);
-    newrange = (struct __EXRange *)_CFRuntimeCreateInstance(allocator, _kEXRangeID, extra, NULL);
-    if (NULL == newrange) {
-	return NULL;
-    }
-    newrange->_location = location;
-    newrange->_length = length;
-    return (EXRangeRef)newrange;
-}
-
-uint32_t EXRangeGetLocation(EXRangeRef rangeref) {
-    return rangeref->_location;
-}
-
-uint32_t EXRangeGetLength(EXRangeRef rangeref) {
-    return rangeref->_length;
-}
-
-#endif
-
 CF_EXTERN_C_END
 
 #endif /* ! __COREFOUNDATION_CFRUNTIME__ */
+

@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	ForFoundationOnly.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 */
 
 #if !CF_BUILDING_CF && !NSBUILDINGFOUNDATION
@@ -43,6 +43,7 @@
 #include <CoreFoundation/CFPropertyList.h>
 #include <CoreFoundation/CFError.h>
 #include <CoreFoundation/CFStringEncodingExt.h>
+#include <CoreFoundation/CFNumberFormatter.h>
 #include <limits.h>
 
 // NOTE: miscellaneous declarations are at the end
@@ -77,10 +78,8 @@ CF_EXPORT const CFStringRef _kCFBundleResolvedPathKey;
 CF_EXPORT const CFStringRef _kCFBundlePrincipalClassKey;
 
 #if __BLOCKS__
-CF_EXPORT CFTypeRef _CFBundleCopyFindResources(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef languages, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized, Boolean (^predicate)(CFStringRef filename, Boolean *stop));
+CF_EXPORT CFTypeRef _CFBundleCopyFindResources(CFBundleRef bundle, CFURLRef bundleURL, CFArrayRef _unused_pass_null_, CFStringRef resourceName, CFStringRef resourceType, CFStringRef subPath, CFStringRef lproj, Boolean returnArray, Boolean localized, Boolean (^predicate)(CFStringRef filename, Boolean *stop));
 #endif
-
-CF_EXPORT CFArrayRef _CFBundleGetLanguageSearchList(CFBundleRef bundle);
 
 CF_EXPORT Boolean _CFBundleLoadExecutableAndReturnError(CFBundleRef bundle, Boolean forceGlobal, CFErrorRef *error);
 CF_EXPORT CFErrorRef _CFBundleCreateError(CFAllocatorRef allocator, CFBundleRef bundle, CFIndex code);
@@ -181,13 +180,13 @@ CF_EXTERN_C_END
 #define NSSTRING_INDEXERROR(index, len) \
     [NSException raise:NSRangeException format:@"%@: Index %lu out of bounds; string length %lu", __CFExceptionProem((id)self, _cmd), (unsigned long)index, (unsigned long)len]
 
-// This can be made into an exception for post-10.9 apps
+// This can be made into an exception for post-10.10 apps
 #define NSSTRING_POSSIBLE_RANGEERROR(range, len)     \
     if (__CFStringNoteErrors()) {       \
         static bool warnonce = false;   \
         if (!warnonce) {                \
             warnonce = true;            \
-            CFLog(kCFLogLevelWarning, CFSTR("*** %@: Range {%lu, %lu} out of bounds; string length %lu. This will become an exception for apps linked after 10.9. Warning shown once per app execution."), __CFExceptionProem((id)self, _cmd), (unsigned long)range.location, (unsigned long)range.length, (unsigned long)len);        \
+            CFLog(kCFLogLevelWarning, CFSTR("*** %@: Range {%lu, %lu} out of bounds; string length %lu. This will become an exception for apps linked after 10.10 and iOS 8. Warning shown once per app execution."), __CFExceptionProem((id)self, _cmd), (unsigned long)range.location, (unsigned long)range.length, (unsigned long)len);        \
     }   \
 }
 
@@ -343,6 +342,9 @@ CF_INLINE UniChar __CFStringGetCharacterFromInlineBufferQuick(CFStringInlineBuff
 */
 CF_EXPORT void _CFStringAppendFormatAndArgumentsAux(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *loc), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args);
 CF_EXPORT CFStringRef  _CFStringCreateWithFormatAndArgumentsAux(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, const void *loc), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments);
+
+CF_EXPORT void _CFStringAppendFormatAndArgumentsAux2(CFMutableStringRef outputString, CFStringRef (*copyDescFunc)(void *, const void *loc), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, CFStringRef formatString, va_list args);
+CF_EXPORT CFStringRef  _CFStringCreateWithFormatAndArgumentsAux2(CFAllocatorRef alloc, CFStringRef (*copyDescFunc)(void *, const void *loc), CFStringRef (*contextDescFunc)(void *, const void *, const void *, bool, bool *), CFDictionaryRef formatOptions, CFStringRef format, va_list arguments);
 
 /* For NSString (and NSAttributedString) usage, mutate with isMutable check
 */
@@ -524,10 +526,6 @@ CF_EXPORT CFStringRef _CFErrorCreateLocalizedFailureReason(CFErrorRef err);
 CF_EXPORT CFStringRef _CFErrorCreateLocalizedRecoverySuggestion(CFErrorRef err);
 CF_EXPORT CFStringRef _CFErrorCreateDebugDescription(CFErrorRef err);
 
-CF_EXPORT CFURLRef _CFURLAlloc(CFAllocatorRef allocator);
-CF_EXPORT Boolean _CFURLInitWithURLString(CFURLRef uninitializedURL, CFStringRef string, Boolean checkForLegalCharacters, CFURLRef baseURL);
-CF_EXPORT Boolean _CFURLInitWithFileSystemPath(CFURLRef uninitializedURL, CFStringRef fileSystemPath, CFURLPathStyle pathStyle, Boolean isDirectory, CFURLRef baseURL);
-CF_EXPORT Boolean _CFURLInitWithFileSystemRepresentation(CFURLRef uninitializedURL, const UInt8 *buffer, CFIndex bufLen, Boolean isDirectory, CFURLRef baseURL);
 CF_EXPORT void *__CFURLReservedPtr(CFURLRef  url);
 CF_EXPORT void __CFURLSetReservedPtr(CFURLRef  url, void *ptr);
 CF_EXPORT CFStringEncoding _CFURLGetEncoding(CFURLRef url);
@@ -559,6 +557,9 @@ enum {
     kCFNumberFormatterOrdinalStyle = 6,
     kCFNumberFormatterDurationStyle = 7,
 };
+
+// This is for NSNumberFormatter use only!
+CF_EXPORT void *_CFNumberFormatterGetFormatter(CFNumberFormatterRef formatter);
 
 CF_EXPORT CFRange _CFDataFindBytes(CFDataRef data, CFDataRef dataToFind, CFRange searchRange, CFDataSearchFlags compareOptions);
 

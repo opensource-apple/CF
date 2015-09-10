@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFTimeZone.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -89,40 +89,40 @@ CONST_STRING_DECL(kCFTimeZoneSystemTimeZoneDidChangeNotification, "kCFTimeZoneSy
 static CFTimeZoneRef __CFTimeZoneSystem = NULL;
 static CFTimeZoneRef __CFTimeZoneDefault = NULL;
 static CFDictionaryRef __CFTimeZoneAbbreviationDict = NULL;
-static CFSpinLock_t __CFTimeZoneAbbreviationLock = CFSpinLockInit;
+static CFLock_t __CFTimeZoneAbbreviationLock = CFLockInit;
 static CFMutableDictionaryRef __CFTimeZoneCompatibilityMappingDict = NULL;
-static CFSpinLock_t __CFTimeZoneCompatibilityMappingLock = CFSpinLockInit;
+static CFLock_t __CFTimeZoneCompatibilityMappingLock = CFLockInit;
 static CFArrayRef __CFKnownTimeZoneList = NULL;
 static CFMutableDictionaryRef __CFTimeZoneCache = NULL;
-static CFSpinLock_t __CFTimeZoneGlobalLock = CFSpinLockInit;
+static CFLock_t __CFTimeZoneGlobalLock = CFLockInit;
 
 #if DEPLOYMENT_TARGET_WINDOWS
 static CFDictionaryRef __CFTimeZoneWinToOlsonDict = NULL;
-static CFSpinLock_t __CFTimeZoneWinToOlsonLock = CFSpinLockInit;
+static CFLock_t __CFTimeZoneWinToOlsonLock = CFLockInit;
 #endif
 
 CF_INLINE void __CFTimeZoneLockGlobal(void) {
-    __CFSpinLock(&__CFTimeZoneGlobalLock);
+    __CFLock(&__CFTimeZoneGlobalLock);
 }
 
 CF_INLINE void __CFTimeZoneUnlockGlobal(void) {
-    __CFSpinUnlock(&__CFTimeZoneGlobalLock);
+    __CFUnlock(&__CFTimeZoneGlobalLock);
 }
 
 CF_INLINE void __CFTimeZoneLockAbbreviations(void) {
-    __CFSpinLock(&__CFTimeZoneAbbreviationLock);
+    __CFLock(&__CFTimeZoneAbbreviationLock);
 }
 
 CF_INLINE void __CFTimeZoneUnlockAbbreviations(void) {
-    __CFSpinUnlock(&__CFTimeZoneAbbreviationLock);
+    __CFUnlock(&__CFTimeZoneAbbreviationLock);
 }
 
 CF_INLINE void __CFTimeZoneLockCompatibilityMapping(void) {
-    __CFSpinLock(&__CFTimeZoneCompatibilityMappingLock);
+    __CFLock(&__CFTimeZoneCompatibilityMappingLock);
 }
 
 CF_INLINE void __CFTimeZoneUnlockCompatibilityMapping(void) {
-    __CFSpinUnlock(&__CFTimeZoneCompatibilityMappingLock);
+    __CFUnlock(&__CFTimeZoneCompatibilityMappingLock);
 }
 
 #if DEPLOYMENT_TARGET_WINDOWS
@@ -479,11 +479,9 @@ static const CFRuntimeClass __CFTimeZoneClass = {
     __CFTimeZoneCopyDescription
 };
 
-CF_PRIVATE void __CFTimeZoneInitialize(void) {
-    __kCFTimeZoneTypeID = _CFRuntimeRegisterClass(&__CFTimeZoneClass);
-}
-
 CFTypeID CFTimeZoneGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFTimeZoneTypeID = _CFRuntimeRegisterClass(&__CFTimeZoneClass); });
     return __kCFTimeZoneTypeID;
 }
 
@@ -655,11 +653,11 @@ static const char *__CFTimeZoneWinToOlsonDefaults =
 " </plist>";
 
 CF_INLINE void __CFTimeZoneLockWinToOlson(void) {
-    __CFSpinLock(&__CFTimeZoneWinToOlsonLock);
+    __CFLock(&__CFTimeZoneWinToOlsonLock);
 }
 
 CF_INLINE void __CFTimeZoneUnlockWinToOlson(void) {
-    __CFSpinUnlock(&__CFTimeZoneWinToOlsonLock);
+    __CFUnlock(&__CFTimeZoneWinToOlsonLock);
 }
 
 CFDictionaryRef CFTimeZoneCopyWinToOlsonDictionary(void) {
@@ -706,8 +704,8 @@ CFTimeZoneRef CFTimeZoneCreateWithWindowsName(CFAllocatorRef allocator, CFString
 
 extern CFStringRef _CFGetWindowsAppleSystemLibraryDirectory(void);
 void __InitTZStrings(void) {
-    static CFSpinLock_t __CFTZDirLock = CFSpinLockInit;
-    __CFSpinLock(&__CFTZDirLock);
+    static CFLock_t __CFTZDirLock = CFLockInit;
+    __CFLock(&__CFTZDirLock);
     if (!__tzZoneInfo) {
         CFStringRef winDir = _CFGetWindowsAppleSystemLibraryDirectory();
         __tzZoneInfo = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@\\etc\\zoneinfo"), winDir);
@@ -721,7 +719,7 @@ void __InitTZStrings(void) {
             strcat(__tzDir, "\\zone.tab");
         }
     }
-    __CFSpinUnlock(&__CFTZDirLock);
+    __CFUnlock(&__CFTZDirLock);
 }
 #endif
 

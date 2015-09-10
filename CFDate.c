@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFDate.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -98,32 +98,6 @@ CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
     return ret;
 }
 
-CF_PRIVATE void __CFDateInitialize(void) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    struct mach_timebase_info info;
-    mach_timebase_info(&info);
-    __CFTSRRate = (1.0E9 / (double)info.numer) * (double)info.denom;
-    __CF1_TSRRate = 1.0 / __CFTSRRate;
-#elif DEPLOYMENT_TARGET_WINDOWS
-    LARGE_INTEGER freq;
-    if (!QueryPerformanceFrequency(&freq)) {
-        HALT;
-    }
-    __CFTSRRate = (double)freq.QuadPart;
-    __CF1_TSRRate = 1.0 / __CFTSRRate;
-#elif DEPLOYMENT_TARGET_LINUX
-    struct timespec res;
-    if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
-        HALT;
-    }
-    __CFTSRRate = res.tv_sec + (1000000000 * res.tv_nsec);
-    __CF1_TSRRate = 1.0 / __CFTSRRate;
-#else
-#error Unable to initialize date
-#endif
-    CFDateGetTypeID(); // cause side-effects
-}
-
 struct __CFDate {
     CFRuntimeBase _base;
     CFAbsoluteTime _time;       /* immutable */
@@ -161,7 +135,33 @@ static const CFRuntimeClass __CFDateClass = {
 };
 
 CFTypeID CFDateGetTypeID(void) {
-    if (_kCFRuntimeNotATypeID == __kCFDateTypeID) __kCFDateTypeID = _CFRuntimeRegisterClass(&__CFDateClass);
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFDateTypeID = _CFRuntimeRegisterClass(&__CFDateClass); 
+
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+    struct mach_timebase_info info;
+    mach_timebase_info(&info);
+    __CFTSRRate = (1.0E9 / (double)info.numer) * (double)info.denom;
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
+#elif DEPLOYMENT_TARGET_WINDOWS
+    LARGE_INTEGER freq;
+    if (!QueryPerformanceFrequency(&freq)) {
+        HALT;
+    }
+    __CFTSRRate = (double)freq.QuadPart;
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
+#elif DEPLOYMENT_TARGET_LINUX
+    struct timespec res;
+    if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
+        HALT;
+    }
+    __CFTSRRate = res.tv_sec + (1000000000 * res.tv_nsec);
+    __CF1_TSRRate = 1.0 / __CFTSRRate;
+#else
+#error Unable to initialize date
+#endif
+    });
     return __kCFDateTypeID;
 }
 

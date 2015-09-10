@@ -1,8 +1,8 @@
 
 include MakefileVersion
 
-MIN_MACOSX_VERSION=10.9
-MAX_MACOSX_VERSION=MAC_OS_X_VERSION_10_9
+MIN_MACOSX_VERSION=10.10
+MAX_MACOSX_VERSION=MAC_OS_X_VERSION_10_10
 
 OBJECTS = $(patsubst %.c,%.o,$(wildcard *.c))
 OBJECTS += CFBasicHash.o
@@ -28,7 +28,7 @@ INSTALLNAME=/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreF
 
 CC = /usr/bin/clang
 
-CFLAGS=-c -x c -pipe -std=gnu99 -Wmost -Wno-trigraphs -mmacosx-version-min=$(MIN_MACOSX_VERSION) -fconstant-cfstrings -fexceptions -DCF_BUILDING_CF=1 -DDEPLOYMENT_TARGET_MACOSX=1 -DMAC_OS_X_VERSION_MAX_ALLOWED=$(MAX_MACOSX_VERSION) -DU_SHOW_DRAFT_API=1 -DU_SHOW_CPLUSPLUS_API=0 -I$(OBJBASE) -DVERSION=$(VERSION) -include CoreFoundation_Prefix.h
+CFLAGS=-c -x c -pipe -std=gnu99 -Wmost -Wno-trigraphs -Wno-deprecated -mmacosx-version-min=$(MIN_MACOSX_VERSION) -fconstant-cfstrings -fexceptions -DCF_BUILDING_CF=1 -DDEPLOYMENT_TARGET_MACOSX=1 -DMAC_OS_X_VERSION_MAX_ALLOWED=$(MAX_MACOSX_VERSION) -DU_SHOW_DRAFT_API=1 -DU_SHOW_CPLUSPLUS_API=0 -I$(OBJBASE) -DVERSION=$(VERSION) -include CoreFoundation_Prefix.h
 
 LFLAGS=-dynamiclib -mmacosx-version-min=$(MIN_MACOSX_VERSION) -twolevel_namespace -fexceptions -init ___CFInitialize -compatibility_version 150 -current_version $(VERSION) -Wl,-alias_list,SymbolAliases -sectcreate __UNICODE __csbitmaps CFCharacterSetBitmaps.bitmap -sectcreate __UNICODE __properties CFUniCharPropertyDatabase.data -sectcreate __UNICODE __data $(call unicode_data_file_name,$(MACHINE_TYPE)) -segprot __UNICODE r r
 

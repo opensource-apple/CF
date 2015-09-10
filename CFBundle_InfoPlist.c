@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,7 +17,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
@@ -38,6 +38,7 @@
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_EMBEDDED_MINI
 #include <dirent.h>
 #include <sys/sysctl.h>
+#include <sys/mman.h>
 #endif
 
 // The following strings are initialized 'later' (i.e., not at static initialization time) because static init time is too early for CFSTR to work, on platforms without constant CF strings
@@ -364,7 +365,10 @@ static CFArrayRef _CopySortedOverridesForBaseKey(CFStringRef keyName, CFDictiona
     return overrides;
 }
 
-CF_PRIVATE void _CFBundleInfoPlistProcessInfoDictionary(CFMutableDictionaryRef dict) {    
+CF_PRIVATE void _CFBundleInfoPlistProcessInfoDictionary(CFMutableDictionaryRef dict) {
+    // Defensive programming
+    if (!dict) return;
+    
     CFIndex count = CFDictionaryGetCount(dict);
     
     if (count > 0) {
@@ -736,14 +740,14 @@ static void _CFBundleInfoPlistFixupInfoDictionary(CFBundleRef bundle, CFMutableD
 }
 
 CFDictionaryRef CFBundleGetInfoDictionary(CFBundleRef bundle) {
-    __CFSpinLock(&bundle->_lock);
+    __CFLock(&bundle->_lock);
     if (!bundle->_infoDict) {
         bundle->_infoDict = _CFBundleCopyInfoDictionaryInDirectoryWithVersion(kCFAllocatorSystemDefault, bundle->_url, bundle->_version);
 
         // Add or fixup any keys that will be expected later
         if (bundle->_infoDict) _CFBundleInfoPlistFixupInfoDictionary(bundle, (CFMutableDictionaryRef)bundle->_infoDict);
     }
-    __CFSpinUnlock(&bundle->_lock);
+    __CFUnlock(&bundle->_lock);
     
     return bundle->_infoDict;
 }
@@ -754,11 +758,11 @@ CFDictionaryRef _CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
 
 CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
     CFDictionaryRef localInfoDict = NULL;
-    __CFSpinLock(&bundle->_lock);
+    __CFLock(&bundle->_lock);
     localInfoDict = bundle->_localInfoDict;    
     if (!localInfoDict) {
         // To avoid keeping the spin lock for too long, let go of it here while we create a new dictionary. We'll relock later to set the value. If it turns out that we have already created another local info dictionary in the meantime, then we'll take care of it then.
-        __CFSpinUnlock(&bundle->_lock);
+        __CFUnlock(&bundle->_lock);
         CFURLRef url = CFBundleCopyResourceURL(bundle, _CFBundleLocalInfoName, _CFBundleStringTableType, NULL);
         if (url) {
             CFDataRef data;
@@ -781,7 +785,7 @@ CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
         }
         if (localInfoDict) _CFBundleInfoPlistProcessInfoDictionary((CFMutableDictionaryRef)localInfoDict);
         // remain locked here until we exit the if statement.
-        __CFSpinLock(&bundle->_lock);
+        __CFLock(&bundle->_lock);
         if (!bundle->_localInfoDict) {
             // Still have no info dictionary, so set it
             bundle->_localInfoDict = localInfoDict;
@@ -791,7 +795,7 @@ CFDictionaryRef CFBundleGetLocalInfoDictionary(CFBundleRef bundle) {
             localInfoDict = bundle->_localInfoDict;
         }
     }
-    __CFSpinUnlock(&bundle->_lock);
+    __CFUnlock(&bundle->_lock);
 
     return localInfoDict;
 }
@@ -819,4 +823,112 @@ CFStringRef CFBundleGetIdentifier(CFBundleRef bundle) {
     CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
     if (infoDict) bundleID = (CFStringRef)CFDictionaryGetValue(infoDict, kCFBundleIdentifierKey);
     return bundleID;
+}
+
+
+static void __addPlatformAndProductNamesToKeys(const void *value, void *context) {
+    CFMutableSetRef newKeys = (CFMutableSetRef)context;
+    CFStringRef key = (CFStringRef)value;
+    CFStringRef firstPartOfKey = NULL;
+    CFStringRef restOfKey = NULL;
+    
+    // Find the first ':'
+    CFRange range;
+    Boolean success = CFStringFindWithOptions(key, CFSTR(":"), CFRangeMake(0, CFStringGetLength(key)), 0, &range);
+    if (success) {
+        firstPartOfKey = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, key, CFRangeMake(0, range.location));
+        restOfKey = CFStringCreateWithSubstring(kCFAllocatorSystemDefault, key, CFRangeMake(range.location + 1, CFStringGetLength(key) - range.location - 1));
+    } else {
+        firstPartOfKey = (CFStringRef)CFRetain(key);
+    }
+    
+    // only apply product and platform to top-level key
+    CFStringRef newKeyWithPlatform = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@-%@%@%@"), firstPartOfKey, _CFGetPlatformName(), restOfKey ? CFSTR(":") : CFSTR(""), restOfKey ? restOfKey : CFSTR(""));
+    CFStringRef newKeyWithProduct = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@~%@%@%@"), firstPartOfKey, _CFGetProductName(), restOfKey ? CFSTR(":") : CFSTR(""), restOfKey ? restOfKey : CFSTR(""));
+    CFStringRef newKeyWithProductAndPlatform = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@-%@~%@%@%@"), firstPartOfKey, _CFGetPlatformName(), _CFGetProductName(), restOfKey ? CFSTR(":") : CFSTR(""), restOfKey ? restOfKey : CFSTR(""));
+    
+    CFSetAddValue(newKeys, key);
+    CFSetAddValue(newKeys, newKeyWithPlatform);
+    CFSetAddValue(newKeys, newKeyWithProduct);
+    CFSetAddValue(newKeys, newKeyWithProductAndPlatform);
+    
+    if (firstPartOfKey) CFRelease(firstPartOfKey);
+    if (restOfKey) CFRelease(restOfKey);
+    CFRelease(newKeyWithPlatform);
+    CFRelease(newKeyWithProduct);
+    CFRelease(newKeyWithProductAndPlatform);
+}
+
+// from CFUtilities.c
+CF_PRIVATE Boolean _CFReadMappedFromFile(CFStringRef path, Boolean map, Boolean uncached, void **outBytes, CFIndex *outLength, CFErrorRef *errorPtr);
+
+// implementation of below functions - takes URL as parameter
+static CFPropertyListRef _CFBundleCreateFilteredInfoPlistWithURL(CFURLRef infoPlistURL, CFSetRef keyPaths, _CFBundleFilteredPlistOptions options) {
+    CFPropertyListRef result = NULL;
+    
+    if (!infoPlistURL) return CFDictionaryCreate(kCFAllocatorSystemDefault, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    
+    CFURLRef absoluteURL = CFURLCopyAbsoluteURL(infoPlistURL);
+    CFStringRef filePath = CFURLCopyFileSystemPath(absoluteURL, PLATFORM_PATH_STYLE);
+    CFRelease(absoluteURL);
+    
+    if (!filePath) return CFDictionaryCreate(kCFAllocatorSystemDefault, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    
+    void *bytes = NULL;
+    CFIndex length = 0;
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+    Boolean mapped = options & _CFBundleFilteredPlistMemoryMapped ? true : false;
+#else
+    Boolean mapped = false;
+#endif
+    Boolean success = _CFReadMappedFromFile(filePath, mapped, false, &bytes, &length, NULL);
+    CFRelease(filePath);
+    if (!success) return CFDictionaryCreate(kCFAllocatorSystemDefault, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    
+    CFDataRef infoPlistData = CFDataCreateWithBytesNoCopy(kCFAllocatorSystemDefault, (const UInt8 *)bytes, length, kCFAllocatorNull);
+    // We need to include all possible variants of the platform/product combo as possible keys.
+    CFMutableSetRef newKeyPaths = CFSetCreateMutable(kCFAllocatorSystemDefault, CFSetGetCount(keyPaths), &kCFTypeSetCallBacks);
+    CFSetApplyFunction(keyPaths, __addPlatformAndProductNamesToKeys, newKeyPaths);
+    
+    success = _CFPropertyListCreateFiltered(kCFAllocatorSystemDefault, infoPlistData, kCFPropertyListMutableContainers, newKeyPaths, &result, NULL);
+    
+    if (!success || !result) {
+        result = CFDictionaryCreate(kCFAllocatorSystemDefault, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    } else {
+        _CFBundleInfoPlistProcessInfoDictionary((CFMutableDictionaryRef)result);
+    }
+    
+    CFRelease(newKeyPaths);
+    CFRelease(infoPlistData);
+    if (mapped) {
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+        munmap(bytes, length);
+#endif
+    } else {
+        free(bytes);
+    }
+    
+    return result;
+}
+
+// Returns a subset of the bundle's property list, only including the keyPaths in the CFSet. If the top level object is not a dictionary, you will get back an empty dictionary as the result. If the Info.plist does not exist or could not be parsed, you will get back an empty dictionary.
+CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, _CFBundleFilteredPlistOptions options) {
+    CFURLRef infoPlistURL = _CFBundleCopyInfoPlistURL(bundle);
+    CFPropertyListRef result = _CFBundleCreateFilteredInfoPlistWithURL(infoPlistURL, keyPaths, options);
+    if (infoPlistURL) CFRelease(infoPlistURL);
+    return result;
+}
+
+CF_EXPORT CFPropertyListRef _CFBundleCreateFilteredLocalizedInfoPlist(CFBundleRef bundle, CFSetRef keyPaths, CFStringRef localizationName, _CFBundleFilteredPlistOptions options) {
+    CFURLRef infoPlistURL = CFBundleCopyResourceURLForLocalization(bundle, _CFBundleLocalInfoName, _CFBundleStringTableType, NULL, localizationName);
+    CFPropertyListRef result = _CFBundleCreateFilteredInfoPlistWithURL(infoPlistURL, keyPaths, options);
+    if (infoPlistURL) CFRelease(infoPlistURL);
+    return result;
+}
+
+CF_EXPORT CFURLRef _CFBundleCopyInfoPlistURL(CFBundleRef bundle) {
+    CFDictionaryRef infoDict = CFBundleGetInfoDictionary(bundle);
+    CFURLRef url = (CFURLRef)CFDictionaryGetValue(infoDict, _kCFBundleInfoPlistURLKey);
+    if (!url) url = (CFURLRef)CFDictionaryGetValue(infoDict, _kCFBundleRawInfoPlistURLKey);
+    return (url ? (CFURLRef)CFRetain(url) : NULL);
 }

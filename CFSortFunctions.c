@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFSortFunctions.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -213,7 +213,7 @@ static void __CFSortIndexesN(VALUE_TYPE listp[], INDEX_TYPE count, int32_t ncore
     }
     VALUE_TYPE **tmps = stack_tmps;
 
-    dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, DISPATCH_QUEUE_OVERCOMMIT);
+    dispatch_queue_t q = __CFDispatchQueueGetGenericMatchingCurrent();
     dispatch_apply(num_sect, q, ^(size_t sect) {
             INDEX_TYPE sect_len = (sect < num_sect - 1) ? sz : last_sect_len;
             __CFSimpleMergeSort(listp + sect * sz, sect_len, tmps[sect], cmp); // naturally stable
@@ -277,7 +277,7 @@ void CFSortIndexes(CFIndex *indexBuffer, CFIndex count, CFOptionFlags opts, CFCo
     } else {
         /* Specifically hard-coded to 8; the count has to be very large before more chunks and/or cores is worthwhile. */
         CFIndex sz = ((((size_t)count + 15) / 16) * 16) / 8;
-        dispatch_apply(8, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, DISPATCH_QUEUE_OVERCOMMIT), ^(size_t n) {
+        dispatch_apply(8, __CFDispatchQueueGetGenericMatchingCurrent(), ^(size_t n) {
                 CFIndex idx = n * sz, lim = __CFMin(idx + sz, count);
                 for (; idx < lim; idx++) indexBuffer[idx] = idx;
             });

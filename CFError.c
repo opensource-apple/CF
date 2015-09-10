@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFError.c
-	Copyright (c) 2006-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2006-2014, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -72,11 +72,11 @@ static CFDictionaryRef _CFErrorCreateEmptyDictionary(CFAllocatorRef allocator);
 
 /* Assertions and other macros/inlines
 */
-#define __CFAssertIsError(cf) __CFGenericValidateType(cf, __kCFErrorTypeID)
+#define __CFAssertIsError(cf) __CFGenericValidateType(cf, CFErrorGetTypeID())
 
 /* This lock is used in the few places in CFError where we create and access shared static objects. Should only be around tiny snippets of code; no recursion
 */
-static CFSpinLock_t _CFErrorSpinlock = CFSpinLockInit;
+static CFLock_t _CFErrorSpinlock = CFLockInit;
 
 
 
@@ -160,11 +160,9 @@ static const CFRuntimeClass __CFErrorClass = {
     __CFErrorCopyDescription
 };
 
-CF_PRIVATE void __CFErrorInitialize(void) {
-    __kCFErrorTypeID = _CFRuntimeRegisterClass(&__CFErrorClass);
-}
-
 CFTypeID CFErrorGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFErrorTypeID = _CFRuntimeRegisterClass(&__CFErrorClass); });
     return __kCFErrorTypeID;
 }
 
@@ -181,12 +179,12 @@ static CFDictionaryRef _CFErrorCreateEmptyDictionary(CFAllocatorRef allocator) {
         static CFDictionaryRef emptyErrorDictionary = NULL;
         if (emptyErrorDictionary == NULL) {
             CFDictionaryRef tmp = CFDictionaryCreate(allocator, NULL, NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            __CFSpinLock(&_CFErrorSpinlock);
+            __CFLock(&_CFErrorSpinlock);
             if (emptyErrorDictionary == NULL) {
                 emptyErrorDictionary = tmp;
-                __CFSpinUnlock(&_CFErrorSpinlock);
+                __CFUnlock(&_CFErrorSpinlock);
             } else {
-                __CFSpinUnlock(&_CFErrorSpinlock);
+                __CFUnlock(&_CFErrorSpinlock);
                 CFRelease(tmp);
             }
         }
@@ -199,7 +197,7 @@ static CFDictionaryRef _CFErrorCreateEmptyDictionary(CFAllocatorRef allocator) {
 /* A non-retained accessor for the userInfo. Might return NULL in some cases, if the subclass of NSError returned nil for some reason. It works with a CF or NSError.
 */
 static CFDictionaryRef _CFErrorGetUserInfo(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFDictionaryRef, (NSError *)err, userInfo);
+    CF_OBJC_FUNCDISPATCHV(CFErrorGetTypeID(), CFDictionaryRef, (NSError *)err, userInfo);
     __CFAssertIsError(err);
     return err->userInfo;
 }
@@ -337,12 +335,12 @@ CFErrorRef CFErrorCreate(CFAllocatorRef allocator, CFStringRef domain, CFIndex c
     __CFGenericValidateType(domain, CFStringGetTypeID());
     if (userInfo) __CFGenericValidateType(userInfo, CFDictionaryGetTypeID());
 
-    CFErrorRef err = (CFErrorRef)_CFRuntimeCreateInstance(allocator, __kCFErrorTypeID, sizeof(struct __CFError) - sizeof(CFRuntimeBase), NULL);
+    CFErrorRef err = (CFErrorRef)_CFRuntimeCreateInstance(allocator, CFErrorGetTypeID(), sizeof(struct __CFError) - sizeof(CFRuntimeBase), NULL);
     if (NULL == err) return NULL;
 
-    err->domain = CFStringCreateCopy(allocator, domain);
-    err->code = code;
-    err->userInfo = userInfo ? CFDictionaryCreateCopy(allocator, userInfo) : _CFErrorCreateEmptyDictionary(allocator);
+    ((struct __CFError *)err)->domain = CFStringCreateCopy(allocator, domain);
+    ((struct __CFError *)err)->code = code;
+    ((struct __CFError *)err)->userInfo = userInfo ? CFDictionaryCreateCopy(allocator, userInfo) : _CFErrorCreateEmptyDictionary(allocator);
 
     return err;
 }
@@ -352,24 +350,24 @@ CFErrorRef CFErrorCreate(CFAllocatorRef allocator, CFStringRef domain, CFIndex c
 CFErrorRef CFErrorCreateWithUserInfoKeysAndValues(CFAllocatorRef allocator, CFStringRef domain, CFIndex code, const void *const *userInfoKeys, const void *const *userInfoValues, CFIndex numUserInfoValues) {
     __CFGenericValidateType(domain, CFStringGetTypeID());
 
-    CFErrorRef err = (CFErrorRef)_CFRuntimeCreateInstance(allocator, __kCFErrorTypeID, sizeof(struct __CFError) - sizeof(CFRuntimeBase), NULL);
+    CFErrorRef err = (CFErrorRef)_CFRuntimeCreateInstance(allocator, CFErrorGetTypeID(), sizeof(struct __CFError) - sizeof(CFRuntimeBase), NULL);
     if (NULL == err) return NULL;
 
-    err->domain = CFStringCreateCopy(allocator, domain);
-    err->code = code;
-    err->userInfo = CFDictionaryCreate(allocator, (const void **)userInfoKeys, (const void **)userInfoValues, numUserInfoValues, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    ((struct __CFError *)err)->domain = CFStringCreateCopy(allocator, domain);
+    ((struct __CFError *)err)->code = code;
+    ((struct __CFError *)err)->userInfo = CFDictionaryCreate(allocator, (const void **)userInfoKeys, (const void **)userInfoValues, numUserInfoValues, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
     return err;
 }
 
 CFStringRef CFErrorGetDomain(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFStringRef, (NSError *)err, domain);
+    CF_OBJC_FUNCDISPATCHV(CFErrorGetTypeID(), CFStringRef, (NSError *)err, domain);
     __CFAssertIsError(err);
     return err->domain;
 }
 
 CFIndex CFErrorGetCode(CFErrorRef err) {
-    CF_OBJC_FUNCDISPATCHV(__kCFErrorTypeID, CFIndex, (NSError *)err, code);
+    CF_OBJC_FUNCDISPATCHV(CFErrorGetTypeID(), CFIndex, (NSError *)err, code);
     __CFAssertIsError(err);
     return err->code;
 }
@@ -382,7 +380,7 @@ CFDictionaryRef CFErrorCopyUserInfo(CFErrorRef err) {
 }
 
 CFStringRef CFErrorCopyDescription(CFErrorRef err) {
-    if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
+    if (CF_IS_OBJC(CFErrorGetTypeID(), err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
         CFStringRef desc = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedDescription);
         return desc ? (CFStringRef)CFRetain(desc) : NULL;    // !!! It really should never return nil.
     }
@@ -391,7 +389,7 @@ CFStringRef CFErrorCopyDescription(CFErrorRef err) {
 }
 
 CFStringRef CFErrorCopyFailureReason(CFErrorRef err) {
-    if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
+    if (CF_IS_OBJC(CFErrorGetTypeID(), err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
         CFStringRef str = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedFailureReason);
         return str ? (CFStringRef)CFRetain(str) : NULL;    // It's possible for localizedFailureReason to return nil
     }
@@ -400,7 +398,7 @@ CFStringRef CFErrorCopyFailureReason(CFErrorRef err) {
 }
 
 CFStringRef CFErrorCopyRecoverySuggestion(CFErrorRef err) {
-    if (CF_IS_OBJC(__kCFErrorTypeID, err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
+    if (CF_IS_OBJC(CFErrorGetTypeID(), err)) {  // Since we have to return a retained result, we need to treat the toll-free bridging specially
         CFStringRef str = (CFStringRef) CF_OBJC_CALLV((NSError *)err, localizedRecoverySuggestion);
         return str ? (CFStringRef)CFRetain(str) : NULL;    // It's possible for localizedRecoverySuggestion to return nil
     }
@@ -483,12 +481,12 @@ static CFTypeRef _CFErrorMachCallBack(CFErrorRef err, CFStringRef key) {
 static void _CFErrorInitializeCallBackTable(void) {
     // Create the table outside the lock
     CFMutableDictionaryRef table = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks, NULL);
-    __CFSpinLock(&_CFErrorSpinlock);
+    __CFLock(&_CFErrorSpinlock);
     if (!_CFErrorCallBackTable) {
         _CFErrorCallBackTable = table;
-        __CFSpinUnlock(&_CFErrorSpinlock);
+        __CFUnlock(&_CFErrorSpinlock);
     } else {
-        __CFSpinUnlock(&_CFErrorSpinlock);
+        __CFUnlock(&_CFErrorSpinlock);
         CFRelease(table);
         // Note, even though the table looks like it was initialized, we go on to register the items on this thread as well, since otherwise we might consult the table before the items are actually registered.
     }
@@ -500,20 +498,20 @@ static void _CFErrorInitializeCallBackTable(void) {
 
 void CFErrorSetCallBackForDomain(CFStringRef domainName, CFErrorUserInfoKeyCallBack callBack) {
     if (!_CFErrorCallBackTable) _CFErrorInitializeCallBackTable();
-    __CFSpinLock(&_CFErrorSpinlock);
+    __CFLock(&_CFErrorSpinlock);
     if (callBack) {
         CFDictionarySetValue(_CFErrorCallBackTable, domainName, (void *)callBack);
     } else {
         CFDictionaryRemoveValue(_CFErrorCallBackTable, domainName);
     }
-    __CFSpinUnlock(&_CFErrorSpinlock);
+    __CFUnlock(&_CFErrorSpinlock);
 }
 
 CFErrorUserInfoKeyCallBack CFErrorGetCallBackForDomain(CFStringRef domainName) {
     if (!_CFErrorCallBackTable) _CFErrorInitializeCallBackTable();
-    __CFSpinLock(&_CFErrorSpinlock);
+    __CFLock(&_CFErrorSpinlock);
     CFErrorUserInfoKeyCallBack callBack = (CFErrorUserInfoKeyCallBack)CFDictionaryGetValue(_CFErrorCallBackTable, domainName);
-    __CFSpinUnlock(&_CFErrorSpinlock);
+    __CFUnlock(&_CFErrorSpinlock);
     return callBack;
 }
 

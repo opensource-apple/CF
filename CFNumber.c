@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFNumber.c
-	Copyright (c) 1999-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc. All rights reserved.
 	Responsibility: Ali Ozer
 */
 
@@ -39,7 +39,7 @@
 #define copysign(A, B) _copysign(A, B)
 #endif
 
-#define __CFAssertIsBoolean(cf) __CFGenericValidateType(cf, __kCFBooleanTypeID)
+#define __CFAssertIsBoolean(cf) __CFGenericValidateType(cf, CFBooleanGetTypeID())
 
 struct __CFBoolean {
     CFRuntimeBase _base;
@@ -88,18 +88,18 @@ static const CFRuntimeClass __CFBooleanClass = {
     __CFBooleanCopyDescription
 };
 
-CF_PRIVATE void __CFBooleanInitialize(void) {
-    __kCFBooleanTypeID = _CFRuntimeRegisterClass(&__CFBooleanClass);
-    _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFBooleanTrue, __kCFBooleanTypeID);
-    _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFBooleanFalse, __kCFBooleanTypeID);
-}
-
 CFTypeID CFBooleanGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFBooleanTypeID = _CFRuntimeRegisterClass(&__CFBooleanClass); // initOnce covered
+        _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFBooleanTrue, __kCFBooleanTypeID);
+        _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFBooleanFalse, __kCFBooleanTypeID);
+    });
     return __kCFBooleanTypeID;
 }
 
 Boolean CFBooleanGetValue(CFBooleanRef boolean) {
-    CF_OBJC_FUNCDISPATCHV(__kCFBooleanTypeID, Boolean, (NSNumber *)boolean, boolValue);
+    CF_OBJC_FUNCDISPATCHV(CFBooleanGetTypeID(), Boolean, (NSNumber *)boolean, boolValue);
     return (boolean == kCFBooleanTrue) ? true : false;
 }
 
@@ -139,7 +139,7 @@ static CFComparisonResult CFNumberCompare_old(struct __CFNumber_old * number1, s
 #endif
 
 
-#define __CFAssertIsNumber(cf) __CFGenericValidateType(cf, __kCFNumberTypeID)
+#define __CFAssertIsNumber(cf) __CFGenericValidateType(cf, CFNumberGetTypeID())
 #define __CFAssertIsValidNumberType(type) CFAssert2((0 < type && type <= kCFNumberMaxType) || (type == kCFNumberSInt128Type), __kCFLogAssertion, "%s(): bad CFNumber type %d", __PRETTY_FUNCTION__, type);
 
 /* The IEEE bit patterns... Also have:
@@ -1007,27 +1007,27 @@ static const CFRuntimeClass __CFNumberClass = {
 };
 
 
-CF_PRIVATE void __CFNumberInitialize(void) {
-    __kCFNumberTypeID = _CFRuntimeRegisterClass(&__CFNumberClass);
-
-    _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFNumberNaN, __kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberNaN._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
-    __kCFNumberNaN._pad = BITSFORDOUBLENAN;
-
-    _CFRuntimeSetInstanceTypeIDAndIsa(& __kCFNumberNegativeInfinity, __kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberNegativeInfinity._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
-    __kCFNumberNegativeInfinity._pad = BITSFORDOUBLENEGINF;
-
-    _CFRuntimeSetInstanceTypeIDAndIsa(& __kCFNumberPositiveInfinity, __kCFNumberTypeID);
-    __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
-    __kCFNumberPositiveInfinity._pad = BITSFORDOUBLEPOSINF;
-
-
-    const char *caching = __CFgetenv("CFNumberDisableCache");	// "all" to disable caching and tagging; anything else to disable caching; nothing to leave both enabled
-    if (caching) __CFNumberCaching = (!strcmp(caching, "all")) ? kCFNumberCachingFullyDisabled : kCFNumberCachingDisabled;	// initial state above is kCFNumberCachingEnabled
-}
-
 CFTypeID CFNumberGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFNumberTypeID = _CFRuntimeRegisterClass(&__CFNumberClass); // initOnce covered
+
+        _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFNumberNaN, __kCFNumberTypeID);
+        __CFBitfieldSetValue(__kCFNumberNaN._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
+        __kCFNumberNaN._pad = BITSFORDOUBLENAN;
+
+        _CFRuntimeSetInstanceTypeIDAndIsa(& __kCFNumberNegativeInfinity, __kCFNumberTypeID);
+        __CFBitfieldSetValue(__kCFNumberNegativeInfinity._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
+        __kCFNumberNegativeInfinity._pad = BITSFORDOUBLENEGINF;
+
+        _CFRuntimeSetInstanceTypeIDAndIsa(& __kCFNumberPositiveInfinity, __kCFNumberTypeID);
+        __CFBitfieldSetValue(__kCFNumberPositiveInfinity._base._cfinfo[CF_INFO_BITS], 4, 0, kCFNumberFloat64Type);
+        __kCFNumberPositiveInfinity._pad = BITSFORDOUBLEPOSINF;
+
+
+        const char *caching = __CFgetenv("CFNumberDisableCache");	// "all" to disable caching and tagging; anything else to disable caching; nothing to leave both enabled
+        if (caching) __CFNumberCaching = (!strcmp(caching, "all")) ? kCFNumberCachingFullyDisabled : kCFNumberCachingDisabled;	// initial state above is kCFNumberCachingEnabled
+    });
     return __kCFNumberTypeID;
 }
 
@@ -1080,7 +1080,7 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
 #if OLD_CRAP_TOO
     size += 2 * sizeof(void *);
 #endif
-    CFNumberRef result = (CFNumberRef)_CFRuntimeCreateInstance(allocator, __kCFNumberTypeID, size, NULL);
+    CFNumberRef result = (CFNumberRef)_CFRuntimeCreateInstance(allocator, CFNumberGetTypeID(), size, NULL);
     if (NULL == result) {
 	return NULL;
     }
@@ -1130,7 +1130,7 @@ CFLog(kCFLogLevelWarning, CFSTR("+++ Create old number '%@'"), __CFNumberCopyDes
 
 CFNumberType CFNumberGetType(CFNumberRef number) {
 //printf("+ [%p] CFNumberGetType(%p)\n", pthread_self(), number);
-    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFNumberType, (NSNumber *)number, _cfNumberType);
+    CF_OBJC_FUNCDISPATCHV(CFNumberGetTypeID(), CFNumberType, (NSNumber *)number, _cfNumberType);
     __CFAssertIsNumber(number);
     CFNumberType type = __CFNumberGetType(number);
     if (kCFNumberSInt128Type == type) type = kCFNumberSInt64Type; // must hide this type, since it is not public
@@ -1149,7 +1149,7 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in CFNumberGetType: '%d' '%d'"), 
 }
 
 CF_EXPORT CFNumberType _CFNumberGetType2(CFNumberRef number) {
-    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFNumberType, (NSNumber *)number, _cfNumberType);
+    CF_OBJC_FUNCDISPATCHV(CFNumberGetTypeID(), CFNumberType, (NSNumber *)number, _cfNumberType);
     __CFAssertIsNumber(number);
     return __CFNumberGetType(number);
 }
@@ -1193,7 +1193,7 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL in CFNumberIsFloatType: '%d' '%d'
 Boolean CFNumberGetValue(CFNumberRef number, CFNumberType type, void *valuePtr) {
 //printf("+ [%p] CFNumberGetValue(%p, %d, %p)\n", pthread_self(), number, type, valuePtr);
 
-    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, Boolean, (NSNumber *)number, _getValue:(void *)valuePtr forType:(CFNumberType)__CFNumberTypeTable[type].canonicalType);
+    CF_OBJC_FUNCDISPATCHV(CFNumberGetTypeID(), Boolean, (NSNumber *)number, _getValue:(void *)valuePtr forType:(CFNumberType)__CFNumberTypeTable[type].canonicalType);
     __CFAssertIsNumber(number);
     __CFAssertIsValidNumberType(type);
     uint8_t localMemory[128];
@@ -1217,8 +1217,8 @@ CFLog(kCFLogLevelWarning, CFSTR("*** TEST FAIL 2 in CFNumberGetValue: BYTES NOT 
 }
 
 static CFComparisonResult CFNumberCompare_new(CFNumberRef number1, CFNumberRef number2, void *context) {
-    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFComparisonResult, (NSNumber *)number1, compare:(NSNumber *)number2);
-    CF_OBJC_FUNCDISPATCHV(__kCFNumberTypeID, CFComparisonResult, (NSNumber *)number2, _reverseCompare:(NSNumber *)number1);
+    CF_OBJC_FUNCDISPATCHV(CFNumberGetTypeID(), CFComparisonResult, (NSNumber *)number1, compare:(NSNumber *)number2);
+    CF_OBJC_FUNCDISPATCHV(CFNumberGetTypeID(), CFComparisonResult, (NSNumber *)number2, _reverseCompare:(NSNumber *)number1);
     __CFAssertIsNumber(number1);
     __CFAssertIsNumber(number2);
 
@@ -1585,7 +1585,7 @@ type = kCFNumberSInt64Type;
 
     storageType = __CFNumberGetStorageTypeForType_old(type);
 
-    num = (struct __CFNumber_old *)_CFRuntimeCreateInstance(allocator, __kCFNumberTypeID, __CFNumberSizeOfType_old(storageType), NULL);
+    num = (struct __CFNumber_old *)_CFRuntimeCreateInstance(allocator, CFNumberGetTypeID(), __CFNumberSizeOfType_old(storageType), NULL);
     if (NULL == num) {
         return NULL;
     }

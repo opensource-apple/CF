@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBundlePriv.h
-	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLEPRIV__)
@@ -144,6 +144,7 @@ CFURLRef _CFBundleCopyMainBundleExecutableURL(Boolean *looksLikeBundle);
 CF_EXPORT
 CFBundleRef _CFBundleGetExistingBundleWithBundleURL(CFURLRef bundleURL);
 
+// This function is obsolete.
 CF_EXPORT
 CFArrayRef _CFBundleGetSupportedPlatforms(CFBundleRef bundle);
 
@@ -153,9 +154,11 @@ CFStringRef _CFBundleGetCurrentPlatform(void);
 
 /* For Code Signing */
 
+// This function is obsolete. Use CFBundleCreate instead.
 CF_EXPORT
-CFBundleRef _CFBundleCreateIfMightBeBundle(CFAllocatorRef allocator, CFURLRef url);
+CFBundleRef _CFBundleCreateIfMightBeBundle(CFAllocatorRef allocator, CFURLRef url) CF_DEPRECATED(10_6, 10_10, 2_0, 8_0);
 
+// This function is for code signing only. Do not use this function.
 CF_EXPORT
 CFBundleRef _CFBundleCreateWithExecutableURLIfMightBeBundle(CFAllocatorRef allocator, CFURLRef url);
 
@@ -199,6 +202,9 @@ CFStringRef CFBundleCopyLocalizationForLocalizationInfo(SInt32 languageCode, SIn
     /* Returns the default localization for the combination of codes */
     /* specified.  Pass in -1 for language, region code, or script code, or */
     /* 0xFFFF for stringEncoding, if you do not wish to specify one of these. */ 
+
+// Get a localized string for a specific localization (including processing as strings dict file). This skips the usual cache for localized strings.
+CF_EXPORT CFStringRef CFBundleCopyLocalizedStringForLocalization(CFBundleRef bundle, CFStringRef key, CFStringRef value, CFStringRef tableName, CFStringRef localizationName) CF_AVAILABLE(10_10, 8_0);
 
 CF_EXPORT
 void _CFBundleSetDefaultLocalization(CFStringRef localizationName);
@@ -248,6 +254,11 @@ Boolean _CFBundleGetStringsFilesShared(CFBundleRef bundle);
 CF_EXPORT
 CFURLRef _CFBundleCopyFrameworkURLForExecutablePath(CFStringRef executablePath);
 
+#if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
+#include <xpc/xpc.h>
+CF_EXPORT
+void _CFBundleSetupXPCBootstrap(xpc_object_t bootstrap) CF_AVAILABLE(10_10, 8_0);
+#endif
 
 /* Functions deprecated as SPI */
 

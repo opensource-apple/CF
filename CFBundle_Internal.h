@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBundle_Internal.h
-	Copyright (c) 1999-2013, Apple Inc.  All rights reserved.
+	Copyright (c) 1999-2014, Apple Inc.  All rights reserved.
 */
 
 #if !defined(__COREFOUNDATION_CFBUNDLE_INTERNAL__)
@@ -35,6 +35,7 @@
 #include "CFInternal.h"
 #include "CFPlugIn_Factory.h"
 #include "CFBundle_BinaryTypes.h"
+#include "CFByteOrder.h"
 
 CF_EXTERN_C_BEGIN
 
@@ -54,17 +55,19 @@ CF_EXTERN_C_BEGIN
 #define CFBundleExecutableLoadError                 3587
 #define CFBundleExecutableLinkError                 3588
 
+CF_INLINE uint32_t _CFBundleSwapInt32Conditional(uint32_t arg, Boolean swap) {return swap ? CFSwapInt32(arg) : arg;}
+CF_INLINE uint32_t _CFBundleSwapInt64Conditional(uint64_t arg, Boolean swap) {return swap ? CFSwapInt64(arg) : arg;}
+
 // uncomment this to enable the checking for 8302591
 //#define CFBUNDLE_NO_TRAVERSE_OUTSIDE
 
 typedef struct __CFResourceData {
-    CFMutableDictionaryRef _stringTableCache;
     Boolean _executableLacksResourceFork;
     Boolean _infoDictionaryFromResourceFork;
     char _padding[2];
 } _CFResourceData;
 
-extern _CFResourceData *__CFBundleGetResourceData(CFBundleRef bundle);
+CF_PRIVATE _CFResourceData *__CFBundleGetResourceData(CFBundleRef bundle);
 
 typedef struct __CFPlugInData {
     Boolean _isPlugIn;
@@ -113,16 +116,18 @@ struct __CFBundle {
     
     CFStringRef _executablePath; // Calculated and cached here
     CFStringRef _developmentRegion; // Calculated and cached here
-    Boolean _developmentRegionCalculated;
+    dispatch_once_t _developmentRegionCalculated;
     
-    CFSpinLock_t _lock;
+    CFLock_t _lock;
     
     CFArrayRef _localizations; // List of localizations, including the development language fallback if required
     Boolean _lookedForLocalizations;
     
     CFMutableDictionaryRef _resourceDirectoryContents;
     
-    CFSpinLock_t _queryLock;
+    CFMutableDictionaryRef _stringTable;
+    
+    CFLock_t _queryLock;
     CFMutableDictionaryRef _queryTable;
     CFStringRef _bundleBasePath;
     
@@ -136,6 +141,8 @@ extern _CFPlugInData *__CFBundleGetPlugInData(CFBundleRef bundle);
 
 /* Private CFBundle API */
 
+CF_PRIVATE CFErrorRef _CFBundleCreateErrorDebug(CFAllocatorRef allocator, CFBundleRef bundle, CFIndex code, CFStringRef debugString);
+
 CF_PRIVATE void _CFBundleInfoPlistProcessInfoDictionary(CFMutableDictionaryRef dict);
 CF_PRIVATE Boolean _CFBundleSupportedProductName(CFStringRef fileName, CFRange searchRange);
 CF_PRIVATE Boolean _CFBundleSupportedPlatformName(CFStringRef fileName, CFRange searchRange);
@@ -143,6 +150,27 @@ CF_PRIVATE Boolean _CFBundleSupportedPlatformName(CFStringRef fileName, CFRange 
 CF_EXPORT CFStringRef _CFGetProductName(void);
 CF_EXPORT CFStringRef _CFGetPlatformName(void);
 CF_EXPORT CFStringRef _CFGetAlternatePlatformName(void);
+
+CF_PRIVATE void _CFBundleFlushQueryTableCache(CFBundleRef bundle);
+
+CF_PRIVATE SInt32 _CFBundleCurrentArchitecture(void);
+CF_PRIVATE Boolean _CFBundleGetObjCImageInfo(CFBundleRef bundle, uint32_t *objcVersion, uint32_t *objcFlags);
+
+#if defined(BINARY_SUPPORT_DYLD)
+CF_PRIVATE CFMutableDictionaryRef _CFBundleCreateInfoDictFromMainExecutable();
+CF_PRIVATE Boolean _CFBundleGrokObjCImageInfoFromMainExecutable(uint32_t *objcVersion, uint32_t *objcFlags);
+#endif
+
+CF_PRIVATE CFStringRef _CFBundleCopyLoadedImagePathForPointer(void *p);
+
+// Languages and locales
+
+CF_PRIVATE CFArrayRef _CFBundleCopyLanguageSearchListInDirectory(CFURLRef url, uint8_t *version);
+CF_PRIVATE CFArrayRef _CFBundleCopyLanguageSearchListInBundle(CFBundleRef bundle);
+
+CF_PRIVATE Boolean CFBundleAllowMixedLocalizations(void);
+
+// Misc
 
 extern Boolean _CFIsResourceAtURL(CFURLRef url, Boolean *isDir);
 extern Boolean _CFIsResourceAtPath(CFStringRef path, Boolean *isDir);

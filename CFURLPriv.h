@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,13 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFURLPriv.h
-	Copyright (c) 2008-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2008-2014, Apple Inc. All rights reserved.
+        Responsibility: Jim Luther/Chris Linn
  */
 
 #if !defined(__COREFOUNDATION_CFURLPRIV__)
@@ -34,18 +35,16 @@
 #include <CoreFoundation/CFDictionary.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFURL.h>
-#if TARGET_OS_MAC
-#include <sys/param.h>
-#include <sys/mount.h>
 #include <CoreFoundation/CFFileSecurity.h>
 #include <CoreFoundation/CFURLEnumerator.h>
 #include <CoreFoundation/CFDate.h>
+#if TARGET_OS_MAC
+#include <sys/mount.h>
 #endif
 
 CF_EXTERN_C_BEGIN
 
-#if TARGET_OS_MAC
-
+// The kCFURLxxxxError enums are error codes in the Cocoa error domain and they mirror the exact same codes in <Foundation/FoundationErrors.h> (i.e. kCFURLReadNoPermissionError = NSFileReadNoPermissionError = 257). They were added to CFURLPriv.h so that CarbonCore and later CoreServicesInternal could return these error codes in the Cocoa error domain. If your code links with Foundation, you should use the codes in <Foundation/FoundationErrors.h>, not these codes.
 enum {
     // Resource I/O related errors, with kCFErrorURLKey containing URL
     kCFURLNoSuchResourceError = 4,			   // Attempt to do a file system operation on a non-existent file
@@ -131,6 +130,9 @@ CF_EXPORT const CFStringRef _kCFURLFileAllocatedSizeOfResourceForkKey CF_AVAILAB
 
 CF_EXPORT const CFStringRef _kCFURLEffectiveIconImageDataKey CF_AVAILABLE(10_6, 4_0);
     /* Icon image data, i.e. raw pixel data (CFData) */
+
+CF_EXPORT const CFStringRef _kCFURLTypeBindingKey CF_AVAILABLE(10_10, 8_0);
+    /* Type binding for icon (Read-only, value type CFData) */
 
 CF_EXPORT const CFStringRef _kCFURLCustomIconImageDataKey CF_AVAILABLE(10_6, 4_0);
     /* Icon image data of the item's custom icon, if any (CFData) */
@@ -257,6 +259,12 @@ CF_EXPORT const CFStringRef _kCFURLVolumeIOMediaIconFamilyNameKey CF_AVAILABLE(1
 CF_EXPORT const CFStringRef _kCFURLVolumeIOMediaIconBundleIdentifierKey CF_AVAILABLE(10_9, NA);
     /* Volume's IOMediaIconBundleIdentifier. (CFStringRef) */
 
+CF_EXPORT const CFStringRef _kCFURLVolumeQuarantinePropertiesKey CF_AVAILABLE(10_10, NA);
+    /* The quarantine properties for the volume on which the resource resides as defined in LSQuarantine.h.=To remove quarantine information from a volume, pass kCFNull as the value when setting this property. (Read-write, value type CFDictionary) */
+
+CF_EXPORT const CFStringRef _kCFURLVolumeOpenFolderURLKey CF_AVAILABLE(10_10, NA);
+    /* Returns a URL to the folder the Finder should open when a HFS volume is mounted, or NULL if there is none. (Read-only, value type CFURL) */
+
 CF_EXPORT const CFStringRef _kCFURLResolvedFromBookmarkDataKey CF_DEPRECATED(10_6, 10_9, 4_0, 7_0);
     /* Deprecated and scheduled for removal later in 10.9/7.0 since it is unused (*/
 
@@ -267,7 +275,27 @@ CF_EXPORT const CFStringRef _kCFURLCompleteMountURLKey CF_DEPRECATED(10_6, 10_9,
     /* Deprecated and scheduled for removal in 10.10/8.0 - Use the kCFURLVolumeURLForRemountingKey or NSURLVolumeURLForRemountingKey public property keys */
 
 CF_EXPORT const CFStringRef _kCFURLUbiquitousItemDownloadRequestedKey CF_AVAILABLE(10_9, 7_0);
+    /* Is this Ubiquity item scheduled for download? (this is also true for items that are already downloaded). Use startDownloadingUbiquitousItemAtURL:error: to make this true (Read-only, value type CFBoolean) */
+
+CF_EXPORT const CFStringRef _kCFURLCloudDocsPlaceholderDictionaryKey CF_AVAILABLE(10_10, 8_0);
+    /* Returns the placeholder dictionary for a side-fault file (Read-only, value type CFDictionary) */
+
+CF_EXPORT const CFStringRef _kCFURLCloudDocsPlaceholderLogicalNameKey CF_AVAILABLE(10_10, 8_0);
+    /* Returns the placeholder dictionary for a side-fault file (Read-only, value type CFString) */
+
+// Temporary holding place for future API.
+
+CF_EXPORT const CFStringRef kCFURLUbiquitousItemDownloadRequestedKey CF_AVAILABLE(10_9, 7_0);
 /* Is this Ubiquity item scheduled for download? (this is also true for items that are already downloaded). Use startDownloadingUbiquitousItemAtURL:error: to make this true (Read-only, value type CFBoolean) */
+
+CF_EXPORT const CFStringRef kCFURLUbiquitousItemContainerDisplayNameKey CF_AVAILABLE(10_10, 8_0);
+    /* Returns the localized name of the ubiquity container that contains this item (Read-only, value type CFString) */
+
+// these keys are defined here, not in CFURL.h, because they return NSImage values which can only be used by Foundation
+CF_EXPORT const CFStringRef kCFURLThumbnailDictionaryKey CF_AVAILABLE(10_10, 8_0);
+CF_EXPORT const CFStringRef kCFURLThumbnailKey CF_AVAILABLE(10_10, 8_0);
+// The values of thumbnails in the dictionary returned by NSURLThumbnailDictionaryKey
+CF_EXPORT const CFStringRef kCFThumbnail1024x1024SizeKey CF_AVAILABLE(10_10, 8_0);
 
 
 /*
@@ -493,18 +521,6 @@ Boolean _CFURLCacheResourcePropertyForKey(CFURLRef url, CFStringRef key, CFError
 CF_EXPORT
 Boolean _CFURLCacheResourcePropertiesForKeys(CFURLRef url, CFArrayRef keys, CFErrorRef *error) CF_AVAILABLE(10_8, NA);
 
-
-/*
- _CFURLSetResourcePropertyForKeyAndUpdateFileCache - Works mostly like CFURLSetResourcePropertyForKey
- except that file system properties are updated in the URL's file cache (if it has a valid cache)
- and dependant properties are not flushed. This means that values in the cache may not match what
- is on the file system (see <rdar://problem/8371295> for details).
- 
- Only for use by DesktopServices!
- */
-CF_EXPORT
-Boolean _CFURLSetResourcePropertyForKeyAndUpdateFileCache(CFURLRef url, CFStringRef key, CFTypeRef propertyValue, CFErrorRef *error) CF_AVAILABLE(10_7, NA);
-
 /*
     _CFURLCreateDisplayPathComponentsArray()
 
@@ -572,29 +588,54 @@ enum {
     _CFURLItemReplacementWithoutDeletingBackupItem  = 1 << 4
 };
 
+/* _CFURLReplaceObject is the underlying implementation for -[NSFileManager replaceItemAtURL:withItemAtURL:backupItemName:options:resultingItemURL:error:] with one additional argument: newName. The optional newName argument can be used to rename the replacement (for example, when replacing "document.rtf" with "document.rtfd") while still preserving the document's metadata. If newName is used, there must be a file or directory at originalItemURL -- if originalItemURL does not exist and newName is not NULL, an error will be returned.
+ */
 CF_EXPORT 
 Boolean _CFURLReplaceObject( CFAllocatorRef allocator, CFURLRef originalItemURL, CFURLRef newItemURL, CFStringRef newName, CFStringRef backupItemName, CFOptionFlags options, CFURLRef *resultingURL, CFErrorRef *error ) CF_AVAILABLE(10_7, 5_0);
 
+CF_EXPORT
+Boolean _CFURLIsProtectedDirectory(CFURLRef directoryURL) CF_AVAILABLE(10_10, NA);
 
-#if (TARGET_OS_MAC) || CF_BUILDING_CF || NSBUILDINGFOUNDATION
+/* _CFURLAttachSecurityScopeToFileURL attaches a sandbox extension to the file URL object. The URL object will then be security-scoped and will be usable with the NSURL's -startAccessingSecurityScopedResource method and CFURL's CFURLStartAccessingSecurityScopedResource() function. The URL object must be a file URL. If the URL object already has a sandbox extension attached, the new extension replaces the previous sandbox extension. If NULL is passed for the sandboxExtension, the sandbox extension (if any) is removed from the URL object. Callers would be responsible for ensuring the sandbox extension matches the URL's file system path.
+ */
+CF_EXPORT
+void _CFURLAttachSecurityScopeToFileURL(CFURLRef url, CFDataRef sandboxExtension) CF_AVAILABLE(10_10, 8_0);
+
+/* _CFURLCopySecurityScopeFromFileURL copies the sandbox extension attached to the file URL object. If the URL is not a file URL or doesn't have a sandbox extension, NULL will be returned.
+ */
+CF_EXPORT
+CFDataRef _CFURLCopySecurityScopeFromFileURL(CFURLRef url) CF_AVAILABLE(10_10, 8_0);
+
+CF_EXPORT
+void _CFURLSetPermanentResourcePropertyForKey(CFURLRef url, CFStringRef key, CFTypeRef propertyValue) CF_AVAILABLE(10_10, 8_0);
+
 CF_EXPORT
 CFURLEnumeratorResult _CFURLEnumeratorGetURLsBulk(CFURLEnumeratorRef enumerator, CFIndex maximumURLs, CFIndex *actualURLs, CFURLRef *urls, CFErrorRef *error) CF_AVAILABLE(10_6, 4_0);
-#endif
 
-#if TARGET_OS_MAC
+// Returns a string describing the bookmark data. For debugging purposes only.
+CF_EXPORT
+CFStringRef _CFURLBookmarkCopyDescription(CFDataRef bookmarkRef) CF_AVAILABLE(10_10, 8_0);
 
+// private CFURLBookmarkCreationOptions
 enum {
+    kCFURLBookmarkCreationWithFileProvider CF_ENUM_AVAILABLE(10_10, 8_0) = ( 1UL << 26 ), // private option to create bookmarks with file provider string. The file provider string overrides the rest of the bookmark data at resolution time.
+    kCFURLBookmarkOperatingInsideScopedBookmarksAgent = (1UL << 27), // private option used internally by ScopedBookmarkAgent to prevent recursion between the agent and the framework code. Available 10_7, NA
+    kCFURLBookmarkCreationAllowCreationIfResourceDoesNotExistMask = ( 1UL << 28 ),    // allow creation of a bookmark to a file: scheme with a CFURLRef of item which may not exist.  If the filesystem item does not exist, the created bookmark contains essentially no properties beyond the url string. Available 10_7, 5_0.
+    kCFURLBookmarkCreationDoNotIncludeSandboxExtensionsMask = ( 1UL << 29 ),  // If set, sandbox extensions are not included in created bookmarks. Ordinarily, bookmarks (except those created suitable for putting into a bookmark file) will have a sandbox extension added for the item. Available 10_7, NA.
+    kCFURLBookmarkCreationSuitableForOdocAppleEvent = ( 1UL << 31 ),   // add properties we guarantee will be in an odoc AppleEvent. Available 10_10, NA (but supported back to 10.6).
+};
+
+// private CFURLBookmarkFileCreationOptions
+enum {
+    // FIXME: These three options (kCFBookmarkFileCreationWithoutOverwritingExistingFile, kCFBookmarkFileCreationWithoutAppendingAliasExtension, and kCFBookmarkFileCreationWithoutCreatingResourceFork) are not implemented and have never been used.
     kCFBookmarkFileCreationWithoutOverwritingExistingFile   = ( 1UL << 8 ), // if destination file already exists don't overwrite it and return an error
     kCFBookmarkFileCreationWithoutAppendingAliasExtension   = ( 1UL << 9 ), // don't add / change whatever extension is on the created alias file
     kCFBookmarkFileCreationWithoutCreatingResourceFork      = ( 1UL << 10 ), // don't create the resource-fork half of the alias file
-
-    kCFURLBookmarkCreationAllowCreationIfResourceDoesNotExistMask = ( 1 << 28 ),	// allow creation of a bookmark to a file: scheme with a CFURLRef of item which may not exist.  If the filesystem item does not exist, the created bookmark contains essentially no properties beyond the url string.
-
-    kCFURLBookmarkCreationDoNotIncludeSandboxExtensionsMask = ( 1 << 29 ),	// If set, sandbox extensions are not included in created bookmarks.  Ordinarily, bookmarks ( except those created suitable for putting into a bookmark file ) will have a sandbox extension added for the item
 };
 
+// private CFURLBookmarkResolutionOptions
 enum {
-    kCFBookmarkResolutionPerformRelativeResolutionFirstMask CF_ENUM_AVAILABLE(10_8,6_0) = ( 1 << 11 ), // perform relative resolution before absolute resolution.  If this bit is set, for this to be useful a relative URL must also have been passed in and the bookmark when created must have been created relative to another url.
+    kCFBookmarkResolutionPerformRelativeResolutionFirstMask CF_ENUM_AVAILABLE(10_8, 6_0) = ( 1UL << 11 ), // perform relative resolution before absolute resolution. If this bit is set, for this to be useful a relative URL must also have been passed in and the bookmark when created must have been created relative to another url.
 };
 
 typedef CF_ENUM(CFIndex, CFURLBookmarkMatchResult) {
@@ -604,7 +645,7 @@ typedef CF_ENUM(CFIndex, CFURLBookmarkMatchResult) {
     kCFURLBookmarkComparisonLikelyToMatch   = 0x00004000,   /* it is likely that the two items refer to the same filesystem item ( but, they may not ) */
     kCFURLBookmarkComparisonMatch           = 0x00008000,   /* the two items refer to the same item, but other information in the bookmarks may not match */
     kCFURLBookmarkComparisonExactMatch      = 0x0000f000    /* the two bookmarks are identical */
-};
+}; // Available 10_7, NA.
 
 /* The relativeToURL and matchingPropertyKeys parameters are not used and are ignored */
 CF_EXPORT
@@ -613,7 +654,8 @@ CFURLBookmarkMatchResult _CFURLBookmarkDataCompare(CFDataRef bookmark1Ref, CFDat
 CF_EXPORT
 OSStatus _CFURLBookmarkDataToAliasHandle(CFDataRef bookmarkRef, void* aliasHandleP) CF_AVAILABLE(10_7, NA);
 
-#endif
+CF_EXPORT
+CFURLRef _CFURLCreateByResolvingAliasFile(CFAllocatorRef allocator, CFURLRef url, CFURLBookmarkResolutionOptions options, CFArrayRef propertiesToInclude, CFErrorRef *error ) CF_AVAILABLE(10_10, 8_0);
 
 /*
  The following are properties that can be asked of bookmark data objects in addition to the resource properties
@@ -625,8 +667,7 @@ extern const CFStringRef kCFURLBookmarkOriginalRelativePathKey CF_AVAILABLE(10_7
 extern const CFStringRef kCFURLBookmarkOriginalRelativePathComponentsArrayKey CF_AVAILABLE(10_7, 5_0);
 extern const CFStringRef kCFURLBookmarkOriginalVolumeNameKey CF_AVAILABLE(10_7, 5_0);
 extern const CFStringRef kCFURLBookmarkOriginalVolumeCreationDateKey CF_AVAILABLE(10_7, 5_0);
-
-#endif /* TARGET_OS_MAC */
+extern const CFStringRef kCFURLBookmarkFileProviderStringKey CF_AVAILABLE(10_10, 8_0);
 
 CF_EXTERN_C_END
 

@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFBase.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -452,25 +452,28 @@ static void _CFAllocatorSetInstanceTypeIDAndIsa(struct __CFAllocator *memory) {
 }
 
 CF_PRIVATE void __CFAllocatorInitialize(void) {
-    __kCFAllocatorTypeID = _CFRuntimeRegisterClass(&__CFAllocatorClass);
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFAllocatorTypeID = _CFRuntimeRegisterClass(&__CFAllocatorClass); // initOnce covered
 
-    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorSystemDefault);
+        _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorSystemDefault);
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    __kCFAllocatorSystemDefault._context.info = (kCFUseCollectableAllocator ? objc_collectableZone() : malloc_default_zone());
+        __kCFAllocatorSystemDefault._context.info = (kCFUseCollectableAllocator ? objc_collectableZone() : malloc_default_zone());
 #endif
-    __kCFAllocatorSystemDefault._allocator = kCFAllocatorSystemDefault;
+        __kCFAllocatorSystemDefault._allocator = kCFAllocatorSystemDefault;
 
-    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMalloc);
-    __kCFAllocatorMalloc._allocator = kCFAllocatorSystemDefault;
+        _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMalloc);
+        __kCFAllocatorMalloc._allocator = kCFAllocatorSystemDefault;
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMallocZone);
-    __kCFAllocatorMallocZone._allocator = kCFAllocatorSystemDefault;
-    __kCFAllocatorMallocZone._context.info = malloc_default_zone();
+        _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorMallocZone);
+        __kCFAllocatorMallocZone._allocator = kCFAllocatorSystemDefault;
+        __kCFAllocatorMallocZone._context.info = malloc_default_zone();
 #endif
 
-    _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorNull);
-    __kCFAllocatorNull._allocator = kCFAllocatorSystemDefault;
+        _CFAllocatorSetInstanceTypeIDAndIsa(&__kCFAllocatorNull);
+        __kCFAllocatorNull._allocator = kCFAllocatorSystemDefault;
+    });
 }
 
 CFTypeID CFAllocatorGetTypeID(void) {
@@ -856,12 +859,12 @@ static const CFRuntimeClass __CFNullClass = {
     __CFNullCopyDescription
 };
 
-CF_PRIVATE void __CFNullInitialize(void) {
-    __kCFNullTypeID = _CFRuntimeRegisterClass(&__CFNullClass);
-    _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFNull, __kCFNullTypeID);
-}
-
 CFTypeID CFNullGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{
+        __kCFNullTypeID = _CFRuntimeRegisterClass(&__CFNullClass); // initOnce covered
+        _CFRuntimeSetInstanceTypeIDAndIsa(&__kCFNull, __kCFNullTypeID);
+    });
     return __kCFNullTypeID;
 }
 

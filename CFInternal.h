@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFInternal.h
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 */
 
 /*
@@ -216,6 +216,7 @@ enum {
 	__CFTSDKeyRunLoop = 10,
 	__CFTSDKeyRunLoopCntr = 11,
         __CFTSDKeyMachMessageBoost = 12, // valid only in the context of a CFMachPort callout
+        __CFTSDKeyMachMessageHasVoucher = 13,
 	// autorelease pool stuff must be higher than run loop constants
 	__CFTSDKeyAutoreleaseData2 = 61,
 	__CFTSDKeyAutoreleaseData1 = 62,
@@ -387,104 +388,83 @@ CF_PRIVATE Boolean __CFProphylacticAutofsAccess;
 
 #if DEPLOYMENT_TARGET_MACOSX
 
-typedef OSSpinLock CFSpinLock_t;
+typedef pthread_mutex_t CFLock_t;
 
-#define CFSpinLockInit OS_SPINLOCK_INIT
-#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
+#define CFLockInit ((pthread_mutex_t)PTHREAD_ERRORCHECK_MUTEX_INITIALIZER)
+#define CF_LOCK_INIT_FOR_STRUCTS(X) (X = CFLockInit)
 
-#define __CFSpinLock(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLock __lockv__ = *__lockp__; \
-    if (0 != __lockv__ && ~0 != __lockv__ && (uintptr_t)__lockp__ != (uintptr_t)__lockv__) { \
-        CFLog(3, CFSTR("In '%s', file %s, line %d, during lock, spin lock %p has value 0x%x, which is neither locked nor unlocked.  The memory has been smashed."), __PRETTY_FUNCTION__, __FILE__, __LINE__, __lockp__, __lockv__); \
-        /* HALT; */ \
-    } \
-    OSSpinLockLock(__lockp__); })
+#define __CFLock(LP) ({ \
+    (void)pthread_mutex_lock(LP); })
 
-#define __CFSpinUnlock(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLock __lockv__ = *__lockp__; \
-    if (~0 != __lockv__ && (uintptr_t)__lockp__ != (uintptr_t)__lockv__) { \
-        CFLog(3, CFSTR("In '%s', file %s, line %d, during unlock, spin lock %p has value 0x%x, which is not locked.  The memory has been smashed or the lock is being unlocked when not locked."), __PRETTY_FUNCTION__, __FILE__, __LINE__, __lockp__, __lockv__); \
-        /* HALT; */ \
-    } \
-    OSSpinLockUnlock(__lockp__); })
+#define __CFUnlock(LP) ({ \
+    (void)pthread_mutex_unlock(LP); })
 
-#define __CFSpinLockTry(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLock __lockv__ = *__lockp__; \
-    if (0 != __lockv__ && ~0 != __lockv__ && (uintptr_t)__lockp__ != (uintptr_t)__lockv__) { \
-        CFLog(3, CFSTR("In '%s', file %s, line %d, during lock, spin lock %p has value 0x%x, which is neither locked nor unlocked.  The memory has been smashed."), __PRETTY_FUNCTION__, __FILE__, __LINE__, __lockp__, __lockv__); \
-        /* HALT; */ \
-    } \
-    OSSpinLockTry(__lockp__); })
+#define __CFLockTry(LP) ({ \
+    pthread_mutex_trylock(LP) == 0; })
 
 #elif DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
 
-typedef OSSpinLock CFSpinLock_t;
+typedef pthread_mutex_t CFLock_t;
 
-#define CFSpinLockInit OS_SPINLOCK_INIT
-#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
+#define CFLockInit ((pthread_mutex_t)PTHREAD_ERRORCHECK_MUTEX_INITIALIZER)
+#define CF_LOCK_INIT_FOR_STRUCTS(X) (X = CFLockInit)
 
-#define __CFSpinLock(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLockLock(__lockp__); })
+#define __CFLock(LP) ({ \
+    (void)pthread_mutex_lock(LP); })
 
-#define __CFSpinUnlock(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLockUnlock(__lockp__); })
+#define __CFUnlock(LP) ({ \
+    (void)pthread_mutex_unlock(LP); })
 
-#define __CFSpinLockTry(LP) ({ \
-    OSSpinLock *__lockp__ = (LP); \
-    OSSpinLockTry(__lockp__); })
+#define __CFLockTry(LP) ({ \
+    pthread_mutex_trylock(LP) == 0; })
 
 #elif DEPLOYMENT_TARGET_WINDOWS
 
-typedef int32_t CFSpinLock_t;
-#define CFSpinLockInit 0
-#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
+typedef int32_t CFLock_t;
+#define CFLockInit 0
+#define CF_LOCK_INIT_FOR_STRUCTS(X) (X = CFLockInit)
 
-CF_INLINE void __CFSpinLock(volatile CFSpinLock_t *lock) {
+CF_INLINE void __CFLock(volatile CFLock_t *lock) {
     while (InterlockedCompareExchange((LONG volatile *)lock, ~0, 0) != 0) {
 	Sleep(0);
     }
 }
 
-CF_INLINE void __CFSpinUnlock(volatile CFSpinLock_t *lock) {
+CF_INLINE void __CFUnlock(volatile CFLock_t *lock) {
     MemoryBarrier();
     *lock = 0;
 }
 
-CF_INLINE Boolean __CFSpinLockTry(volatile CFSpinLock_t *lock) {
+CF_INLINE Boolean __CFLockTry(volatile CFLock_t *lock) {
     return (InterlockedCompareExchange((LONG volatile *)lock, ~0, 0) == 0);
 }
 
 #elif DEPLOYMENT_TARGET_LINUX
 
-typedef int32_t CFSpinLock_t;
-#define CFSpinLockInit 0
-#define CF_SPINLOCK_INIT_FOR_STRUCTS(X) (X = CFSpinLockInit)
+typedef int32_t CFLock_t;
+#define CFLockInit 0
+#define CF_LOCK_INIT_FOR_STRUCTS(X) (X = CFLockInit)
 
-CF_INLINE void __CFSpinLock(volatile CFSpinLock_t *lock) {
+CF_INLINE void __CFLock(volatile CFLock_t *lock) {
     while (__sync_val_compare_and_swap(lock, 0, ~0) != 0) {
 	sleep(0);
     }
 }
 
-CF_INLINE void __CFSpinUnlock(volatile CFSpinLock_t *lock) {
+CF_INLINE void __CFUnlock(volatile CFLock_t *lock) {
     __sync_synchronize();
     *lock = 0;
 }
 
-CF_INLINE Boolean __CFSpinLockTry(volatile CFSpinLock_t *lock) {
+CF_INLINE Boolean __CFLockTry(volatile CFLock_t *lock) {
     return (__sync_val_compare_and_swap(lock, 0, ~0) == 0);
 }
 
 #else
 
-#warning CF spin locks not defined for this platform -- CF is not thread-safe
-#define __CFSpinLock(A)		do {} while (0)
-#define __CFSpinUnlock(A)	do {} while (0)
+#warning CF locks not defined for this platform -- CF is not thread-safe
+#define __CFLock(A)	do {} while (0)
+#define __CFUnlock(A)	do {} while (0)
 
 #endif
 
@@ -525,13 +505,11 @@ CF_EXPORT CFStringRef _CFCopyExtensionForAbstractType(CFStringRef abstractType);
 /* ==================== Simple file access ==================== */
 /* These functions all act on a c-strings which must be in the file system encoding. */
     
-CF_EXPORT Boolean _CFCreateDirectory(const char *path);
-CF_EXPORT Boolean _CFRemoveDirectory(const char *path);
-CF_EXPORT Boolean _CFDeleteFile(const char *path);
+CF_PRIVATE Boolean _CFCreateDirectory(const char *path);
+CF_PRIVATE Boolean _CFRemoveDirectory(const char *path);
+CF_PRIVATE Boolean _CFDeleteFile(const char *path);
 
-CF_EXPORT Boolean _CFReadBytesFromPathAndGetFD(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags, int *fd);
-CF_EXPORT Boolean _CFReadBytesFromPath(CFAllocatorRef alloc, const char *path, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags);
-CF_EXPORT Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags);
+CF_PRIVATE Boolean _CFReadBytesFromFile(CFAllocatorRef alloc, CFURLRef url, void **bytes, CFIndex *length, CFIndex maxLength, int extraOpenFlags);
     /* resulting bytes are allocated from alloc which MUST be non-NULL. */
     /* maxLength of zero means the whole file.  Otherwise it sets a limit on the number of bytes read. */
 
@@ -776,6 +754,50 @@ CF_INLINE const char *CFPathRelativeToAppleFrameworksRoot(const char *path, Bool
     }
     return path;
 }
+
+#include <dispatch/dispatch.h>
+#include <dispatch/private.h>
+
+#if (DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED)
+
+// Returns a generic dispatch queue for when you want to just throw some work
+// into the concurrent pile to execute, and don't care about specifics except
+// to match the QOS of the main thread.
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericMatchingMain(void) {
+    return dispatch_get_global_queue(qos_class_main(), DISPATCH_QUEUE_OVERCOMMIT);
+}
+
+// Returns a generic dispatch queue for when you want to just throw some work
+// into the concurrent pile to execute, and don't care about specifics except
+// to match the QOS of the current thread.
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericMatchingCurrent(void) {
+    return dispatch_get_global_queue(qos_class_self(), 0); // DISPATCH_QUEUE_OVERCOMMIT left out intentionally at this point
+}
+
+// Returns a generic dispatch queue for when you want to just throw some work
+// into the concurrent pile to execute, and don't care about specifics except
+// that it should be in background QOS.
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericBackground(void) {
+    // Don't ACTUALLY use BACKGROUND, because of unknowable and unfavorable interactions like (<rdar://problem/16319229>)
+    return dispatch_get_global_queue(QOS_CLASS_UTILITY, DISPATCH_QUEUE_OVERCOMMIT);
+}
+
+#else
+
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericMatchingMain(void) {
+    return dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, DISPATCH_QUEUE_OVERCOMMIT);
+}
+
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericMatchingCurrent(void) {
+    return dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0); // DISPATCH_QUEUE_OVERCOMMIT left out intentionally at this point
+}
+
+CF_INLINE dispatch_queue_t __CFDispatchQueueGetGenericBackground(void) {
+    return dispatch_get_global_queue(QOS_CLASS_UTILITY, DISPATCH_QUEUE_OVERCOMMIT);
+}
+
+#endif
+
 
 CF_EXTERN_C_END
 

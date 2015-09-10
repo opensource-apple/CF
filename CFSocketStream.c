@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFSocketStream.c
-	Copyright (c) 2000-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2000-2014, Apple Inc. All rights reserved.
 	Responsibility: Jeremy Wyld
 */
 //	Original Author: Becky Willrich
@@ -101,7 +101,7 @@ enum {
 };
 
 static struct {
-    CFSpinLock_t lock;
+    CFLock_t lock;
     UInt32	flags;
 #if DEPLOYMENT_TARGET_WINDOWS
     HMODULE	image;
@@ -110,7 +110,7 @@ static struct {
     CFErrorRef (*_CFErrorCreateWithStreamError)(CFAllocatorRef, CFStreamError*);
     CFStreamError (*_CFStreamErrorFromCFError)(CFErrorRef);
 } CFNetworkSupport = {
-    CFSpinLockInit,
+    CFLockInit,
     0x0,
 #if DEPLOYMENT_TARGET_WINDOWS
     NULL,
@@ -183,9 +183,9 @@ createPair(CFAllocatorRef alloc, CFStringRef host, UInt32 port, CFSocketNativeHa
     if (writeStream)
         *writeStream = NULL;
 
-    __CFSpinLock(&(CFNetworkSupport.lock));
+    __CFLock(&(CFNetworkSupport.lock));
     if (!__CFBitIsSet(CFNetworkSupport.flags, kTriedToLoad)) initializeCFNetworkSupport();
-    __CFSpinUnlock(&(CFNetworkSupport.lock));
+    __CFUnlock(&(CFNetworkSupport.lock));
 
     CFNETWORK_CALL(_CFSocketStreamCreatePair, (alloc, host, port, sock, sig, readStream, writeStream));
 }
@@ -207,10 +207,10 @@ CF_PRIVATE CFStreamError _CFStreamErrorFromError(CFErrorRef error) {
     CFStreamError result;
     Boolean canUpCall;
     
-    __CFSpinLock(&(CFNetworkSupport.lock));
+    __CFLock(&(CFNetworkSupport.lock));
     if (!__CFBitIsSet(CFNetworkSupport.flags, kTriedToLoad)) initializeCFNetworkSupport();
     canUpCall = (CFNetworkSupport._CFStreamErrorFromCFError != NULL);
-    __CFSpinUnlock(&(CFNetworkSupport.lock));
+    __CFUnlock(&(CFNetworkSupport.lock));
 
     if (canUpCall) {
         result = CFNETWORK_CALL(_CFStreamErrorFromCFError, (error));
@@ -234,10 +234,10 @@ CF_PRIVATE CFErrorRef _CFErrorFromStreamError(CFAllocatorRef alloc, CFStreamErro
     CFErrorRef result;
     Boolean canUpCall;
     
-    __CFSpinLock(&(CFNetworkSupport.lock));
+    __CFLock(&(CFNetworkSupport.lock));
     if (!__CFBitIsSet(CFNetworkSupport.flags, kTriedToLoad)) initializeCFNetworkSupport();
     canUpCall = (CFNetworkSupport._CFErrorCreateWithStreamError != NULL);
-    __CFSpinUnlock(&(CFNetworkSupport.lock));
+    __CFUnlock(&(CFNetworkSupport.lock));
 
     if (canUpCall) {
         result = CFNETWORK_CALL(_CFErrorCreateWithStreamError, (alloc, streamError));

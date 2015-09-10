@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFXMLPreferencesDomain.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: David Smith
 */
 
@@ -48,7 +48,7 @@ typedef struct {
     CFMutableDictionaryRef _domainDict; // Current value of the domain dictionary
     CFMutableArrayRef _dirtyKeys; // The array of keys which must be synchronized
     CFAbsoluteTime _lastReadTime; // The last time we synchronized with the disk
-    CFSpinLock_t _lock; // Lock for accessing fields in the domain
+    CFLock_t _lock; // Lock for accessing fields in the domain
     Boolean _isWorldReadable; // HACK - this is because we have no good way to propogate the kCFPreferencesAnyUser information from the upper level CFPreferences routines  REW, 1/13/00
     char _padding[3];
 } _CFXMLPreferencesDomain;
@@ -80,12 +80,12 @@ static void __CFMilliSleep(uint32_t msecs) {
 #endif
 }
 
-static CFSpinLock_t _propDictLock = CFSpinLockInit; // Annoying that we need this, but otherwise we have a multithreading risk
+static CFLock_t _propDictLock = CFLockInit; // Annoying that we need this, but otherwise we have a multithreading risk
 
 CF_INLINE CFDictionaryRef URLPropertyDictForPOSIXMode(SInt32 mode) {
     static CFMutableDictionaryRef _propertyDict = NULL;
     CFNumberRef num = CFNumberCreate(__CFPreferencesAllocator(), kCFNumberSInt32Type, &mode);
-    __CFSpinLock(&_propDictLock);
+    __CFLock(&_propDictLock);
     if (!_propertyDict) {
         _propertyDict = CFDictionaryCreateMutable(__CFPreferencesAllocator(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     }
@@ -95,7 +95,7 @@ CF_INLINE CFDictionaryRef URLPropertyDictForPOSIXMode(SInt32 mode) {
 }
 
 CF_INLINE void URLPropertyDictRelease(void) {
-    __CFSpinUnlock(&_propDictLock);
+    __CFUnlock(&_propDictLock);
 }
 
 // Asssumes caller already knows the directory doesn't exist.
@@ -138,7 +138,7 @@ static void *createXMLDomain(CFAllocatorRef allocator, CFTypeRef context) {
     domain->_lastReadTime = 0.0;
     domain->_domainDict = NULL;
     domain->_dirtyKeys = CFArrayCreateMutable(allocator, 0, & kCFTypeArrayCallBacks);
-	const CFSpinLock_t lock = CFSpinLockInit;
+	const CFLock_t lock = CFLockInit;
     domain->_lock = lock;
     domain->_isWorldReadable = false;
     return domain;
@@ -218,11 +218,11 @@ static CFTypeRef fetchXMLValue(CFTypeRef context, void *xmlDomain, CFStringRef k
     CFTypeRef result;
  
     // Never reload if we've looked at the file system within the last 5 seconds.
-    __CFSpinLock(&domain->_lock);
+    __CFLock(&domain->_lock);
     if (domain->_domainDict == NULL) _loadXMLDomainIfStale((CFURLRef )context, domain);
     result = CFDictionaryGetValue(domain->_domainDict, key);
     if (result) CFRetain(result); 
-    __CFSpinUnlock(&domain->_lock);
+    __CFUnlock(&domain->_lock);
 
     return result;
 }
@@ -405,7 +405,7 @@ static void writeXMLValue(CFTypeRef context, void *xmlDomain, CFStringRef key, C
     _CFXMLPreferencesDomain *domain = (_CFXMLPreferencesDomain *)xmlDomain;
     const void *existing = NULL;
 
-    __CFSpinLock(&domain->_lock);
+    __CFLock(&domain->_lock);
     if (domain->_domainDict == NULL) {
         _loadXMLDomainIfStale((CFURLRef )context, domain);
     }
@@ -416,12 +416,12 @@ static void writeXMLValue(CFTypeRef context, void *xmlDomain, CFStringRef key, C
 	// these things are no-ops, and should not dirty the domain
     if (CFDictionaryGetValueIfPresent(domain->_domainDict, key, &existing)) {
 	if (NULL != value && (existing == value || CFEqual(existing, value))) {
-	    __CFSpinUnlock(&domain->_lock);
+	    __CFUnlock(&domain->_lock);
 	    return;
 	}
     } else {
 	if (NULL == value) {
-	    __CFSpinUnlock(&domain->_lock);
+	    __CFUnlock(&domain->_lock);
 	    return;
 	}
     }
@@ -440,13 +440,13 @@ static void writeXMLValue(CFTypeRef context, void *xmlDomain, CFStringRef key, C
     } else {
         CFDictionaryRemoveValue(domain->_domainDict, key);
     }
-    __CFSpinUnlock(&domain->_lock);
+    __CFUnlock(&domain->_lock);
 }
 
 static void getXMLKeysAndValues(CFAllocatorRef alloc, CFTypeRef context, void *xmlDomain, void **buf[], CFIndex *numKeyValuePairs) {
     _CFXMLPreferencesDomain *domain = (_CFXMLPreferencesDomain *)xmlDomain;
     CFIndex count;
-    __CFSpinLock(&domain->_lock);
+    __CFLock(&domain->_lock);
     if (!domain->_domainDict) {
         _loadXMLDomainIfStale((CFURLRef )context, domain);
     }
@@ -465,21 +465,21 @@ static void getXMLKeysAndValues(CFAllocatorRef alloc, CFTypeRef context, void *x
         }
     }
     *numKeyValuePairs = count;
-    __CFSpinUnlock(&domain->_lock);
+    __CFUnlock(&domain->_lock);
 }
 
 static CFDictionaryRef copyXMLDomainDictionary(CFTypeRef context, void *xmlDomain) {
     _CFXMLPreferencesDomain *domain = (_CFXMLPreferencesDomain *)xmlDomain;
     CFDictionaryRef result;
     
-    __CFSpinLock(&domain->_lock);
+    __CFLock(&domain->_lock);
     if(!domain->_domainDict) {
         _loadXMLDomainIfStale((CFURLRef)context, domain);
     }
     
     result = (CFDictionaryRef)CFPropertyListCreateDeepCopy(__CFPreferencesAllocator(), domain->_domainDict, kCFPropertyListImmutable);
     
-    __CFSpinUnlock(&domain->_lock);
+    __CFUnlock(&domain->_lock);
     return result;
 }
 
@@ -495,7 +495,7 @@ static Boolean synchronizeXMLDomain(CFTypeRef context, void *xmlDomain) {
     SInt32 idx,  count;
     Boolean success, tryAgain;
     
-    __CFSpinLock(&domain->_lock);
+    __CFLock(&domain->_lock);
     cachedDict = domain->_domainDict;
     changedKeys = domain->_dirtyKeys;
     count = CFArrayGetCount(changedKeys);
@@ -506,7 +506,7 @@ static Boolean synchronizeXMLDomain(CFTypeRef context, void *xmlDomain) {
             CFRelease(cachedDict);
             domain->_domainDict = NULL;
         }
-        __CFSpinUnlock(&domain->_lock);
+        __CFUnlock(&domain->_lock);
         return true;
     }
 
@@ -532,7 +532,7 @@ static Boolean synchronizeXMLDomain(CFTypeRef context, void *xmlDomain) {
 	CFArrayRemoveAllValues(domain->_dirtyKeys);
     }
     domain->_lastReadTime = CFAbsoluteTimeGetCurrent();
-    __CFSpinUnlock(&domain->_lock);
+    __CFUnlock(&domain->_lock);
     return success;
 }
 

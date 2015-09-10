@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,12 +17,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*	CFMessagePort.c
-	Copyright (c) 1998-2013, Apple Inc. All rights reserved.
+	Copyright (c) 1998-2014, Apple Inc. All rights reserved.
 	Responsibility: Christopher Kane
 */
 
@@ -60,13 +60,13 @@ extern pid_t getpid(void);
 
 #define __CFMessagePortMaxDataSize 0x60000000L
 
-static CFSpinLock_t __CFAllMessagePortsLock = CFSpinLockInit;
+static CFLock_t __CFAllMessagePortsLock = CFLockInit;
 static CFMutableDictionaryRef __CFAllLocalMessagePorts = NULL;
 static CFMutableDictionaryRef __CFAllRemoteMessagePorts = NULL;
 
 struct __CFMessagePort {
     CFRuntimeBase _base;
-    CFSpinLock_t _lock;
+    CFLock_t _lock;
     CFStringRef _name;
     CFMachPortRef _port;		/* immutable; invalidated */
     CFMutableDictionaryRef _replies;
@@ -132,84 +132,77 @@ CF_INLINE void __CFMessagePortSetIsDeallocing(CFMessagePortRef ms) {
 }
 
 CF_INLINE void __CFMessagePortLock(CFMessagePortRef ms) {
-    __CFSpinLock(&(ms->_lock));
+    __CFLock(&(ms->_lock));
 }
 
 CF_INLINE void __CFMessagePortUnlock(CFMessagePortRef ms) {
-    __CFSpinUnlock(&(ms->_lock));
+    __CFUnlock(&(ms->_lock));
 }
 
+#if !defined(__LP64__)
+#define __LP64__ 0
+#endif
+
 // Just a heuristic
-#define __CFMessagePortMaxInlineBytes 4096*10
+#define __CFMessagePortMaxInlineBytes ((int32_t)4000)
 
-struct __CFMessagePortMachMessage0 {
-    mach_msg_base_t base;
-    int32_t magic;
-    int32_t msgid;
-    int32_t byteslen;
-    uint8_t bytes[0];
-};
-
-struct __CFMessagePortMachMessage1 {
+struct __CFMessagePortMachMessage {
     mach_msg_base_t base;
     mach_msg_ool_descriptor_t ool;
-    int32_t magic;
-    int32_t msgid;
-    int32_t byteslen;
+    struct innards {
+        int32_t magic;
+        int32_t msgid;
+        int32_t convid;
+        int32_t byteslen;
+        uint8_t bytes[0];
+    } innards;
 };
+#define __INNARD_OFFSET (((!(msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && ((mach_msg_header_t *)msgp)->msgh_id == 0) || ( (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && !__LP64__)) ? 40 : 44)
 
-#define MAGIC 0xF1F2F3F4
+#define MAGIC 0xF0F2F4F8
 
-#define MSGP0_FIELD(msgp, ident) ((struct __CFMessagePortMachMessage0 *)msgp)->ident
-#define MSGP1_FIELD(msgp, ident) ((struct __CFMessagePortMachMessage1 *)msgp)->ident
-#define MSGP_GET(msgp, ident) \
-    ((((mach_msg_base_t *)msgp)->body.msgh_descriptor_count) ? MSGP1_FIELD(msgp, ident) : MSGP0_FIELD(msgp, ident))
+// These 3 macros should ONLY be used on RECEIVED messages, not ones being constructed on the sending side
+#define MSGP_GET(msgp, ident)  (((struct __CFMessagePortMachMessage *)msgp)->ident)
+#define MSGP_INFO(msgp, ident) ((struct innards *)((void *)msgp + __INNARD_OFFSET))->ident
+#define MSGP_SIZE(msgp) (__INNARD_OFFSET + sizeof(struct innards))
+
 
 static mach_msg_base_t *__CFMessagePortCreateMessage(bool reply, mach_port_t port, mach_port_t replyPort, int32_t convid, int32_t msgid, const uint8_t *bytes, int32_t byteslen) {
     if (__CFMessagePortMaxDataSize < byteslen) return NULL;
-    int32_t rounded_byteslen = ((byteslen + 3) & ~0x3);
+    if (byteslen < -1) return NULL;
+    int32_t rounded_byteslen = (byteslen < 0) ? 0 : ((byteslen + 7) & ~0x7);
+    int32_t size = (int32_t)sizeof(struct __CFMessagePortMachMessage) + ((rounded_byteslen <= __CFMessagePortMaxInlineBytes) ? rounded_byteslen : 0);
+    struct __CFMessagePortMachMessage *msg = CFAllocatorAllocate(kCFAllocatorSystemDefault, size, 0);
+    if (!msg) return NULL;
+    memset(msg, 0, size);
+#if __LP64__
+    msg->base.header.msgh_id = 1;
+#else
+    msg->base.header.msgh_id = 0;
+#endif
+    msg->base.header.msgh_size = size;
+    msg->base.header.msgh_remote_port = port;
+    msg->base.header.msgh_local_port = replyPort;
+    msg->base.header.msgh_bits = MACH_MSGH_BITS((reply ? MACH_MSG_TYPE_MOVE_SEND_ONCE : MACH_MSG_TYPE_COPY_SEND), (MACH_PORT_NULL != replyPort ? MACH_MSG_TYPE_MAKE_SEND_ONCE : 0));
+    msg->base.body.msgh_descriptor_count = 0;
+    msg->innards.magic = MAGIC;
+    msg->innards.msgid = CFSwapInt32HostToLittle(msgid);
+    msg->innards.convid = CFSwapInt32HostToLittle(convid);
+    msg->innards.byteslen = CFSwapInt32HostToLittle(byteslen);
     if (rounded_byteslen <= __CFMessagePortMaxInlineBytes) {
-        int32_t size = sizeof(struct __CFMessagePortMachMessage0) + rounded_byteslen;
-        struct __CFMessagePortMachMessage0 *msg = CFAllocatorAllocate(kCFAllocatorSystemDefault, size, 0);
-        if (!msg) return NULL;
-        memset(msg, 0, size);
-        msg->base.header.msgh_id = convid;
-        msg->base.header.msgh_size = size;
-        msg->base.header.msgh_remote_port = port;
-        msg->base.header.msgh_local_port = replyPort;
-        msg->base.header.msgh_reserved = 0;
-        msg->base.header.msgh_bits = MACH_MSGH_BITS((reply ? MACH_MSG_TYPE_MOVE_SEND_ONCE : MACH_MSG_TYPE_COPY_SEND), (MACH_PORT_NULL != replyPort ? MACH_MSG_TYPE_MAKE_SEND_ONCE : 0));
-	msg->base.body.msgh_descriptor_count = 0;
-        msg->magic = MAGIC;
-        msg->msgid = CFSwapInt32HostToLittle(msgid);
-        msg->byteslen = CFSwapInt32HostToLittle(byteslen);
 	if (NULL != bytes && 0 < byteslen) {
-	    memmove(msg->bytes, bytes, byteslen);
+	    memmove(msg->innards.bytes, bytes, byteslen);
 	}
-        return (mach_msg_base_t *)msg;
     } else {
-        int32_t size = sizeof(struct __CFMessagePortMachMessage1);
-        struct __CFMessagePortMachMessage1 *msg = CFAllocatorAllocate(kCFAllocatorSystemDefault, size, 0);
-        if (!msg) return NULL;
-        memset(msg, 0, size);
-        msg->base.header.msgh_id = convid;
-        msg->base.header.msgh_size = size;
-        msg->base.header.msgh_remote_port = port;
-        msg->base.header.msgh_local_port = replyPort;
-        msg->base.header.msgh_reserved = 0;
-        msg->base.header.msgh_bits = MACH_MSGH_BITS((reply ? MACH_MSG_TYPE_MOVE_SEND_ONCE : MACH_MSG_TYPE_COPY_SEND), (MACH_PORT_NULL != replyPort ? MACH_MSG_TYPE_MAKE_SEND_ONCE : 0));
 	msg->base.header.msgh_bits |= MACH_MSGH_BITS_COMPLEX;
 	msg->base.body.msgh_descriptor_count = 1;
-        msg->magic = MAGIC;
-        msg->msgid = CFSwapInt32HostToLittle(msgid);
-        msg->byteslen = CFSwapInt32HostToLittle(byteslen);
 	msg->ool.deallocate = false;
 	msg->ool.copy = MACH_MSG_VIRTUAL_COPY;
 	msg->ool.address = (void *)bytes;
 	msg->ool.size = byteslen;
 	msg->ool.type = MACH_MSG_OOL_DESCRIPTOR;
-        return (mach_msg_base_t *)msg;
     }
+    return (mach_msg_base_t *)msg;
 }
 
 static CFStringRef __CFMessagePortCopyDescription(CFTypeRef cf) {
@@ -217,7 +210,7 @@ static CFStringRef __CFMessagePortCopyDescription(CFTypeRef cf) {
     CFStringRef result;
     const char *locked;
     CFStringRef contextDesc = NULL;
-    locked = ms->_lock ? "Yes" : "No";
+    locked = "Maybe";
     if (__CFMessagePortIsRemote(ms)) {
 	result = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<CFMessagePort %p [%p]>{locked = %s, valid = %s, remote = %s, name = %@}"), cf, CFGetAllocator(ms), locked, (__CFMessagePortIsValid(ms) ? "Yes" : "No"), (__CFMessagePortIsRemote(ms) ? "Yes" : "No"), ms->_name);
     } else {
@@ -265,7 +258,7 @@ static void __CFMessagePortDeallocate(CFTypeRef cf) {
     // auto-invalidating; so we manually implement the 'auto-invalidation' here by
     // tickling each remote port to check its state after any message port is destroyed,
     // but most importantly after local message ports are destroyed.
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     CFMessagePortRef *remotePorts = NULL;
     CFIndex cnt = 0;
     if (NULL != __CFAllRemoteMessagePorts) {
@@ -276,7 +269,7 @@ static void __CFMessagePortDeallocate(CFTypeRef cf) {
 	    CFRetain(remotePorts[idx]);
 	}
     }
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
     if (remotePorts) {
 	for (CFIndex idx = 0; idx < cnt; idx++) {
 	    // as a side-effect, this will auto-invalidate the CFMessagePort if the CFMachPort is invalid
@@ -301,11 +294,9 @@ static const CFRuntimeClass __CFMessagePortClass = {
     __CFMessagePortCopyDescription
 };
 
-CF_PRIVATE void __CFMessagePortInitialize(void) {
-    __kCFMessagePortTypeID = _CFRuntimeRegisterClass(&__CFMessagePortClass);
-}
-
 CFTypeID CFMessagePortGetTypeID(void) {
+    static dispatch_once_t initOnce;
+    dispatch_once(&initOnce, ^{ __kCFMessagePortTypeID = _CFRuntimeRegisterClass(&__CFMessagePortClass); });
     return __kCFMessagePortTypeID;
 }
 
@@ -356,12 +347,12 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
     if (NULL != name) {
 	name = __CFMessagePortSanitizeStringName(name, &utfname, NULL);
     }
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     if (!perPID && NULL != name) {
 	CFMessagePortRef existing;
 	if (NULL != __CFAllLocalMessagePorts && CFDictionaryGetValueIfPresent(__CFAllLocalMessagePorts, name, (const void **)&existing)) {
 	    CFRetain(existing);
-	    __CFSpinUnlock(&__CFAllMessagePortsLock);
+	    __CFUnlock(&__CFAllMessagePortsLock);
 	    CFRelease(name);
 	    CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
             if (!CFMessagePortIsValid(existing)) { // must do this outside lock to avoid deadlock
@@ -371,9 +362,9 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 	    return (CFMessagePortRef)(existing);
 	}
     }
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
     CFIndex size = sizeof(struct __CFMessagePort) - sizeof(CFRuntimeBase);
-    memory = (CFMessagePortRef)_CFRuntimeCreateInstance(allocator, __kCFMessagePortTypeID, size, NULL);
+    memory = (CFMessagePortRef)_CFRuntimeCreateInstance(allocator, CFMessagePortGetTypeID(), size, NULL);
     if (NULL == memory) {
 	if (NULL != name) {
 	    CFRelease(name);
@@ -384,7 +375,7 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
     __CFMessagePortUnsetValid(memory);
     __CFMessagePortUnsetExtraMachRef(memory);
     __CFMessagePortUnsetRemote(memory);
-    memory->_lock = CFSpinLockInit;
+    memory->_lock = CFLockInit;
     memory->_name = name;
     memory->_port = NULL;
     memory->_replies = NULL;
@@ -410,13 +401,25 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 	if (!perPID) {
 	    ret = bootstrap_check_in(bs, (char *)utfname, &mp); /* If we're started by launchd or the old mach_init */
 	    if (ret == KERN_SUCCESS) {
-		ret = mach_port_insert_right(mach_task_self(), mp, mp, MACH_MSG_TYPE_MAKE_SEND);
+                mach_port_type_t type = 0;
+                ret = mach_port_type(mach_task_self(), mp, &type);
+                if (KERN_SUCCESS != ret || (0 == (type & MACH_PORT_TYPE_PORT_RIGHTS))) {
+                    CFLog(kCFLogLevelError, CFSTR("*** CFMessagePort: bootstrap_check_in() succeeded, but mach port type is unknown (err %d) or returned invalid type (0x%x); name = '%s'"), ret, type, utfname);
+                    ret = KERN_INVALID_RIGHT;
+                }
+		ret = (KERN_SUCCESS == ret) ? mach_port_insert_right(mach_task_self(), mp, mp, MACH_MSG_TYPE_MAKE_SEND) : ret;
 		if (KERN_SUCCESS == ret) {
 		    CFMachPortContext ctx = {0, memory, NULL, NULL, NULL};
 		    native = CFMachPortCreateWithPort(allocator, mp, __CFMessagePortDummyCallback, &ctx, NULL);
+                    if (!native) {
+                        mach_port_destroy(mach_task_self(), mp);
+                        CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
+                        // name is released by deallocation
+                        CFRelease(memory);
+                        return NULL;
+                    }
 		    __CFMessagePortSetExtraMachRef(memory);
 		} else {
-		    CFLog(kCFLogLevelDebug, CFSTR("*** CFMessagePort: mach_port_insert_member() after bootstrap_check_in(): failed %d (0x%x) '%s', port = 0x%x, name = '%s'"), ret, ret, bootstrap_strerror(ret), mp, utfname);
 		    mach_port_destroy(mach_task_self(), mp);
 		    CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
 		    // name is released by deallocation
@@ -435,7 +438,10 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 		return NULL;
 	    }
 	    mp = CFMachPortGetPort(native);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
 	    ret = bootstrap_register2(bs, (char *)utfname, mp, perPID ? BOOTSTRAP_PER_PID_SERVICE : 0);
+#pragma GCC diagnostic pop
 	    if (ret != KERN_SUCCESS) {
 		CFLog(kCFLogLevelDebug, CFSTR("*** CFMessagePort: bootstrap_register(): failed %d (0x%x) '%s', port = 0x%x, name = '%s'\nSee /usr/include/servers/bootstrap_defs.h for the error codes."), ret, ret, bootstrap_strerror(ret), mp, utfname);
 		CFMachPortInvalidate(native);
@@ -456,12 +462,12 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 	memmove(&memory->_context, context, sizeof(CFMessagePortContext));
 	memory->_context.info = context->retain ? (void *)context->retain(context->info) : context->info;
     }
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     if (!perPID && NULL != name) {
         CFMessagePortRef existing;
         if (NULL != __CFAllLocalMessagePorts && CFDictionaryGetValueIfPresent(__CFAllLocalMessagePorts, name, (const void **)&existing)) {
             CFRetain(existing);
-            __CFSpinUnlock(&__CFAllMessagePortsLock); 
+            __CFUnlock(&__CFAllMessagePortsLock); 
 	    CFRelease(memory);
             return (CFMessagePortRef)(existing);
         }       
@@ -470,7 +476,7 @@ static CFMessagePortRef __CFMessagePortCreateLocal(CFAllocatorRef allocator, CFS
 	}
 	CFDictionaryAddValue(__CFAllLocalMessagePorts, name, memory);
     }
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
     if (shouldFreeInfo) *shouldFreeInfo = false;
     return memory;
 }
@@ -500,12 +506,12 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
     if (NULL == name) {
 	return NULL;
     }
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     if (!perPID && NULL != name) {
 	CFMessagePortRef existing;
 	if (NULL != __CFAllRemoteMessagePorts && CFDictionaryGetValueIfPresent(__CFAllRemoteMessagePorts, name, (const void **)&existing)) {
 	    CFRetain(existing);
-	    __CFSpinUnlock(&__CFAllMessagePortsLock);
+	    __CFUnlock(&__CFAllMessagePortsLock);
 	    CFRelease(name);
 	    CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
             if (!CFMessagePortIsValid(existing)) { // must do this outside lock to avoid deadlock
@@ -515,9 +521,9 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
 	    return (CFMessagePortRef)(existing);
 	}
     }
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
     size = sizeof(struct __CFMessagePort) - sizeof(CFMessagePortContext) - sizeof(CFRuntimeBase);
-    memory = (CFMessagePortRef)_CFRuntimeCreateInstance(allocator, __kCFMessagePortTypeID, size, NULL);
+    memory = (CFMessagePortRef)_CFRuntimeCreateInstance(allocator, CFMessagePortGetTypeID(), size, NULL);
     if (NULL == memory) {
 	if (NULL != name) {
 	    CFRelease(name);
@@ -528,7 +534,7 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
     __CFMessagePortUnsetValid(memory);
     __CFMessagePortUnsetExtraMachRef(memory);
     __CFMessagePortSetRemote(memory);
-    memory->_lock = CFSpinLockInit;
+    memory->_lock = CFLockInit;
     memory->_name = name;
     memory->_port = NULL;
     memory->_replies = CFDictionaryCreateMutable(kCFAllocatorSystemDefault, 0, NULL, NULL);
@@ -557,12 +563,12 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
     }
     memory->_port = native;
     __CFMessagePortSetValid(memory);
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     if (!perPID && NULL != name) {
 	CFMessagePortRef existing;
 	if (NULL != __CFAllRemoteMessagePorts && CFDictionaryGetValueIfPresent(__CFAllRemoteMessagePorts, name, (const void **)&existing)) {
 	    CFRetain(existing);
-	    __CFSpinUnlock(&__CFAllMessagePortsLock);
+	    __CFUnlock(&__CFAllMessagePortsLock);
 	    CFRelease(memory);
 	    return (CFMessagePortRef)(existing);
 	}
@@ -572,7 +578,7 @@ static CFMessagePortRef __CFMessagePortCreateRemote(CFAllocatorRef allocator, CF
 	CFDictionaryAddValue(__CFAllRemoteMessagePorts, name, memory);
     }
     CFRetain(native);
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
     CFMachPortSetInvalidationCallBack(native, __CFMessagePortInvalidationCallBack);
     // that set-invalidation-callback might have called back into us
     // if the CFMachPort is already bad, but that was a no-op since
@@ -596,12 +602,12 @@ CFMessagePortRef CFMessagePortCreatePerProcessRemote(CFAllocatorRef allocator, C
 }
 
 Boolean CFMessagePortIsRemote(CFMessagePortRef ms) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     return __CFMessagePortIsRemote(ms);
 }
 
 CFStringRef CFMessagePortGetName(CFMessagePortRef ms) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     return ms->_name;
 }
 
@@ -609,23 +615,23 @@ Boolean CFMessagePortSetName(CFMessagePortRef ms, CFStringRef name) {
     CFAllocatorRef allocator = CFGetAllocator(ms);
     uint8_t *utfname = NULL;
 
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     if (ms->_perPID || __CFMessagePortIsRemote(ms)) return false;
     name = __CFMessagePortSanitizeStringName(name, &utfname, NULL);
     if (NULL == name) {
 	return false;
     }
-    __CFSpinLock(&__CFAllMessagePortsLock);
+    __CFLock(&__CFAllMessagePortsLock);
     if (NULL != name) {
 	CFMessagePortRef existing;
 	if (NULL != __CFAllLocalMessagePorts && CFDictionaryGetValueIfPresent(__CFAllLocalMessagePorts, name, (const void **)&existing)) {
-	    __CFSpinUnlock(&__CFAllMessagePortsLock);
+	    __CFUnlock(&__CFAllMessagePortsLock);
 	    CFRelease(name);
 	    CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
 	    return false;
 	}
     }
-    __CFSpinUnlock(&__CFAllMessagePortsLock);
+    __CFUnlock(&__CFAllMessagePortsLock);
 
     if (NULL != name && (NULL == ms->_name || !CFEqual(ms->_name, name))) {
 	CFMachPortRef oldPort = ms->_port;
@@ -656,7 +662,10 @@ Boolean CFMessagePortSetName(CFMessagePortRef ms, CFStringRef name) {
                 return false;
 	    }
             mp = CFMachPortGetPort(native);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated"
             ret = bootstrap_register2(bs, (char *)utfname, mp, 0);
+#pragma GCC diagnostic pop
             if (ret != KERN_SUCCESS) {
                 CFLog(kCFLogLevelDebug, CFSTR("*** CFMessagePort: bootstrap_register(): failed %d (0x%x) '%s', port = 0x%x, name = '%s'\nSee /usr/include/servers/bootstrap_defs.h for the error codes."), ret, ret, bootstrap_strerror(ret), mp, utfname);
                 CFMachPortInvalidate(native);
@@ -676,7 +685,7 @@ Boolean CFMessagePortSetName(CFMessagePortRef ms, CFStringRef name) {
 	    CFMachPortInvalidate(oldPort);
 	    CFRelease(oldPort);
 	}
-	__CFSpinLock(&__CFAllMessagePortsLock);
+	__CFLock(&__CFAllMessagePortsLock);
 	// This relocking without checking to see if something else has grabbed
 	// that name in the cache is rather suspect, but what would that even
 	// mean has happened?  We'd expect the bootstrap_* calls above to have
@@ -693,7 +702,7 @@ Boolean CFMessagePortSetName(CFMessagePortRef ms, CFStringRef name) {
 	}
 	ms->_name = name;
 	CFDictionaryAddValue(__CFAllLocalMessagePorts, name, ms);
-	__CFSpinUnlock(&__CFAllMessagePortsLock);
+	__CFUnlock(&__CFAllMessagePortsLock);
     }
 
     CFAllocatorDeallocate(kCFAllocatorSystemDefault, utfname);
@@ -701,14 +710,14 @@ Boolean CFMessagePortSetName(CFMessagePortRef ms, CFStringRef name) {
 }
 
 void CFMessagePortGetContext(CFMessagePortRef ms, CFMessagePortContext *context) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
 //#warning CF: assert that this is a local port
     CFAssert1(0 == context->version, __kCFLogAssertion, "%s(): context version not initialized to 0", __PRETTY_FUNCTION__);
     memmove(context, &ms->_context, sizeof(CFMessagePortContext));
 }
 
 void CFMessagePortInvalidate(CFMessagePortRef ms) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     if (!__CFMessagePortIsDeallocing(ms)) {
 	CFRetain(ms);
     }
@@ -737,11 +746,11 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
         ms->_port = NULL;
 	__CFMessagePortUnlock(ms);
 
-	__CFSpinLock(&__CFAllMessagePortsLock);
+	__CFLock(&__CFAllMessagePortsLock);
 	if (0 == ms->_perPID && NULL != name && NULL != (__CFMessagePortIsRemote(ms) ? __CFAllRemoteMessagePorts : __CFAllLocalMessagePorts)) {
 	    CFDictionaryRemoveValue(__CFMessagePortIsRemote(ms) ? __CFAllRemoteMessagePorts : __CFAllLocalMessagePorts, name);
 	}
-	__CFSpinUnlock(&__CFAllMessagePortsLock);
+	__CFUnlock(&__CFAllMessagePortsLock);
 	if (NULL != callout) {
 	    callout(ms, info);
 	}
@@ -783,7 +792,7 @@ void CFMessagePortInvalidate(CFMessagePortRef ms) {
 }
 
 Boolean CFMessagePortIsValid(CFMessagePortRef ms) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     if (!__CFMessagePortIsValid(ms)) return false;
     CFRetain(ms);
     if (NULL != ms->_port && !CFMachPortIsValid(ms->_port)) {
@@ -801,12 +810,12 @@ Boolean CFMessagePortIsValid(CFMessagePortRef ms) {
 }
 
 CFMessagePortInvalidationCallBack CFMessagePortGetInvalidationCallBack(CFMessagePortRef ms) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     return ms->_icallout;
 }
 
 void CFMessagePortSetInvalidationCallBack(CFMessagePortRef ms, CFMessagePortInvalidationCallBack callout) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     if (!__CFMessagePortIsValid(ms) && NULL != callout) {
 	callout(ms, ms->_context.info);
     } else {
@@ -826,22 +835,26 @@ static void __CFMessagePortReplyCallBack(CFMachPortRef port, void *msg, CFIndex 
 
     int32_t byteslen = 0;
 
-    Boolean invalidMagic = (MSGP_GET(msgp, magic) != MAGIC) && (CFSwapInt32(MSGP_GET(msgp, magic)) != MAGIC);
-    Boolean invalidComplex = (0 != msgp->body.msgh_descriptor_count) && !(msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX);
-    invalidComplex = invalidComplex || ((msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && (0 == msgp->body.msgh_descriptor_count));
-    Boolean wayTooBig = ((msgp->body.msgh_descriptor_count) ? sizeof(struct __CFMessagePortMachMessage1) : sizeof(struct __CFMessagePortMachMessage0) + __CFMessagePortMaxInlineBytes) < msgp->header.msgh_size;
-    Boolean wayTooSmall = msgp->header.msgh_size < sizeof(struct __CFMessagePortMachMessage0);
+    Boolean wayTooSmall = size < sizeof(mach_msg_header_t) || size < MSGP_SIZE(msgp) || msgp->header.msgh_size < MSGP_SIZE(msgp);
+    Boolean invalidMagic = false;
+    Boolean invalidComplex = false;
+    Boolean wayTooBig = false;
+    if (!wayTooSmall) {
+        invalidMagic = ((MSGP_INFO(msgp, magic) != MAGIC) && (CFSwapInt32(MSGP_INFO(msgp, magic)) != MAGIC));
+        invalidComplex = (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && (1 != msgp->body.msgh_descriptor_count);
+        wayTooBig = ((int32_t)MSGP_SIZE(msgp) + __CFMessagePortMaxInlineBytes) < msgp->header.msgh_size; // also less than a 32-bit signed int can hold
+    }
     Boolean wrongSize = false;
     if (!(invalidComplex || wayTooBig || wayTooSmall)) {
-        byteslen = CFSwapInt32LittleToHost(MSGP_GET(msgp, byteslen));
-        wrongSize = (byteslen < 0) || (__CFMessagePortMaxDataSize < byteslen);
-        if (0 != msgp->body.msgh_descriptor_count) {
-            wrongSize = wrongSize || (MSGP1_FIELD(msgp, ool).size != byteslen);
+        byteslen = CFSwapInt32LittleToHost(MSGP_INFO(msgp, byteslen));
+        wrongSize = (byteslen < -1) || (__CFMessagePortMaxDataSize < byteslen);
+        if (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) {
+            wrongSize = wrongSize || (MSGP_GET(msgp, ool).size != byteslen);
         } else {
-            wrongSize = wrongSize || (msgp->header.msgh_size - sizeof(struct __CFMessagePortMachMessage0) < byteslen);
+            wrongSize = wrongSize || ((int32_t)msgp->header.msgh_size - (int32_t)MSGP_SIZE(msgp) < byteslen);
         }
     }
-    Boolean invalidMsgID = (0 <= msgp->header.msgh_id) && (msgp->header.msgh_id <= INT32_MAX); // conversation id
+    Boolean invalidMsgID = wayTooSmall ? false : ((0 <= MSGP_INFO(msgp, convid)) && (MSGP_INFO(msgp, convid) <= INT32_MAX)); // conversation id
     if (invalidMagic || invalidComplex || wayTooBig || wayTooSmall || wrongSize || invalidMsgID) {
         CFLog(kCFLogLevelWarning, CFSTR("*** CFMessagePort: dropping corrupt reply Mach message (0b%d%d%d%d%d%d)"), invalidMagic, invalidComplex, wayTooBig, wayTooSmall, wrongSize, invalidMsgID);
         mach_msg_destroy((mach_msg_header_t *)msgp);
@@ -849,26 +862,27 @@ static void __CFMessagePortReplyCallBack(CFMachPortRef port, void *msg, CFIndex 
         return;
     }
 
-    if (CFDictionaryContainsKey(ms->_replies, (void *)(uintptr_t)msgp->header.msgh_id)) {
+    if (CFDictionaryContainsKey(ms->_replies, (void *)(uintptr_t)MSGP_INFO(msgp, convid))) {
 	CFDataRef reply = NULL;
 	replymsg = (mach_msg_base_t *)msg;
-	if (0 == replymsg->body.msgh_descriptor_count) {
+	if (!(replymsg->header.msgh_bits & MACH_MSGH_BITS_COMPLEX)) {
 	    uintptr_t msgp_extent = (uintptr_t)((uint8_t *)msgp + msgp->header.msgh_size);
-	    uintptr_t data_extent = (uintptr_t)((uint8_t *)&(MSGP0_FIELD(replymsg, bytes)) + byteslen);
+	    uintptr_t data_extent = (uintptr_t)((uint8_t *)&(MSGP_INFO(replymsg, bytes)) + byteslen);
+            if (byteslen < 0) byteslen = 0; // from here on, treat negative same as zero -- this is historical behavior: a NULL return from the callback on the other side results in empty data to the original requestor
 	    if (0 <= byteslen && data_extent <= msgp_extent) {
-		reply = CFDataCreate(kCFAllocatorSystemDefault, MSGP0_FIELD(replymsg, bytes), byteslen);
+		reply = CFDataCreate(kCFAllocatorSystemDefault, MSGP_INFO(replymsg, bytes), byteslen);
 	    } else {
 		reply = (void *)~0;	// means NULL data
 	    }
 	} else {
 //#warning CF: should create a no-copy data here that has a custom VM-freeing allocator, and not vm_dealloc here
-	    reply = CFDataCreate(kCFAllocatorSystemDefault, MSGP1_FIELD(replymsg, ool).address, MSGP1_FIELD(replymsg, ool).size);
-	    vm_deallocate(mach_task_self(), (vm_address_t)MSGP1_FIELD(replymsg, ool).address, MSGP1_FIELD(replymsg, ool).size);
+	    reply = CFDataCreate(kCFAllocatorSystemDefault, MSGP_GET(replymsg, ool).address, MSGP_GET(replymsg, ool).size);
+	    vm_deallocate(mach_task_self(), (vm_address_t)MSGP_GET(replymsg, ool).address, MSGP_GET(replymsg, ool).size);
 	}
-	CFDictionarySetValue(ms->_replies, (void *)(uintptr_t)msgp->header.msgh_id, (void *)reply);
+	CFDictionarySetValue(ms->_replies, (void *)(uintptr_t)MSGP_INFO(msgp, convid), (void *)reply);
     } else {	/* discard message */
-	if (1 == msgp->body.msgh_descriptor_count) {
-	    vm_deallocate(mach_task_self(), (vm_address_t)MSGP1_FIELD(msgp, ool).address, MSGP1_FIELD(msgp, ool).size);
+	if (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) {
+	    vm_deallocate(mach_task_self(), (vm_address_t)MSGP_GET(msgp, ool).address, MSGP_GET(msgp, ool).size);
 	}
     }
     __CFMessagePortUnlock(ms);
@@ -908,7 +922,7 @@ SInt32 CFMessagePortSendRequest(CFMessagePortRef remote, SInt32 msgid, CFDataRef
     }
     remote->_convCounter++;
     desiredReply = -remote->_convCounter;
-    sendmsg = __CFMessagePortCreateMessage(false, CFMachPortGetPort(remote->_port), (replyMode != NULL ? CFMachPortGetPort(remote->_replyPort) : MACH_PORT_NULL), -desiredReply, msgid, (data ? CFDataGetBytePtr(data) : NULL), (data ? CFDataGetLength(data) : 0));
+    sendmsg = __CFMessagePortCreateMessage(false, CFMachPortGetPort(remote->_port), (replyMode != NULL ? CFMachPortGetPort(remote->_replyPort) : MACH_PORT_NULL), -desiredReply, msgid, (data ? CFDataGetBytePtr(data) : NULL), (data ? CFDataGetLength(data) : -1));
     if (!sendmsg) {
         __CFMessagePortUnlock(remote);
         CFRelease(remote);
@@ -999,7 +1013,7 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
     void (*context_release)(const void *);
     CFDataRef returnData, data = NULL;
     void *return_bytes = NULL;
-    CFIndex return_len = 0;
+    CFIndex return_len = -1;
     int32_t msgid;
 
     __CFMessagePortLock(ms);
@@ -1019,39 +1033,45 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
     
     int32_t byteslen = 0;
 
-    Boolean invalidMagic = (MSGP_GET(msgp, magic) != MAGIC) && (CFSwapInt32(MSGP_GET(msgp, magic)) != MAGIC);
-    Boolean invalidComplex = (0 != msgp->body.msgh_descriptor_count) && !(msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX);
-    invalidComplex = invalidComplex || ((msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && (0 == msgp->body.msgh_descriptor_count));
-    Boolean wayTooBig = ((msgp->body.msgh_descriptor_count) ? sizeof(struct __CFMessagePortMachMessage1) : sizeof(struct __CFMessagePortMachMessage0) + __CFMessagePortMaxInlineBytes) < msgp->header.msgh_size;
-    Boolean wayTooSmall = msgp->header.msgh_size < sizeof(struct __CFMessagePortMachMessage0);
+    Boolean wayTooSmall = size < sizeof(mach_msg_header_t) || size < MSGP_SIZE(msgp) || msgp->header.msgh_size < MSGP_SIZE(msgp);
+    Boolean invalidMagic = false;
+    Boolean invalidComplex = false;
+    Boolean wayTooBig = false;
+    if (!wayTooSmall) {
+        invalidMagic = ((MSGP_INFO(msgp, magic) != MAGIC) && (CFSwapInt32(MSGP_INFO(msgp, magic)) != MAGIC));
+        invalidComplex = (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) && (1 != msgp->body.msgh_descriptor_count);
+        wayTooBig = ((int32_t)MSGP_SIZE(msgp) + __CFMessagePortMaxInlineBytes) < msgp->header.msgh_size; // also less than a 32-bit signed int can hold
+    }
     Boolean wrongSize = false;
     if (!(invalidComplex || wayTooBig || wayTooSmall)) {
-        byteslen = CFSwapInt32LittleToHost(MSGP_GET(msgp, byteslen));
-        wrongSize = (byteslen < 0) || (__CFMessagePortMaxDataSize < byteslen);
-        if (0 != msgp->body.msgh_descriptor_count) {
-            wrongSize = wrongSize || (MSGP1_FIELD(msgp, ool).size != byteslen);
+        byteslen = CFSwapInt32LittleToHost(MSGP_INFO(msgp, byteslen));
+        wrongSize = (byteslen < -1) || (__CFMessagePortMaxDataSize < byteslen);
+        if (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) {
+            wrongSize = wrongSize || (MSGP_GET(msgp, ool).size != byteslen);
         } else {
-            wrongSize = wrongSize || (msgp->header.msgh_size - sizeof(struct __CFMessagePortMachMessage0) < byteslen);
+            wrongSize = wrongSize || ((int32_t)msgp->header.msgh_size - (int32_t)MSGP_SIZE(msgp) < byteslen);
         }
     }
-    Boolean invalidMsgID = (msgp->header.msgh_id <= 0) || (INT32_MAX < msgp->header.msgh_id); // conversation id
+    Boolean invalidMsgID = wayTooSmall ? false : ((MSGP_INFO(msgp, convid) <= 0) || (INT32_MAX < MSGP_INFO(msgp, convid))); // conversation id
     if (invalidMagic || invalidComplex || wayTooBig || wayTooSmall || wrongSize || invalidMsgID) {
 	CFLog(kCFLogLevelWarning, CFSTR("*** CFMessagePort: dropping corrupt request Mach message (0b%d%d%d%d%d%d)"), invalidMagic, invalidComplex, wayTooBig, wayTooSmall, wrongSize, invalidMsgID);
         mach_msg_destroy((mach_msg_header_t *)msgp);
         return NULL;
     }
 
+    if (byteslen < 0) byteslen = 0; // from here on, treat negative same as zero
+
     /* Create no-copy, no-free-bytes wrapper CFData */
-    if (0 == msgp->body.msgh_descriptor_count) {
+    if (!(msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX)) {
 	uintptr_t msgp_extent = (uintptr_t)((uint8_t *)msgp + msgp->header.msgh_size);
-	uintptr_t data_extent = (uintptr_t)((uint8_t *)&(MSGP0_FIELD(msgp, bytes)) + byteslen);
-	msgid = CFSwapInt32LittleToHost(MSGP_GET(msgp, msgid));
+	uintptr_t data_extent = (uintptr_t)((uint8_t *)&(MSGP_INFO(msgp, bytes)) + byteslen);
+	msgid = CFSwapInt32LittleToHost(MSGP_INFO(msgp, msgid));
 	if (0 <= byteslen && data_extent <= msgp_extent) {
-	    data = CFDataCreateWithBytesNoCopy(allocator, MSGP0_FIELD(msgp, bytes), byteslen, kCFAllocatorNull);
-	}
+	    data = CFDataCreateWithBytesNoCopy(allocator, MSGP_INFO(msgp, bytes), byteslen, kCFAllocatorNull);
+        }
     } else {
-	msgid = CFSwapInt32LittleToHost(MSGP_GET(msgp, msgid));
-	data = CFDataCreateWithBytesNoCopy(allocator, MSGP1_FIELD(msgp, ool).address, MSGP1_FIELD(msgp, ool).size, kCFAllocatorNull);
+	msgid = CFSwapInt32LittleToHost(MSGP_INFO(msgp, msgid));
+	data = CFDataCreateWithBytesNoCopy(allocator, MSGP_GET(msgp, ool).address, MSGP_GET(msgp, ool).size, kCFAllocatorNull);
     }
     if (ms->_callout) {
         returnData = ms->_callout(ms, msgid, data, context_info);
@@ -1074,6 +1094,7 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
         if (__CFMessagePortMaxDataSize < return_len) {
             CFLog(kCFLogLevelWarning, CFSTR("*** CFMessagePort reply: CFMessagePort cannot send more than %lu bytes of data"), __CFMessagePortMaxDataSize);
             return_len = 0;
+            CFRelease(returnData);
             returnData = NULL;
         }
 	if (returnData && return_len < __CFMessagePortMaxInlineBytes) {
@@ -1088,13 +1109,13 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
 	    memmove(return_bytes, CFDataGetBytePtr(returnData), return_len);
 	}
     }
-    replymsg = __CFMessagePortCreateMessage(true, msgp->header.msgh_remote_port, MACH_PORT_NULL, -1 * (int32_t)msgp->header.msgh_id, msgid, return_bytes, return_len);
-    if (1 == replymsg->body.msgh_descriptor_count) {
-	MSGP1_FIELD(replymsg, ool).deallocate = true;
+    replymsg = __CFMessagePortCreateMessage(true, msgp->header.msgh_remote_port, MACH_PORT_NULL, -1 * (int32_t)MSGP_INFO(msgp, convid), msgid, return_bytes, return_len);
+    if (replymsg->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) {
+	MSGP_GET(replymsg, ool).deallocate = true;
     }
     if (data) CFRelease(data);
-    if (1 == msgp->body.msgh_descriptor_count) {
-	vm_deallocate(mach_task_self(), (vm_address_t)MSGP1_FIELD(msgp, ool).address, MSGP1_FIELD(msgp, ool).size);
+    if (msgp->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) {
+	vm_deallocate(mach_task_self(), (vm_address_t)MSGP_GET(msgp, ool).address, MSGP_GET(msgp, ool).size);
     }
     if (returnData) CFRelease(returnData);
     if (context_release) {
@@ -1105,7 +1126,7 @@ static void *__CFMessagePortPerform(void *msg, CFIndex size, CFAllocatorRef allo
 
 CFRunLoopSourceRef CFMessagePortCreateRunLoopSource(CFAllocatorRef allocator, CFMessagePortRef ms, CFIndex order) {
     CFRunLoopSourceRef result = NULL;
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     if (!CFMessagePortIsValid(ms)) return NULL;
     if (__CFMessagePortIsRemote(ms)) return NULL;
     __CFMessagePortLock(ms);
@@ -1134,7 +1155,7 @@ CFRunLoopSourceRef CFMessagePortCreateRunLoopSource(CFAllocatorRef allocator, CF
 }
 
 void CFMessagePortSetDispatchQueue(CFMessagePortRef ms, dispatch_queue_t queue) {
-    __CFGenericValidateType(ms, __kCFMessagePortTypeID);
+    __CFGenericValidateType(ms, CFMessagePortGetTypeID());
     __CFMessagePortLock(ms);
     if (!__CFMessagePortIsValid(ms)) {
 	__CFMessagePortUnlock(ms);
@@ -1164,7 +1185,8 @@ void CFMessagePortSetDispatchQueue(CFMessagePortRef ms, dispatch_queue_t queue) 
             static dispatch_queue_t mportQueue = NULL;
             static dispatch_once_t once;
             dispatch_once(&once, ^{
-                mportQueue = dispatch_queue_create("CFMessagePort Queue", NULL);
+                dispatch_queue_attr_t dqattr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, qos_class_main(), 0);
+                mportQueue = dispatch_queue_create("com.apple.CFMessagePort", dqattr);
             });
             dispatch_source_t theSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, port, 0, mportQueue);
             dispatch_source_set_cancel_handler(theSource, ^{

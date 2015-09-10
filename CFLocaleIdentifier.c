@@ -2,14 +2,14 @@
  * Copyright (c) 2014 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,13 +17,13 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 /*
     CFLocaleIdentifier.c
-	Copyright (c) 2002-2013, Apple Inc. All rights reserved.
+	Copyright (c) 2002-2014, Apple Inc. All rights reserved.
     Responsibility: David Smith
     
     CFLocaleIdentifier.c defines
@@ -822,7 +822,7 @@ static const KeyStringToResultString localeStringPrefixToCanonical[] = {
     { "tat",        "tt"        },  // Tatar
     { "tel",        "te"        },  // Telugu
     { "tgk",        "tg"        },  // Tajik
-    { "tgl",        "tl"        },  // Tagalog
+    { "tgl",        "fil"       },  // Tagalog
     { "tha",        "th"        },  // Thai
     { "tib",        "bo"        },  // Tibetan
     { "tir",        "ti"        },  // Tigrinya
@@ -1128,15 +1128,16 @@ static const KeyStringToResultString appleLocaleToLanguageString[] = {
 //    -------			-------
     { "en_US_POSIX",	"en-US-POSIX"	},  // POSIX locale, need as language string			// <1.17> [3840752]
     { "zh_CN",  		"zh-Hans"		},  // mainland China => simplified
-    { "zh_HK",  		"zh-Hant"		},  // Hong Kong => traditional, not currently used
-    { "zh_MO",  		"zh-Hant"		},  // Macao => traditional, not currently used
-    { "zh_SG",  		"zh-Hans"		},  // Singapore => simplified, not currently used
+    { "zh_HK",  		"zh-HK"		},  // Hong Kong => traditional, not currently used
+    { "zh_MO",  		"zh-MO"		},  // Macao => traditional, not currently used
+    { "zh_SG",  		"zh-SG"		},  // Singapore => simplified, not currently used
     { "zh_TW",  		"zh-Hant"		},  // Taiwan => traditional
 };
 enum {
     kNumAppleLocaleToLanguageString = sizeof(appleLocaleToLanguageString)/sizeof(KeyStringToResultString)
 };
 
+/*
 static const KeyStringToResultString appleLocaleToLanguageStringForCFBundle[] = {
 // Map locale strings that Apple uses as language IDs to real language strings.
 // Must be sorted according to how strcmp compares the strings in the first column.
@@ -1170,7 +1171,9 @@ static const KeyStringToResultString appleLocaleToLanguageStringForCFBundle[] = 
 enum {
     kNumAppleLocaleToLanguageStringForCFBundle = sizeof(appleLocaleToLanguageStringForCFBundle)/sizeof(KeyStringToResultString)
 };
+ */
 
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_WINDOWS || DEPLOYMENT_TARGET_LINUX
 
 struct LocaleToLegacyCodes {
     const char *        locale;	// reduced to language plus one other component (script, region, variant), separators normalized to'_'
@@ -1349,6 +1352,8 @@ static const LocaleToLegacyCodes localeToLegacyCodes[] = {
 enum {
     kNumLocaleToLegacyCodes = sizeof(localeToLegacyCodes)/sizeof(localeToLegacyCodes[0])
 };
+
+#endif
 
 /*
 	For reference here is a list of ICU locales with variants and how some
